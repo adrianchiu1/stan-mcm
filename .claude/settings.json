@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pytest*)",
+      "Bash(python*)",
+      "Bash(uv*)",
+      "Bash(pip*)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git add*)",
+      "Bash(git commit*)"
+    ]
+  },
+  "sandbox": {
+    "allowedDomains": [
+      "pypi.org",
+      "files.pythonhosted.org",
+      "github.com",
+      "objects.githubusercontent.com",
+      "raw.githubusercontent.com",
+      "newyorkfed.org",
+      "www.newyorkfed.org"
+    ]
+  },
+  "hooks": {
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./scripts/gate-check.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
