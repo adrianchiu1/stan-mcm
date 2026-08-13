@@ -3,6 +3,38 @@
 One dated line per judgment call not fixed by the spec, with rationale.
 Newest first.
 
+- **2026-08-13 — S1 toy model shows real (if mild) divergences; left as-is
+  rather than hand-tuned to a clean PASS.** The non-centered random-walk
+  local-level model (`stan/templates/local_level.stan.j2`) produces ~0.5%
+  divergent transitions on the example run (`diagnostics.json` verdict:
+  FAIL). Tried `adapt_delta` 0.9–0.97 and several warmup lengths; the
+  divergence rate stayed roughly constant (a mild funnel characteristic of
+  this model class near `sigma_level -> 0`, not a plumbing bug) and
+  `adapt_delta=0.99` traded divergences for 78% max-treedepth hits instead.
+  Spec §7's S1 acceptance test is "produces immutable run dir with draws +
+  diagnostics" — not "achieves a clean PASS verdict" (that's S3+ territory
+  for the real model). A FAIL verdict with a correct, specific reason is
+  the diagnostics harness doing its job, not a defect; not spending further
+  effort chasing a cosmetic PASS on a throwaway infra-proving toy.
+- **2026-08-13 — `data.snapshot.csv` is a byte-identical copy of the whole
+  source CSV, not the mapped/trimmed subset.** Keeps it in lockstep with
+  the run-identity hash, which is computed over the full file's raw bytes
+  (not the mapped/trimmed data) — the snapshot should reproduce exactly
+  what was hashed.
+- **2026-08-13 — `runs/<hash>/spec.yaml` is the canonicalized spec
+  (validated, sorted-key YAML via `RunSpec.to_canonical_yaml()`), not a
+  copy of the original source file.** A faithful audit record regardless
+  of the original file's key order/comments/formatting.
+- **2026-08-13 — Compile cache lives at `.mtk_cache/stan/<hash>_<version>/`,
+  gitignored, not under `stan/templates/`.** Keeps the templates directory
+  free of build artifacts; cache is always reproducible from template +
+  context + CmdStan version.
+- **2026-08-13 — `build_stan_data` (DataFrame -> Stan `data` block) is a
+  small explicit dispatch function in `run.py`, not yet generalized onto
+  the family registry.** Only `local_level` exists; guessing `lw_sv`'s
+  data-block shape now would be premature. Flagged in its docstring for S2
+  to generalize once that shape is actually known.
+
 - **2026-08-13 — G5a oracle is a self-derived reproduction, not literally
   HLW's own published numbers, and that's treated as sufficient.** Ran
   `HLW_2017_Code/` (the genuine 2017 code) ourselves on data we already
