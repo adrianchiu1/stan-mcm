@@ -92,12 +92,15 @@ tests/test_g5a_hlw_replication.py   # loads tests/fixtures/hlw/derived/us_2017_r
 ## This pass's actual deliverables (non-gated prep, done now)
 
 1. This plan.
-2. `tests/g1_scaffold.py` (or similar) — the mirror-comparison harness and
-   parameter-point generator described in the unsupervised-scope brief,
-   built against stubs for the not-yet-existing `smoother.py` KF and the
-   Stan KF function, so G1's actual test in S2 just wires two real
+2. `tests/g1_harness.py` + `tests/test_g1_mirror.py` — the mirror-comparison
+   harness and parameter-point generator described in the unsupervised-scope
+   brief, built against stubs for the not-yet-existing `smoother.py` KF and
+   the Stan KF function, so G1's actual test in S2 just wires two real
    functions into an already-correct, already-tested harness rather than
-   being designed from scratch under gate pressure.
+   being designed from scratch under gate pressure. 3 real passing tests
+   (point count, reproducibility, every generated point actually satisfies
+   the spec's prior constraints) + 1 structurally-complete-but-skipped test
+   for the real G1 comparison.
 3. `tests/test_units_conventions.py` promoted from documented skips to
    real, passing numeric-pinning tests of the three conventions themselves
    (not of production code, which doesn't exist yet) — see that file for
@@ -107,6 +110,40 @@ tests/test_g5a_hlw_replication.py   # loads tests/fixtures/hlw/derived/us_2017_r
    cataloguing item from the brief — nothing further needed there.
 
 ## Open questions for S2 implementation (not blocking this prep pass)
+
+0. **No prior exists anywhere in the spec for the no-SV variant's constant
+   IS/Phillips shock scales.** Surfaced while building the G1 parameter-
+   point generator (`tests/g1_harness.py`), worth a closer look than the
+   three below since it's a genuine spec gap, not just an implementation
+   trade-off. Spec §1.4's shocks table says `ε_IS`/`ε_PC` variance is *always*
+   `exp(h_IS,t)`/`exp(h_PC,t)` — SV, full stop, no constant-variance case is
+   ever described for them (unlike `σ_y*, σ_g, σ_z`, which are constant in
+   every variant). Spec §1.6's priors table accordingly has no entry for a
+   constant analogue (call it `σ_IS`/`σ_PC`, matching HLW's own `σ_ỹ, σ_π`
+   naming) — every prior it lists is either a structural coefficient, one
+   of the three constant-innovation shocks, or an SV-path parameter. But
+   spec §7's S2 row is explicitly "LW **without** SV" as a real, separate
+   build stage before S3 "adds" the SV block — which only makes sense if
+   the no-SV variant has *some* constant value standing in for
+   `exp(h_IS,t)`/`exp(h_PC,t)` in the meantime. G1's parameter-point
+   generator (this pass) sidesteps this by only sampling the 8 parameters
+   the priors table actually specifies — it does not need `σ_IS`/`σ_PC`
+   itself, since G1 only checks that two log-likelihood implementations
+   agree at a given parameter point, not that the point is "complete" by
+   some model-specification standard. But S2's actual Stan/Python KF code
+   does need a concrete answer. Candidate options for whoever picks up S2
+   (not resolved here): (a) reuse HLW's own convention directly — treat
+   `σ_IS`/`σ_PC` exactly like HLW's `σ_ỹ`/`σ_π` (constant, estimated by
+   the sampler with some weakly-informative prior, no relation to the SV
+   parameters at all) since that's literally what "LW without SV" should
+   mean structurally; (b) center a prior on the values already in
+   `tests/fixtures/hlw/derived/us_2017_reproduction/output/us_2017_parameters.csv`
+   (`sigma_ytilde≈0.34`, `sigma_pi≈0.80` for the US) as an empirically-
+   grounded weakly-informative prior. (a) seems like the more obviously
+   correct reading of "without SV" and doesn't require deciding on a made-
+   up prior scale, but flagging both since this needs a real decision, not
+   an assumption, before S2's Stan template or Pydantic priors schema can
+   be written.
 
 1. **`estimate_c` for the S2/G5a run**: HLW (2017)'s stage-3 model fixes
    `c` implicitly at 1 (`r* = g + z`, no `c` term at all — see

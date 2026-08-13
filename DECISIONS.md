@@ -3,6 +3,24 @@
 One dated line per judgment call not fixed by the spec, with rationale.
 Newest first.
 
+- **2026-08-13 — `pytest` is installed as a `uv tool` with the project's
+  full dependency set + an editable `macrotoolkit` install, rather than
+  relying on a project-local `.venv` someone must remember to activate.**
+  `scripts/gate-check.sh`'s `SubagentStop` hook invokes a bare `pytest -q
+  ...` with no shell setup of its own — it needs `pytest` to import
+  `macrotoolkit`/`numpy`/`pandas`/`cmdstanpy`/etc. out of the box. A
+  project `.venv` (what S1/S1-test-suite work used) satisfies this only
+  within a shell where it's been sourced; deleting it between turns (as
+  this session did, for tidiness) breaks the hook for whoever runs it
+  next. `uv tool install pytest --with cmdstanpy --with numba --with arviz
+  --with pydantic --with jinja2 --with matplotlib --with pyyaml --with
+  pandas --with click --with h5netcdf --with-editable .` (receipt at
+  `~/.local/share/uv/tools/pytest/uv-receipt.toml`) makes the globally-on-
+  `PATH` `pytest` binary self-sufficient. Container/environment-level only
+  — touches nothing under version control. Revisit if `pyproject.toml`'s
+  dependency list changes (the tool install needs re-running to pick up
+  new/changed deps; it does not auto-track `pyproject.toml`).
+
 - **2026-08-13 — S1 toy model shows real (if mild) divergences; left as-is
   rather than hand-tuned to a clean PASS.** The non-centered random-walk
   local-level model (`stan/templates/local_level.stan.j2`) produces ~0.5%
