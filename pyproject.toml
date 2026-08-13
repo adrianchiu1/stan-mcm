@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "macrotoolkit"
+version = "0.1.0"
+description = "Bayesian state-space macroeconometrics toolkit (Python + Stan)"
+requires-python = ">=3.11"
+readme = "VISION.md"
+dependencies = [
+    "cmdstanpy>=1.2,<2",
+    "numba>=0.59",
+    "arviz>=0.17",
+    "pydantic>=2,<3",
+    "jinja2>=3.1",
+    "pytest>=8",
+    "matplotlib>=3.8",
+    "pyyaml>=6",
+    "pandas>=2",
+    "click>=8",
+    "h5netcdf>=1.2",
+]
+
+[project.scripts]
+mtk = "macrotoolkit.cli:main"
+
+# `specs/schema/` lives at the repo root (sibling of `src/` and `stan/`), per
+# lw-sv-spec.md §6's repository layout -- it is not nested under
+# src/macrotoolkit/. Map both roots explicitly rather than relying on
+# packages.find, which only discovers packages under a single tree.
+[tool.setuptools]
+packages = ["macrotoolkit", "specs", "specs.schema"]
+
+[tool.setuptools.package-dir]
+macrotoolkit = "src/macrotoolkit"
+specs = "specs"
+"specs.schema" = "specs/schema"
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: slow tests (SBC, HLW replication, etc.) excluded from the fast gate-check suite",
+]
