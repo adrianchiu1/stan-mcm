@@ -23,11 +23,29 @@ Newest first.
   re-verified against the live site (that site is unreachable from this
   session).
 
-- **2026-08-13 — HLW model-variant target for G5a: left open, not decided
-  unilaterally.** The checked-in R code and the newly supplied
-  `current_estimates.xlsx` are HLW's 2023 COVID-adjusted model; `lw-sv-spec.md`
-  specifies the plain 2017 model. This is a modeling-scope decision (whether
-  to extend the G5a fixture harness with COVID/κ_t terms, or pursue exact
-  2017-vintage parameters some other way), not a fixture-plumbing detail —
-  left for the human to decide before S2 begins designing G5a. See
-  `FIXTURES.md` for the full option set. Does not block S1.
+- **2026-08-13 — HLW model-variant target for G5a: 2017, not 2023.**
+  Recommended to the user with reasoning (G5a validates the shared KF
+  library the *production* model uses, and production's functional form is
+  the 2017 equations — SV sits on top of that, it doesn't replace HLW's
+  COVID-adjustment machinery; G5b's own pass criterion already restricts
+  its window to 2000–2019, independently confirming COVID-era agreement
+  isn't needed for launch). User then supplied the genuine 2017 code
+  (`HLW_2017_Code/`, verified by direct term-by-term comparison of its
+  Stage 3 matrices against spec §1.2–§1.3, and by grep showing zero
+  COVID/κ/φ references) — treating this as confirmation. See `FIXTURES.md`.
+
+- **2026-08-13 — Install R via apt (`--no-install-recommends`) +
+  build `tis` from `github.com/cran/tis` rather than CRAN.** Needed to
+  eventually run `HLW_2017_Code/` ourselves and derive a self-consistent
+  G5a oracle (published parameter values for any 2017-vintage aren't
+  available in either supplied workbook). `cran.r-project.org` /
+  `cloud.r-project.org` are blocked the same way as `newyorkfed.org`
+  (403 at CONNECT); `r-base-core`, `r-cran-nloptr`, `r-cran-mfilter` are
+  in Ubuntu's apt repos and install directly. `tis` isn't packaged for
+  Ubuntu, but its CRAN mirror is a plain readable git repo on GitHub,
+  which is reachable — `git clone` + `R CMD INSTALL` builds it from
+  source with no CRAN access needed. Verified all three load correctly.
+  A first `apt-get install r-base-core ...` attempt (with recommends)
+  pulled in ~886MB of unrelated GUI/media-codec packages and failed on
+  stale-mirror 404s for a few of them; `--no-install-recommends` avoided
+  that entirely and installed cleanly.

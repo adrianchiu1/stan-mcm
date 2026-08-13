@@ -146,6 +146,22 @@ partial (output only, no matching params) one for the 2017 model.** Full
 detail and options in `FIXTURES.md`. This still needs a human decision
 before S2's G5a test is designed — it does not block S1.
 
+**Update, same session:** resolved. Recommended targeting the 2017 model
+for G5a (reasoning in `DECISIONS.md`); the user then supplied the genuine
+HLW (2017) replication code (`HLW_2017_Code/`), confirmed by direct
+term-by-term comparison against spec §1.2–§1.3 and by grep (zero
+COVID/κ/φ references). Neither workbook has 2017-vintage published
+parameters or a smoothed series, so the plan is to run this code
+ourselves — and **R is now confirmed viable in this environment**: R
+4.3.3 + `nloptr`/`mFilter` install via apt (`--no-install-recommends`
+needed — a plain `apt-get install` pulls ~886MB of unrelated
+GUI/media-codec packages, some of which 404 on a stale mirror index and
+abort the whole transaction); `tis` (not packaged for Ubuntu, and direct
+CRAN access is blocked the same way `newyorkfed.org` is) builds from
+source off `github.com/cran/tis`, the CRAN read-only git mirror, which
+*is* reachable. All three load correctly. Not yet run end-to-end — see
+`FIXTURES.md` for the concrete plan.
+
 ## Summary
 
 | Check | Status |
