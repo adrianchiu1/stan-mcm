@@ -3,6 +3,23 @@
 One dated line per judgment call not fixed by the spec, with rationale.
 Newest first.
 
+- **2026-08-13 — G5a oracle is a self-derived reproduction, not literally
+  HLW's own published numbers, and that's treated as sufficient.** Ran
+  `HLW_2017_Code/` (the genuine 2017 code) ourselves on data we already
+  had, since neither supplied workbook publishes 2017-vintage MLE
+  parameters or a smoothed series for any vintage. Sanity-checked the
+  reproduction's one-sided output against a real published vintage
+  (`real_time_estimates.xlsx` sheet `2019Q2`, same sample end by
+  construction): 0.06pp mean / 0.31pp max deviation across 234 quarters
+  on output gap/g/z/r*. Treating this as close enough to trust as the
+  G5a oracle — the residual gap is attributable to named, expected causes
+  (data revisions since 2019, independent optimizer path), not a
+  methodology error. Output in
+  `tests/fixtures/hlw/derived/us_2017_reproduction/`, full detail in its
+  `README.md` and in `FIXTURES.md`. `run.se=FALSE` (skipped the
+  5000-iteration Monte Carlo standard-error procedure) since G5a compares
+  point/smoothed state paths, not confidence intervals.
+
 - **2026-08-13 — Pin CmdStan to version 2.36.0, never call `install_cmdstan`
   without an explicit `version=`.** `api.github.com` (used by cmdstanpy's
   default "resolve latest release" path) is blocked by this environment's

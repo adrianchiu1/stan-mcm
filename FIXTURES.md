@@ -122,29 +122,38 @@ has genuine 2017-model **one-sided** output only (vintage sheets
 `2015Q4`–`2019Q4`), and `current_estimates.xlsx`'s `Parameters` sheet is
 the current 2023-model MLE, not 2017's.
 
-**Resolution path: run `HLW_2017_Code/` ourselves.** Now verified viable —
-R 4.3.3 + `nloptr`/`mFilter` (via apt, `--no-install-recommends`) + `tis`
-(built from source via `git clone https://github.com/cran/tis.git`, the
-CRAN read-only mirror — direct CRAN access is blocked the same way
-`newyorkfed.org` is, but this git clone isn't) all install and load
-cleanly in this environment. Plan: feed the existing `US input data` sheet
-(already covers 1960Q1 onward with the right columns) into
-`rstar.stage{1,2,3}.R` / `run.hlw.estimation.R` via a small driver script
-(bypassing `prepare.rstar.data.us.R`'s FRED auto-fetch, not `wget`-tested
-here), trimmed to a pre-COVID sample — `sample.end <- c(2019,2)` matches
-the code's own default and lines up with the `2019Q2` vintage sheet
-already in `real_time_estimates.xlsx`, giving a free sanity check: our
-run's one-sided output should track that published vintage closely (not
-byte-exact, since today's GDP/PCE series have been revised since 2019).
-This also solves the "no smoothed series published" gap for free — the
-code computes `two.sided.est.*` internally, `format.output.R` just doesn't
-write it to CSV; a few added lines fix that.
+**Resolved by running `HLW_2017_Code/` ourselves — done, 2026-08-13.** R
+4.3.3 + `nloptr`/`mFilter` (apt, `--no-install-recommends`) + `tis` (built
+from source off `github.com/cran/tis`, the CRAN read-only mirror — direct
+CRAN access is blocked the same way `newyorkfed.org` is, but this clone
+isn't) all installed and worked. `tests/fixtures/hlw/derived/us_2017_reproduction/`
+now contains the result: US, 1961Q1–2019Q2, fed from the existing `US
+input data` sheet (trimmed, `prepare.rstar.data.us.R`'s FRED auto-fetch
+bypassed and not tested), run through `rstar.stage{1,2,3}.R` /
+`run.hlw.estimation.R` unmodified.
 
-This produces a fully self-consistent 2017-model oracle: input data +
-independently-reproduced MLE parameters + one-sided output (cross-checked
-against the real 2019Q2 vintage) + smoothed output (not otherwise
-available anywhere). Not yet executed — next concrete step, pending
-go-ahead.
+**Sanity-checked against genuine published output**: `sample.end <-
+c(2019,2)` (the code's own default) lines up exactly with the real
+`2019Q2` vintage sheet in `real_time_estimates.xlsx`. Our reproduced
+one-sided series tracks it to within 0.06pp mean / 0.31pp max deviation
+across the full 234-quarter sample, on every one of output gap, g, z, r*
+— strong confirmation the data and methodology are right. (Not byte-exact,
+expected: today's GDP/PCE series carry revisions since 2019, and our own
+`nloptr` optimization run isn't guaranteed to land at HLW's exact original
+optimum.) Full numbers and detail in that directory's `README.md`.
+
+This also solves the "no smoothed series published anywhere" gap for
+free: HLW's own code computes `out.stage3$*.smoothed` internally
+(`kalman.states.wrapper.R`), `format.output.R` just never writes it to
+CSV — the driver script (`run_us_2017.R`) extracts it directly, no
+modification to the official code needed.
+
+**Net: `tests/fixtures/hlw/derived/us_2017_reproduction/` is now a fully
+self-consistent 2017-model G5a oracle** — input data + reproduced MLE
+parameters (`output/us_2017_parameters.csv`) + one-sided output
+(cross-checked against genuine 2019Q2 vintage) + smoothed output
+(`output/us_2017_smoothed.csv`, otherwise unavailable). Ready for S2 to
+build G5a against.
 
 ## Bottom line for S1
 
