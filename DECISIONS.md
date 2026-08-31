@@ -209,3 +209,15 @@ Newest first.
   defects; its one hygiene fix (Cholesky-based RTS gain) is applied. S2's
   acceptance row in spec §7 — "G1, G2, G5a pass; posterior sensible on US
   data" — is met in full. S3 warnings recorded in HANDOFF.md.
+
+- **2026-08-31 — S2 external benchmarking + COVID stress test recorded in
+  `STRESS-TESTS.md`; S3 plan drafted (`plans/S3-plan.md`).** Pre-COVID
+  reference runs track HLW's published current estimates at ρ ≈ 0.94–0.99
+  (documented σ_z-prior level gap). Full-latest-vintage re-estimations
+  (through 2026Q1, no COVID machinery) ran as deliberate stress tests:
+  sampler geometry held (US 0 divergences; EA 2/6000), but COVID is
+  absorbed into constant shock scales through different channels per
+  economy (US: σ_y*; EA: σ_IS + gap-AR collapse) — the empirical
+  motivation for S3's stochastic volatility, now written into the S3 plan.
+  Pre-COVID runs remain the reference results; full-vintage specs are
+  marked experiments.

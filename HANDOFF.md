@@ -1,9 +1,12 @@
 # Handoff
 
-Status as of 2026-08-31. **S2 is complete and green: G1, G2, and G5a all
-pass, and the US posterior is sensible** (spec §7's S2 acceptance row,
-met in full). S1 and S0 remain green (96 fast tests + the slow G2 gate).
-S3 (the SV block) has not started.
+Status as of 2026-08-31 (end of session). **S2 is complete, green, merged
+to main, and externally benchmarked.** G1, G2, G5a pass; US and EA runs
+track HLW's published estimates (see `STRESS-TESTS.md` for the full
+benchmarking + COVID stress-test record, including the full-latest-vintage
+experiments). **The next stage is S3 — `plans/S3-plan.md` is the drafted
+plan of record**, including the empirical motivation the stress test
+supplied and the mandatory KF regression check.
 
 ## What passed
 
