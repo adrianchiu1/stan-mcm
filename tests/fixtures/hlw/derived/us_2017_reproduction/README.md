@@ -71,6 +71,22 @@ check, not itself the G5a pass criterion.
   CSV; `run_us_2017.R` extracts it directly from `out.stage3$*.smoothed`
   (already computed internally by `kalman.states.wrapper.R`, just
   discarded by the stock scripts).
+- `output/us_2017_xi00.csv` / `output/us_2017_P00.csv` — the stage-3
+  Kalman filter's exact initial conditions (added 2026-08-31, S2): the
+  HP-trend-based initial state mean `xi.00` and the initial covariance
+  `P.00` from `calculate.covariance.R`. `P.00` is the output of a *full
+  inner nloptr L-BFGS optimization* starting from `0.2*I` — bit-for-bit
+  irreproducible from outside R, which is why it's dumped verbatim rather
+  than re-derived by the Python mirror (spec §2.2 requires the KF take
+  the initial mean/cov explicitly anyway). State ordering
+  `[y*_t, y*_{t-1}, y*_{t-2}, g_{t-1}, g_{t-2}, z_{t-1}, z_{t-2}]`,
+  `y*` in 100·log units, g **quarterly** (our annualized-g convention
+  converts with `S = diag(1,1,1,4,4,1,1)`: `xi_ann = S xi00`,
+  `P_ann = S P00 S'` — see `tests/test_g5a_hlw_replication.py`).
+
+The 2026-08-31 regeneration (which added the two initial-condition files)
+reproduced every previously committed output CSV **byte-identically**,
+confirming the pipeline is fully deterministic.
 
 ## Using this as the G5a oracle
 

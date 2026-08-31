@@ -1,0 +1,45 @@
+// g1_loglik_harness.stan -- TEST-ONLY harness for gate G1
+// (tests/test_g1_mirror.py), rendered from g1_loglik_harness.stan.j2.
+//
+// Not a model family: this program exposes the Stan-side KF log-likelihood
+// to Python. It takes a batch of parameter points as DATA, builds the LW
+// system matrices with the same shared functions the lw_sv template uses,
+// and evaluates kalman_loglik at every point in generated quantities.
+// Sampled with fixed_param for a single iteration, it returns the vector of
+// log-likelihoods for comparison against the Python mirror
+// (macrotoolkit.smoother), per lw-sv-spec.md §5's G1 row.
+//
+// Parameter column order (must match tests/g1_harness.py PARAM_NAMES):
+//   1 a1, 2 a2, 3 a_r, 4 b_pi, 5 b_y, 6 sigma_ystar, 7 sigma_g, 8 sigma_z,
+//   9 sigma_is, 10 sigma_pc.  c arrives as a data scalar (fixed 1.0 in S2).
+
+functions {
+{% include "functions/ssm_matrices_lw.stan" %}
+{% include "functions/kalman_loglik_tv.stan" %}
+}
+
+data {
+  int<lower=1> T;
+  matrix[T, 2] yobs;
+  matrix[T, 6] x;
+  vector[7] xi00;
+  matrix[7, 7] P00;
+  real c;
+  int<lower=1> n_points;
+  matrix[n_points, 10] params;
+}
+
+generated quantities {
+  vector[n_points] loglik;
+  for (i in 1:n_points) {
+    loglik[i] = kalman_loglik(yobs, x,
+                              lw_F(),
+                              lw_Q(params[i, 6], params[i, 7], params[i, 8]),
+                              lw_A(params[i, 1], params[i, 2], params[i, 3],
+                                   params[i, 4], params[i, 5]),
+                              lw_Z(params[i, 1], params[i, 2], params[i, 3],
+                                   params[i, 5], c),
+                              lw_R(params[i, 9], params[i, 10]),
+                              xi00, P00);
+  }
+}

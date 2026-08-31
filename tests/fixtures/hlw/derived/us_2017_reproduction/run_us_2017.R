@@ -95,5 +95,16 @@ two.sided <- data.frame(
 )
 write.csv(two.sided, "output/us_2017_smoothed.csv", row.names = FALSE)
 
+# Exact initial conditions of the stage-3 Kalman filter: xi.00 (the HP-trend-
+# based initial state mean, quarterly-g units) and P.00 (the initial state
+# covariance from calculate.covariance.R's inner MLE pass). G5a needs these
+# verbatim: P.00 is the output of a full nloptr L-BFGS optimization starting
+# from 0.2*I, which no Python mirror should try to reproduce independently --
+# spec §2.2 requires the KF take the initial mean/cov explicitly anyway.
+# State ordering: [y*_t, y*_{t-1}, y*_{t-2}, g_{t-1}, g_{t-2}, z_{t-1}, z_{t-2}],
+# y* in 100*log units, g QUARTERLY (annualize with S = diag(1,1,1,4,4,1,1)).
+write.csv(data.frame(xi00 = out3$xi.00), "output/us_2017_xi00.csv", row.names = FALSE)
+write.csv(as.data.frame(out3$P.00), "output/us_2017_P00.csv", row.names = FALSE)
+
 cat("\nRows in one-sided/smoothed output:", nrow(one.sided), "(expect T=234, 1961Q1-2019Q2)\n")
 cat("DONE\n")

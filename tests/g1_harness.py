@@ -2,18 +2,11 @@
 Stan KF log-likelihood, 50 random parameter points | max abs diff < 1e-8."
 
 This is a **support module**, not itself a test file pytest collects tests
-from (no `test_*` functions live here). It exists so that when S2 lands
-`macrotoolkit.smoother`'s KF log-likelihood mirror and a render+expose
-harness for `stan/functions/kalman_loglik_tv.stan`, the actual G1 test
-(`tests/test_g1_mirror.py`) only has to wire in two real functions -- the
-parameter-point generator, synthetic dataset, and comparison utility are
-already built and already tested here.
-
-Scope note: per this task's brief, this file is prep for S2, not S2 itself.
-It must not import or depend on `macrotoolkit.smoother` or any Stan function
-that doesn't exist yet -- see `python_kf_loglik_stub` / `stan_kf_loglik_stub`
-below, which raise `NotImplementedError` naming exactly what S2 needs to
-build.
+from (no `test_*` functions live here). Built as S2 prep against stubs; S2
+(2026-08-31) replaced the stubs with the real wiring: `python_kf_loglik`
+calls `macrotoolkit.smoother`'s KF mirror, and `stan_kf_loglik_batch`
+compiles + runs the G1 Stan harness program
+(`stan/templates/g1_loglik_harness.stan.j2`) once for all points.
 
 --------------------------------------------------------------------------
 Parameter-point generator
@@ -25,16 +18,12 @@ sigma_z`; no SV/h-path parameters (`sigma_h,IS`, `sigma_h,PC`, `mu_h0,s`) at
 all, since those don't exist outside the SV variant. `c` is fixed at 1.0
 (spec's default `estimate_c: false`), not sampled.
 
-Note on scope: spec §1.6's prior table has no entry for a constant IS/PC
-shock scale -- in the full SV model those are entirely determined by the SV
-path (`exp(h/2)`); the no-SV variant's equivalent constant-variance
-parameters for the IS and Phillips-curve shocks aren't specified anywhere in
-the spec's priors table. This harness therefore samples exactly the 8
-parameters the spec priors table gives values for (`a1, a2, a_r, b_pi, b_y,
-sigma_ystar, sigma_g, sigma_z`), per this task's explicit brief. If S2's real
-KF functions need additional constant IS/PC shock-scale parameters to fully
-specify Q_t for the no-SV variant, that is a decision for whoever wires the
-real functions in here -- flagged, not resolved, by this prep pass.
+The no-SV variant's constant IS/PC shock scales (`sigma_is`, `sigma_pc`)
+are not in spec §1.6's table; their prior -- Half-N(0, 1^2), sampled here
+alongside the 8 table parameters -- is the 2026-08-31 user-confirmed
+decision recorded in DECISIONS.md and encoded in
+`specs.schema.lw_sv.DEFAULT_PRIORS`, which this generator reads so the two
+never drift apart.
 """
 from __future__ import annotations
 
@@ -44,13 +33,18 @@ from typing import Callable
 import numpy as np
 import pandas as pd
 
+from specs.schema.lw_sv import DEFAULT_PRIORS
+
 # ---------------------------------------------------------------------------
 # Constants shared by the harness and by tests/test_g1_mirror.py
 # ---------------------------------------------------------------------------
 
-#: The 8 no-SV static parameters this harness samples (see module docstring
-#: for why the list stops here and doesn't include IS/PC shock scales).
-PARAM_NAMES = ("a1", "a2", "a_r", "b_pi", "b_y", "sigma_ystar", "sigma_g", "sigma_z")
+#: The 10 no-SV static parameters this harness samples, in the column order
+#: the G1 Stan harness (stan/templates/g1_loglik_harness.stan.j2) expects.
+PARAM_NAMES = (
+    "a1", "a2", "a_r", "b_pi", "b_y",
+    "sigma_ystar", "sigma_g", "sigma_z", "sigma_is", "sigma_pc",
+)
 
 #: `c` (spec §1.3) fixed at 1.0 -- spec default `estimate_c: false`.
 C_FIXED = 1.0
@@ -141,10 +135,14 @@ def generate_parameter_points(n: int, seed: int) -> list[dict]:
                 f"{max_attempts} attempts."
             )
 
-        # Half-Normal(0, scale^2) == |N(0, scale^2)|.
-        sigma_ystar = abs(float(rng.normal(0.0, 0.4)))
-        sigma_g = abs(float(rng.normal(0.0, 0.03)))
-        sigma_z = abs(float(rng.normal(0.0, 0.08)))
+        # Half-Normal(0, scale^2) == |N(0, scale^2)|. Scales come from
+        # specs.schema.lw_sv.DEFAULT_PRIORS (the single source of truth for
+        # the §1.6 defaults + the confirmed sigma_is/sigma_pc entry).
+        sigma_ystar = abs(float(rng.normal(0.0, DEFAULT_PRIORS["sigma_ystar"]["sd"])))
+        sigma_g = abs(float(rng.normal(0.0, DEFAULT_PRIORS["sigma_g"]["sd"])))
+        sigma_z = abs(float(rng.normal(0.0, DEFAULT_PRIORS["sigma_z"]["sd"])))
+        sigma_is = abs(float(rng.normal(0.0, DEFAULT_PRIORS["sigma_is"]["sd"])))
+        sigma_pc = abs(float(rng.normal(0.0, DEFAULT_PRIORS["sigma_pc"]["sd"])))
 
         points.append(
             {
@@ -156,6 +154,8 @@ def generate_parameter_points(n: int, seed: int) -> list[dict]:
                 "sigma_ystar": sigma_ystar,
                 "sigma_g": sigma_g,
                 "sigma_z": sigma_z,
+                "sigma_is": sigma_is,
+                "sigma_pc": sigma_pc,
                 "c": C_FIXED,
             }
         )
@@ -213,46 +213,68 @@ SYNTHETIC_DATA = _generate_synthetic_data()
 
 
 # ---------------------------------------------------------------------------
-# Stub log-likelihood functions (S2 replaces these with the real thing)
+# Real log-likelihood functions (the S2 wiring that replaced this file's
+# original pre-S2 stubs)
 # ---------------------------------------------------------------------------
 
 
-def python_kf_loglik_stub(params: dict, data: SyntheticKFData) -> float:
-    """Stand-in for the not-yet-written Python KF log-likelihood mirror.
-
-    S2 must implement this as (or wire this call site directly to) a KF
-    log-likelihood function inside `macrotoolkit.smoother` (per
-    lw-sv-spec.md §2.4's "the Python KF log-likelihood must match the Stan
-    KF log-likelihood" requirement, and plans/S2-plan.md's file list:
-    `src/macrotoolkit/smoother.py`, S2 scope limited to the KF log-likelihood
-    only -- the Durbin-Koopman simulation smoother itself is S4 scope, do
-    not front-load it here).
-    """
-    raise NotImplementedError(
-        "python_kf_loglik_stub: awaiting macrotoolkit.smoother's KF "
-        "log-likelihood function (src/macrotoolkit/smoother.py, S2 scope; "
-        "not yet written). Replace this stub with the real function (or "
-        "call it directly from tests/test_g1_mirror.py) once it exists."
+def python_kf_loglik(params: dict, data: SyntheticKFData) -> float:
+    """The Python KF log-likelihood mirror (`macrotoolkit.smoother`) at one
+    parameter point on the synthetic dataset, with the family's default
+    initial state (anchored at the first estimation-sample observation)."""
+    from macrotoolkit.smoother import (
+        build_lw_matrices,
+        build_lw_regressors,
+        default_initial_state,
+        kalman_loglik,
     )
 
+    yobs, x = build_lw_regressors(data.y, data.pi, data.r)
+    F, Q, A, Z, R = build_lw_matrices(params, c=params.get("c", C_FIXED))
+    xi00, P00 = default_initial_state(float(data.y[4]))
+    return kalman_loglik(yobs, x, F, Q, A, Z, R, xi00, P00)
 
-def stan_kf_loglik_stub(params: dict, data: SyntheticKFData) -> float:
-    """Stand-in for the not-yet-written Stan KF log-likelihood, exposed to
-    Python.
 
-    S2 must implement `stan/functions/kalman_loglik_tv.stan` (lw-sv-spec.md
-    §2.2) and a thin render+expose harness around it -- e.g. a small `.stan`
-    program that `#include`s the function and exposes it via CmdStan's
-    standalone-function interface (or an equivalent mechanism) -- so it can
-    be called from Python with the same `(params, data) -> float` signature
-    as the Python mirror.
+def stan_kf_loglik_batch(points: list[dict], data: SyntheticKFData) -> np.ndarray:
+    """Evaluate the Stan-side KF log-likelihood at every parameter point in
+    one compile + one fixed_param run of the G1 harness program
+    (stan/templates/g1_loglik_harness.stan.j2), which builds the system
+    matrices with the same shared `stan/functions/` library the lw_sv
+    template uses. Returns the vector of log-likelihoods in `points` order.
+
+    `sig_figs=18`: CmdStan writes draws as CSV with 6 significant figures by
+    default, which alone would exceed G1's 1e-8 tolerance for any
+    |loglik| > ~1e-2 -- full precision output is load-bearing here, not an
+    optimization.
     """
-    raise NotImplementedError(
-        "stan_kf_loglik_stub: awaiting stan/functions/kalman_loglik_tv.stan "
-        "(S2 scope; not yet written) plus a render+expose harness that "
-        "calls it from Python. Replace this stub with the real function (or "
-        "call it directly from tests/test_g1_mirror.py) once both exist."
+    from macrotoolkit.render import compile_model, render_stan_source
+    from macrotoolkit.smoother import build_lw_regressors, default_initial_state
+
+    yobs, x = build_lw_regressors(data.y, data.pi, data.r)
+    xi00, P00 = default_initial_state(float(data.y[4]))
+    pmat = np.array([[p[k] for k in PARAM_NAMES] for p in points])
+
+    source = render_stan_source("g1_loglik_harness.stan.j2", {})
+    model, _ = compile_model(source)
+    fit = model.sample(
+        data={
+            "T": yobs.shape[0],
+            "yobs": yobs,
+            "x": x,
+            "xi00": xi00,
+            "P00": P00,
+            "c": C_FIXED,
+            "n_points": len(points),
+            "params": pmat,
+        },
+        fixed_param=True,
+        chains=1,
+        iter_sampling=1,
+        seed=PARAM_SEED,
+        sig_figs=18,
+        show_progress=False,
     )
+    return fit.stan_variable("loglik")[0]
 
 
 # ---------------------------------------------------------------------------
