@@ -28,7 +28,9 @@ from g1_harness import (
     compare_loglik,
     generate_h_paths,
     generate_parameter_points,
+    generate_sv_inputs,
     python_kf_loglik,
+    python_kf_loglik_sv,
     python_kf_loglik_tv,
     stan_kf_loglik_batch,
 )
@@ -102,28 +104,31 @@ def test_time_varying_R_shape_mismatch_raises() -> None:
 
 
 def test_g1_python_kf_matches_stan_kf_loglik() -> None:
-    """The G1 gate proper, covering BOTH filter paths of the generalized
-    KF (S3): the constant-R overload and the time-varying R_t = diag(exp(h))
-    array form, each Python-vs-Stan at all 50 points. The Stan side runs
-    once for all points and both paths; each value is then compared against
-    the Python mirror through `compare_loglik`, so a mismatch fails loudly
-    naming the point.
+    """The G1 gate proper, covering all THREE filter paths of the
+    generalized KF (S3): the constant-R overload, the time-varying
+    R_t = diag(exp(h)) array form, and the production SV-helper composition
+    (sv_rw_noncentered -> sv_diag_variance_path -> KF), each Python-vs-Stan
+    at all 50 points. The Stan side runs once for all points and paths;
+    each value is then compared against the Python mirror through
+    `compare_loglik`, so a mismatch fails loudly naming the point.
 
-    Seeds are `PARAM_SEED`/`H_PATH_SEED` (recorded in `tests/g1_harness.py`);
-    if this ever fails for real, re-run `generate_parameter_points(
-    N_PARAM_POINTS, seed=PARAM_SEED)` (+ `generate_h_paths`) to reproduce
-    the exact failing inputs.
+    Seeds are `PARAM_SEED`/`H_PATH_SEED`/`SV_INPUT_SEED` (recorded in
+    `tests/g1_harness.py`); if this ever fails for real, re-run the
+    generators at those seeds to reproduce the exact failing inputs.
     """
     points = generate_parameter_points(N_PARAM_POINTS, seed=PARAM_SEED)
     h_paths = generate_h_paths(points, SYNTHETIC_DATA.T - 4)
-    stan_ll, stan_ll_tv = stan_kf_loglik_batch(points, SYNTHETIC_DATA, h_paths)
-    assert stan_ll.shape == (N_PARAM_POINTS,)
-    assert stan_ll_tv.shape == (N_PARAM_POINTS,)
-    assert np.all(np.isfinite(stan_ll))
-    assert np.all(np.isfinite(stan_ll_tv))
-    # The tv path must actually differ from the constant path (a wiring bug
-    # returning the constant loglik twice would otherwise pass trivially).
+    sv_inputs = generate_sv_inputs(points, SYNTHETIC_DATA.T - 4)
+    stan_ll, stan_ll_tv, stan_ll_sv = stan_kf_loglik_batch(
+        points, SYNTHETIC_DATA, h_paths, sv_inputs
+    )
+    for arr in (stan_ll, stan_ll_tv, stan_ll_sv):
+        assert arr.shape == (N_PARAM_POINTS,)
+        assert np.all(np.isfinite(arr))
+    # The tv/sv paths must actually differ from the constant path (a wiring
+    # bug returning the constant loglik would otherwise pass trivially).
     assert np.max(np.abs(stan_ll - stan_ll_tv)) > 1.0
+    assert np.max(np.abs(stan_ll - stan_ll_sv)) > 1.0
 
     diffs = [
         compare_loglik(
@@ -148,3 +153,15 @@ def test_g1_python_kf_matches_stan_kf_loglik() -> None:
         for i, p in enumerate(points)
     ]
     assert max(diffs_tv) < LOGLIK_TOL
+
+    diffs_sv = [
+        compare_loglik(
+            p,
+            SYNTHETIC_DATA,
+            lambda _p, _d, i=i: python_kf_loglik_sv(_p, sv_inputs, i, _d),
+            lambda _p, _d, i=i: float(stan_ll_sv[i]),
+            tol=LOGLIK_TOL,
+        )
+        for i, p in enumerate(points)
+    ]
+    assert max(diffs_sv) < LOGLIK_TOL

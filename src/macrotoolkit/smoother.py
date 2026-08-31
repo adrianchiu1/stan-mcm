@@ -336,7 +336,42 @@ def lw_kalman_loglik(params: dict, y: np.ndarray, pi: np.ndarray, r: np.ndarray,
 
 
 # ---------------------------------------------------------------------------
-# 3. Fixed-interval (RTS) smoother -- G5a's engine. NOT the DK simulation
+# 3. Stochastic-volatility helpers (mirror of
+#    stan/functions/sv_rw_noncentered.stan; held together by the G1
+#    harness's SV-path comparison). UNITS (spec §1.5, pinned by
+#    tests/test_units_conventions.py): h is log-VARIANCE -- exp(h) is the
+#    variance entering the measurement covariance, exp(h/2) is the sd.
+# ---------------------------------------------------------------------------
+
+
+def sv_rw_noncentered(h0: float, sigma_h: float, nu: np.ndarray) -> np.ndarray:
+    """Non-centered SV random-walk path: h_t = h_{t-1} + sigma_h * nu_t for
+    t = 1..T from the realized initial log-variance ``h0`` (the caller
+    builds it as mu_h0 + sd * h0_raw, per spec §1.5's h_0 ~ N(mu_h0, 1))
+    and standard-normal innovations ``nu``. Observation t uses h[t]; h_0
+    itself is the pre-sample initial condition."""
+    return h0 + sigma_h * np.cumsum(np.asarray(nu, dtype=np.float64))
+
+
+def sv_diag_variance_path(h1: np.ndarray, h2: np.ndarray) -> np.ndarray:
+    """Time-varying diagonal measurement covariance from two log-variance
+    paths: R_t = diag(exp(h1_t), exp(h2_t)) -- exp(h) because h is
+    log-VARIANCE. For lw_sv, h1 = IS, h2 = PC, matching the observation
+    order [y, pi]. Returns (T, 2, 2), ready for :func:`kalman_loglik`."""
+    h1 = np.asarray(h1, dtype=np.float64)
+    h2 = np.asarray(h2, dtype=np.float64)
+    if h1.shape != h2.shape or h1.ndim != 1:
+        raise ValueError(
+            f"h1 and h2 must be equal-length 1-d arrays; got {h1.shape} and {h2.shape}."
+        )
+    R = np.zeros((h1.shape[0], 2, 2))
+    R[:, 0, 0] = np.exp(h1)
+    R[:, 1, 1] = np.exp(h2)
+    return R
+
+
+# ---------------------------------------------------------------------------
+# 4. Fixed-interval (RTS) smoother -- G5a's engine. NOT the DK simulation
 #    smoother (S4 scope).
 # ---------------------------------------------------------------------------
 

@@ -1,25 +1,17 @@
 """Numeric-pinning unit tests for the LW-SV numerical conventions
 (lw-sv-spec.md §1.1, "Data and units conventions").
 
-**Status: live, worked-example tests, not placeholders.** S2's real
-conversion code (`macrotoolkit.smoother`'s state-transition mirror, any SV
-log-variance-to-sd helper, and the data-prep step deriving inflation from a
-price level) does not exist yet -- this pass is explicitly scoped to *not*
-create it (see plans/S2-plan.md). So instead of `pytest.mark.skip` stubs,
-this module defines small, local reference implementations of each
-convention directly here (deliberately *not* under `src/macrotoolkit/` or
-`specs/` -- that would be S2 implementation, out of scope for this pass) and
-pins them down with concrete numeric assertions. This is worth having now
-because the conventions themselves -- the arithmetic, not any particular
-code path -- are exactly what's easy to get subtly wrong (a `g` vs `g/4`
-mixup, an `exp(h)` vs `exp(h/2)` factor-of-two bug, a `100*` vs `400*`
-scaling slip) and cheap to pin permanently.
-
-**When S2 lands real code:** extend or rewire each test below to import and
-call the real function (`macrotoolkit.smoother`'s transition step, its SV
-sd helper, `macrotoolkit.data`'s inflation transform) in place of, or in
-addition to, the local reference implementation, so the same worked numbers
-end up validating production code instead of just this file's own arithmetic.
+**Status: live, worked-example tests, wired to production code where it
+exists.** Each convention keeps a small, local reference implementation
+(the arithmetic pinned independently of any code path) PLUS a
+`test_production_*` twin calling the real function with the same worked
+numbers: convention 1 against `macrotoolkit.smoother.build_lw_matrices`
+(S2), convention 2 against `macrotoolkit.smoother.sv_rw_noncentered` /
+`sv_diag_variance_path` (S3). Convention 3's production transform
+(deriving inflation from a price level in `macrotoolkit.data`) still does
+not exist -- the toolkit takes pre-constructed inflation as input in v1 --
+so only the reference implementation pins it; rewire it the same way if
+that transform is ever added.
 
 The three conventions pinned here:
 
@@ -138,6 +130,41 @@ def test_h_is_log_variance_sd_is_exp_h_over_2() -> None:
     assert buggy_sd == pytest.approx(4.0)
     assert correct_sd == pytest.approx(2.0)
     assert buggy_sd != pytest.approx(correct_sd)
+
+
+def test_production_sv_helpers_treat_h_as_log_variance() -> None:
+    """S3 rewiring: the same convention checked against the real
+    `macrotoolkit.smoother` SV helpers (mirrors of
+    stan/functions/sv_rw_noncentered.stan; the Stan side is held to the
+    Python side by the G1 harness's loglik_sv comparison).
+
+    - `sv_diag_variance_path` puts exp(h) -- the VARIANCE -- on the
+      measurement covariance diagonal, so at h = 2*ln(2) the R entry is
+      4.0 and the implied sd is sqrt(4.0) = 2.0 = exp(h/2), NOT
+      exp(h) = 4.0 (the factor-of-2 bug this convention exists to stop).
+    - `sv_rw_noncentered` is the plain non-centered random walk
+      h_t = h_0 + sigma_h * cumsum(nu), with h_0 NOT itself an
+      observation-period value (observation t uses h[t], t >= 1).
+    """
+    import numpy as np
+
+    from macrotoolkit.smoother import sv_diag_variance_path, sv_rw_noncentered
+
+    h = 2.0 * math.log(2.0)
+    R = sv_diag_variance_path(np.array([h]), np.array([0.0]))
+    assert R.shape == (1, 2, 2)
+    assert R[0, 0, 0] == pytest.approx(4.0)  # variance = exp(h)
+    assert math.sqrt(R[0, 0, 0]) == pytest.approx(_sd_from_log_variance(h))  # sd = exp(h/2)
+    assert math.sqrt(R[0, 0, 0]) != pytest.approx(math.exp(h))  # NOT exp(h)
+    assert R[0, 1, 1] == pytest.approx(1.0)  # exp(0) = 1
+    assert R[0, 0, 1] == 0.0 and R[0, 1, 0] == 0.0  # diagonal by construction
+
+    path = sv_rw_noncentered(1.5, 0.5, np.array([1.0, -2.0, 3.0]))
+    np.testing.assert_allclose(path, [2.0, 1.0, 2.5])
+    # sigma_h = 0: the path is flat at h_0 (the funnel's degenerate corner).
+    np.testing.assert_allclose(
+        sv_rw_noncentered(-0.7, 0.0, np.array([1.0, 1.0])), [-0.7, -0.7]
+    )
 
 
 # ---------------------------------------------------------------------------
