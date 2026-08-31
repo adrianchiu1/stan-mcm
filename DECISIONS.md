@@ -221,3 +221,140 @@ Newest first.
   motivation for S3's stochastic volatility, now written into the S3 plan.
   Pre-COVID runs remain the reference results; full-vintage specs are
   marked experiments.
+
+- **2026-08-31 — S3 plan's three open questions resolved (user decisions,
+  start of S3 implementation).** (1) **KF signature for time-varying R**:
+  the generalized `kalman_loglik` takes an array of T measurement-covariance
+  matrices (`array[] matrix R` / `(T,m,m)` ndarray), built by a small
+  helper from the h paths — the KF stays family-agnostic; the h-vectors-
+  inside-KF alternative was rejected as baking lw_sv structure into the
+  shared function. (2) **G3 SBC scale**: 200 replications (~6–7 h under the
+  `slow` marker), ranks from posterior draws thinned to 99 (100 rank
+  values), χ² over 20 bins → 10 expected per bin; 100 was rejected as
+  underpowered (5/bin), 500 as overkill for a gate G4 will repeat.
+  (3) **μ_h0 OLS anchor**: mirror HLW's own stage-3 initialization
+  (`rstar.stage3.R` lines 22–48) on our trimmed data (which, like HLW's,
+  includes the 4 pre-sample lag quarters): gap⁰ = residual of OLS of y on
+  [const, linear trend] over the FULL trimmed sample; IS: OLS of gap⁰_t on
+  [gap⁰_{t-1}, gap⁰_{t-2}, (r_{t-1}+r_{t-2})/2, const] over estimation
+  rows, σ̂_IS = √(RSS/(n−4)); PC: OLS of π_t on [π_{t-1},
+  (π_{t-2}+π_{t-3}+π_{t-4})/3, gap⁰_{t-1}] with NO intercept,
+  σ̂_PC = √(RSS/(n−3)); μ_h0,s = 2·ln(σ̂_s). Deterministic given the
+  trimmed data, so run hashes stay reproducible.
+
+- **2026-08-31 — G3 SBC runs with the a1/a2 priors overridden to
+  N(0.8, 0.1²)/N(−0.25, 0.05²) via the production `priors:` override path;
+  everything else production-default.** User decision, forced by a measured
+  numerical fact: the production a1/a2 defaults put ~32% of prior mass on
+  non-stationary gap dynamics (a1+a2 ~ N(0.8, 0.42²)), and SBC must sample
+  the exact fitted prior (no stationarity rejection — that's G1/G2's
+  machinery, invalid here). A 3-rep smoke showed one such draw simulating
+  |y| ≈ 2e13 at T=120, at which point the KF covariance update (P entries
+  ~1e26) loses everything to float64 cancellation (`cholesky_decompose`
+  not-PD; all 10 ranks at the extremes) — garbage ranks for ~a third of
+  replications, poisoning χ² regardless of pipeline correctness, and
+  shortening T doesn't fix the tail. Under the override the stationarity
+  boundary sits ~4σ out (non-stationary mass ~3e-5), so the exact prior is
+  simulable with no rejection anywhere and SBC exactness holds. Rejected
+  alternatives: an SBC-only stationarity-truncated (a1,a2) parameterization
+  (changes the sampled geometry away from the production program and adds
+  a template branch only a test uses); sim-side rejection with the model
+  prior unchanged (breaks SBC's prior-equality requirement in a region
+  holding real prior mass — uninterpretable marginal failures). G3 thus
+  validates the production program/geometry/override path exactly, at two
+  shifted hyperparameter values; SBC of the production a1/a2 values
+  themselves remains impossible in float64 with a plain (non-square-root)
+  KF, recorded here as a known limit.
+
+- **2026-08-31 — S2 run-hash stability sacrificed for a single KF
+  implementation (user decision resolving a conflict in plans/S3-plan.md).**
+  The plan demanded both "generalize `kalman_loglik_tv.stan`, don't fork"
+  and "the empty-`sv_shocks` render stays byte-stable so S2 run hashes
+  don't change" — jointly impossible, because the run hash covers the
+  rendered source, which INLINES the included function files: any edit to
+  the KF text changes every no-SV render's hash. Chosen: one generalized
+  filter (array-of-R_t core + a thin constant-R overload delegating via
+  rep_array; Python mirror likewise via `_as_R_path`), accepting that
+  re-running an S2 spec now produces a new run hash (old run dirs remain
+  valid immutable records; G1 at 5.5e-12 on both filter paths and G5a at
+  ~1e-12 prove the constant case is numerically unchanged). The
+  byte-stability requirement is re-scoped to what it can mean and what
+  actually matters: from the S3 baseline onward, the no-SV render is
+  pinned byte-for-byte against `tests/fixtures/render/lw_sv_no_sv.stan`
+  (`test_no_sv_render_is_byte_stable`), so the SV conditionals — and any
+  future edit — can never leak into the no-SV render unnoticed; changing
+  that fixture requires a recorded decision. A numerics-reviewer pass over
+  the generalization found no defects (one noted non-issue: the constant-R
+  overload allocates a T-array per likelihood evaluation in no-SV models —
+  accepted cost of the delegation design).
+
+- **2026-08-31 — S3 SV stage landed: template conditionals, schema, OLS
+  anchor; no-SV render pin regenerated once (comment-only header change).**
+  Design points: (1) the template treats `sv_shocks` as a single boolean
+  conditional — the schema admits only `[]` and the canonical `[is, pc]`
+  (normalized from any order so run identity is order-independent;
+  single-shock SV rejected as unvalidated in v1). (2) With SV on, the
+  constant `sigma_is`/`sigma_pc` parameters are REPLACED, not shadowed;
+  h paths are built non-centered in `transformed parameters` (h_0 = mu_h0
+  + sd·h0_raw, h0_raw ~ std_normal; observation t uses h_t = h_0 +
+  σ_h·Σν) so the draws carry the authoritative log-variance paths for S4's
+  outputs. (3) `build_stan_data` computes the HLW-exact mu_h0 OLS anchors
+  unconditionally for lw_sv (CmdStan ignores unused data; the anchors are
+  deterministic functions of the trimmed data so run identity is
+  untouched); on the US 1960–2019 window they imply OLS residual sds 0.75
+  (IS) / 0.82 (PC) — PC essentially on HLW's MLE σ_π ≈ 0.80, IS above the
+  MLE σ_ỹ ≈ 0.34 exactly as HLW's own linear-detrend initialization
+  behaves. (4) The no-SV render fixture was regenerated ONCE in this
+  stage: the template header comment now documents both variants
+  (a comment-only change — verified 0 non-comment diff lines against the
+  prior pin). The pin is expected to stay stable from here.
+
+- **2026-08-31 — G3 PASSED: SBC, no-SV variant, 200 replications.**
+  `pytest -m slow tests/test_g3_sbc.py` — 3h37m wall. Per-parameter χ²
+  uniformity (20 bins, 10 expected/bin): p-values 0.073 (a2) to 0.735
+  (σ_z), all ten parameters comfortably above the 0.001 floor with a
+  healthy spread (no clustering at either extreme). Sampler health: 5
+  divergent transitions in 200 × 3,000 = 600,000 post-warmup draws
+  (ceiling 600). Rank histograms + per-rep CSV archived from
+  `tests/artifacts/g3_sbc/` (gitignored; regenerable — seeds fixed at
+  G3_SEED_BASE = 20260901). Configuration per the recorded decisions:
+  production template + default priors with the a1/a2 override
+  N(0.8, 0.1²)/N(−0.25, 0.05²) through the production override path;
+  ranks from 1,500 pooled draws thinned to 99. The prior-to-posterior
+  pipeline (template, KF likelihood, priors-as-stamped, NUTS) is
+  calibrated end-to-end for the no-SV variant.
+
+- **2026-08-31 — S3 acceptance (G4-precursor) PASSED on the first attempt:
+  full SV model on US data, run `70ad47166eaf`.**
+  `examples/us_lw_sv/spec_sv.yaml` (sv_shocks: [is, pc], 1961Q1–2019Q2,
+  4 chains × 1500/1500, DEFAULT adapt_delta 0.95 — no retuning needed):
+  verdict **PASS** — 0 divergences, 0 treedepth hits, E-BFMI 0.88–1.01,
+  max R-hat 1.004, min bulk/tail ESS 2628/1620. The expected σ_h funnel
+  never materialized as a sampling problem: the non-centered
+  parameterization plus data-supported volatility variation (σ_h,IS
+  median 0.25 [0.14, 0.42]; σ_h,PC 0.22 [0.14, 0.32] — 5th percentiles
+  well off zero) keeps the mass away from the funnel neck. Volatility
+  paths are economically right on cue (spec §3.1): exp(h_PC/2) peaks
+  ≈1.5 at the 1974 oil shock; exp(h_IS/2) decays from ≈1.1 (late 1970s)
+  to 0.22 by 2019 — the Great Moderation. Notable posterior shifts vs
+  the S2 no-SV reference (24b6288dddad): σ_y* 0.24 (vs 0.54), a_r −0.047
+  (vs −0.070), b_y 0.036 (vs 0.073) — time-varying measurement variances
+  reallocate what the constant-scale model forced elsewhere; recorded in
+  `examples/us_lw_sv/README.md`.
+
+- **2026-08-31 — S3 COVID payoff exhibit delivered: run `9d10bcf32a40`
+  (full vintage through 2026Q1, SV on, no hand-set COVID machinery).**
+  Diagnostics PASS (0 divergences, 0 treedepth hits, max R-hat 1.005, min
+  bulk/tail ESS 1779/917, E-BFMI 0.88–0.99). The four largest exp(h_IS/2)
+  posterior medians are exactly 2020Q1–Q4 (peak 3.77 in 2020Q3; 1.38 at
+  2019Q4, back to 0.75 by 2022Q1) — the endogenous Bayesian counterpart
+  of HLW's hand-set κ variance scaling, discovered from the data rather
+  than imposed. Structural de-contamination vs STRESS-TESTS.md §3's no-SV
+  absorption channel: σ_y* 0.33 [0.19, 0.42] (no-SV full-vintage: 0.94),
+  gap AR a1/a2 = 1.26/−0.29 ≈ the SV pre-COVID values (no-SV had
+  collapsed to 1.15). σ_h,IS rises to 0.60 [0.44, 0.78] on this window
+  (0.25 pre-COVID) — the RW scale carries the 2020 jump. Full record in
+  `examples/us_lw_sv/README.md`. Figures regenerable from the run store
+  via the session's sv_run_report script (exp(h/2) medians + 68/90%
+  bands).
+

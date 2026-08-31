@@ -1,0 +1,27 @@
+# US Laubach-Williams example -- S3: LW WITH stochastic volatility on the
+# IS and Phillips measurement shocks (sv_shocks: [is, pc], spec §1.5).
+# Same data/window as spec.yaml (the S2 no-SV reference run): 1960Q1-2019Q2,
+# estimation 1961Q1-2019Q2. This spec is the S3 acceptance run ("G4
+# precursor": clean sampling -- 0 or explained divergences).
+#
+# sampler settings: spec §2.3 defaults (adapt_delta 0.95); retuning, if the
+# sigma_h funnel demands it, is recorded in DECISIONS.md and this comment.
+model:
+  family: lw_sv
+  options:
+    sv_shocks: [is, pc]
+    estimate_c: false
+data:
+  file: data/us_quarterly.csv
+  date_column: date
+  mapping: { y: lgdp100, pi: core_pce_ann, r: real_rate }
+  sample: { start: null, end: null }   # file is already the exact window
+priors: { }              # defaults from lw-sv-spec.md §1.6 (incl. sigma_h, mu_h0)
+sampler:
+  chains: 4
+  warmup: 1500
+  sampling: 1500
+  adapt_delta: 0.95
+  max_treedepth: 12
+  seed: 20260813
+outputs: { }             # output modules are S4 scope

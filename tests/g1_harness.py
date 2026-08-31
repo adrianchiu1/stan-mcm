@@ -67,6 +67,19 @@ DATA_SEED = 20260814
 #: Length (in quarters) of the synthetic dataset.
 SYNTHETIC_T = 50
 
+#: Seed + scale for the per-point log-variance paths exercising the
+#: time-varying-R_t KF (S3 generalization). The scale matches the SV
+#: prior's sigma_h ~ Half-N(0, 0.2^2) magnitude so paths are the size the
+#: production model produces.
+H_PATH_SEED = 20260901
+H_PATH_RW_SD = 0.2
+
+#: Seed for the per-point (h0, sigma_h, nu) inputs exercising the
+#: PRODUCTION SV helpers (sv_rw_noncentered / sv_diag_variance_path) on
+#: both sides of the mirror. Distinct from H_PATH_SEED so the two
+#: time-varying comparisons don't share randomness.
+SV_INPUT_SEED = 20260902
+
 
 def _is_stationary_ar2(a1: float, a2: float) -> bool:
     """AR(2) stationarity triangle for `gap_t = a1*gap_{t-1} + a2*gap_{t-2}
@@ -235,12 +248,98 @@ def python_kf_loglik(params: dict, data: SyntheticKFData) -> float:
     return kalman_loglik(yobs, x, F, Q, A, Z, R, xi00, P00)
 
 
-def stan_kf_loglik_batch(points: list[dict], data: SyntheticKFData) -> np.ndarray:
-    """Evaluate the Stan-side KF log-likelihood at every parameter point in
+def generate_h_paths(points: list[dict], t: int, seed: int = H_PATH_SEED) -> np.ndarray:
+    """Per-point log-VARIANCE paths for the time-varying-R_t G1 comparison:
+    for each point, h_{s,1} = 2*ln(sigma_s) (so the path starts at the
+    point's own constant-variant scale -- spec §1.5's h-is-log-variance
+    convention) followed by random-walk increments of sd H_PATH_RW_SD.
+    Returns (n_points, t, 2) with column 0 = IS, 1 = PC."""
+    rng = np.random.default_rng(seed)
+    h = np.empty((len(points), t, 2))
+    for i, p in enumerate(points):
+        start = np.array([2.0 * np.log(p["sigma_is"]), 2.0 * np.log(p["sigma_pc"])])
+        increments = rng.normal(0.0, H_PATH_RW_SD, size=(t, 2))
+        increments[0] = 0.0
+        h[i] = start + np.cumsum(increments, axis=0)
+    return h
+
+
+def generate_sv_inputs(points: list[dict], t: int, seed: int = SV_INPUT_SEED) -> dict:
+    """Per-point inputs for the SV-helper mirror comparison: realized
+    initial log-variances h0 (anchored at each point's own scales, spec
+    §1.5's h_0 ~ N(2*ln(sigma), 1)), RW scales sigma_h ~ |N(0, 0.2^2)| (the
+    production prior's magnitude), and standard-normal innovations nu with
+    shape (n_points, t, 2), column 0 = IS, 1 = PC."""
+    rng = np.random.default_rng(seed)
+    n = len(points)
+    h0_is = np.array([2.0 * np.log(p["sigma_is"]) for p in points]) + rng.normal(0.0, 1.0, n)
+    h0_pc = np.array([2.0 * np.log(p["sigma_pc"]) for p in points]) + rng.normal(0.0, 1.0, n)
+    return {
+        "h0_is": h0_is,
+        "h0_pc": h0_pc,
+        "sigma_h_is": np.abs(rng.normal(0.0, 0.2, n)),
+        "sigma_h_pc": np.abs(rng.normal(0.0, 0.2, n)),
+        "nu": rng.normal(0.0, 1.0, size=(n, t, 2)),
+    }
+
+
+def python_kf_loglik_sv(params: dict, sv: dict, i: int, data: SyntheticKFData) -> float:
+    """Python mirror of the SV composition the production SV render uses:
+    h = sv_rw_noncentered(h0, sigma_h, nu), R_t = sv_diag_variance_path(h_is,
+    h_pc), then the time-varying KF."""
+    from macrotoolkit.smoother import (
+        build_lw_matrices,
+        build_lw_regressors,
+        default_initial_state,
+        kalman_loglik,
+        sv_diag_variance_path,
+        sv_rw_noncentered,
+    )
+
+    yobs, x = build_lw_regressors(data.y, data.pi, data.r)
+    F, Q, A, Z, _ = build_lw_matrices(params, c=params.get("c", C_FIXED))
+    xi00, P00 = default_initial_state(float(data.y[4]))
+    h_is = sv_rw_noncentered(float(sv["h0_is"][i]), float(sv["sigma_h_is"][i]), sv["nu"][i, :, 0])
+    h_pc = sv_rw_noncentered(float(sv["h0_pc"][i]), float(sv["sigma_h_pc"][i]), sv["nu"][i, :, 1])
+    return kalman_loglik(yobs, x, F, Q, A, Z, sv_diag_variance_path(h_is, h_pc), xi00, P00)
+
+
+def python_kf_loglik_tv(params: dict, h: np.ndarray, data: SyntheticKFData) -> float:
+    """Python mirror of the TIME-VARYING measurement-covariance KF at one
+    parameter point: R_t = diag(exp(h_t)) (h is log-variance) replacing the
+    constant R from the matrix builder."""
+    from macrotoolkit.smoother import (
+        build_lw_matrices,
+        build_lw_regressors,
+        default_initial_state,
+        kalman_loglik,
+    )
+
+    yobs, x = build_lw_regressors(data.y, data.pi, data.r)
+    F, Q, A, Z, _ = build_lw_matrices(params, c=params.get("c", C_FIXED))
+    xi00, P00 = default_initial_state(float(data.y[4]))
+    T = yobs.shape[0]
+    R_path = np.zeros((T, 2, 2))
+    R_path[:, 0, 0] = np.exp(h[:, 0])
+    R_path[:, 1, 1] = np.exp(h[:, 1])
+    return kalman_loglik(yobs, x, F, Q, A, Z, R_path, xi00, P00)
+
+
+def stan_kf_loglik_batch(
+    points: list[dict],
+    data: SyntheticKFData,
+    h_paths: np.ndarray | None = None,
+    sv_inputs: dict | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Evaluate the Stan-side KF log-likelihoods at every parameter point in
     one compile + one fixed_param run of the G1 harness program
     (stan/templates/g1_loglik_harness.stan.j2), which builds the system
     matrices with the same shared `stan/functions/` library the lw_sv
-    template uses. Returns the vector of log-likelihoods in `points` order.
+    template uses. Returns `(loglik, loglik_tv, loglik_sv)` in `points`
+    order: the constant-R filter path, the time-varying-R_t path at
+    `h_paths` (default: `generate_h_paths(points, T)`), and the
+    production-SV-helper composition at `sv_inputs` (default:
+    `generate_sv_inputs(points, T)`).
 
     `sig_figs=18`: CmdStan writes draws as CSV with 6 significant figures by
     default, which alone would exceed G1's 1e-8 tolerance for any
@@ -253,6 +352,10 @@ def stan_kf_loglik_batch(points: list[dict], data: SyntheticKFData) -> np.ndarra
     yobs, x = build_lw_regressors(data.y, data.pi, data.r)
     xi00, P00 = default_initial_state(float(data.y[4]))
     pmat = np.array([[p[k] for k in PARAM_NAMES] for p in points])
+    if h_paths is None:
+        h_paths = generate_h_paths(points, yobs.shape[0])
+    if sv_inputs is None:
+        sv_inputs = generate_sv_inputs(points, yobs.shape[0])
 
     source = render_stan_source("g1_loglik_harness.stan.j2", {})
     model, _ = compile_model(source)
@@ -266,6 +369,8 @@ def stan_kf_loglik_batch(points: list[dict], data: SyntheticKFData) -> np.ndarra
             "c": C_FIXED,
             "n_points": len(points),
             "params": pmat,
+            "h": h_paths,
+            **sv_inputs,
         },
         fixed_param=True,
         chains=1,
@@ -274,7 +379,11 @@ def stan_kf_loglik_batch(points: list[dict], data: SyntheticKFData) -> np.ndarra
         sig_figs=18,
         show_progress=False,
     )
-    return fit.stan_variable("loglik")[0]
+    return (
+        fit.stan_variable("loglik")[0],
+        fit.stan_variable("loglik_tv")[0],
+        fit.stan_variable("loglik_sv")[0],
+    )
 
 
 # ---------------------------------------------------------------------------

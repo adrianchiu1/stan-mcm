@@ -55,6 +55,119 @@ def test_render_is_deterministic_across_calls() -> None:
     assert a == b
 
 
+def test_no_sv_render_is_byte_stable() -> None:
+    """The rendered no-SV lw_sv program is pinned byte-for-byte against
+    tests/fixtures/render/lw_sv_no_sv.stan (decision 2026-08-31,
+    DECISIONS.md): S3's SV additions must sit entirely behind `sv_shocks`
+    conditionals, so the empty-`sv_shocks` render -- and with it every
+    no-SV run hash -- cannot drift by accident. If this fails, either a
+    template/functions edit leaked into the no-SV render (fix the leak) or
+    the change is a DELIBERATE, reviewed no-SV change (regenerate the
+    fixture and record the decision + hash consequences in DECISIONS.md).
+    """
+    from pathlib import Path
+
+    from specs.schema.base import RunSpec
+    from macrotoolkit.run import build_render_context
+
+    spec = RunSpec.model_validate(
+        {
+            "model": {"family": "lw_sv", "options": {}},
+            "data": {
+                "file": "unused.csv",
+                "date_column": "date",
+                "mapping": {"y": "y", "pi": "pi", "r": "r"},
+            },
+        }
+    )
+    rendered = render_stan_source("lw_sv.stan.j2", build_render_context(spec))
+    pinned = (Path(__file__).parent / "fixtures" / "render" / "lw_sv_no_sv.stan").read_text()
+    assert rendered == pinned
+
+
+def test_sv_render_has_sv_blocks_and_compiles() -> None:
+    """The sv_shocks: [is, pc] render carries the full SV machinery -- the
+    sv function include, the mu_h0 data entries, the non-centered
+    parameters, the h transformed parameters, the SV priors, and the
+    time-varying KF call -- and none of the no-SV-only pieces; and it
+    compiles (cached after the first run)."""
+    from specs.schema.base import RunSpec
+    from macrotoolkit.run import build_render_context
+
+    spec = RunSpec.model_validate(
+        {
+            "model": {"family": "lw_sv", "options": {"sv_shocks": ["is", "pc"]}},
+            "data": {
+                "file": "unused.csv",
+                "date_column": "date",
+                "mapping": {"y": "y", "pi": "pi", "r": "r"},
+            },
+        }
+    )
+    source = render_stan_source("lw_sv.stan.j2", build_render_context(spec))
+
+    for needle in (
+        "vector sv_rw_noncentered(",
+        "real mu_h0_is;",
+        "real<lower=0> sigma_h_is;",
+        "vector[T] nu_pc;",
+        "transformed parameters {",
+        "sv_diag_variance_path(h_is, h_pc)",
+        "nu_is ~ std_normal();",
+    ):
+        assert needle in source, f"SV render is missing {needle!r}"
+    # The constant-scale machinery must be fully replaced, not coexist
+    # (the lw_R DEFINITION still rides in with the shared include; what
+    # must be gone is the constant parameters, their priors, and the call).
+    for absent in (
+        "real<lower=0> sigma_is;",
+        "real<lower=0> sigma_pc;",
+        "sigma_is ~",
+        "sigma_pc ~",
+        "lw_R(sigma_is",
+    ):
+        assert absent not in source, f"SV render still contains {absent!r}"
+
+    model, _ = compile_model(source)
+    assert model.exe_file is not None
+
+
+def test_prior_overrides_rejected_for_inactive_variant() -> None:
+    """A prior override naming a parameter the selected variant doesn't
+    render must be a hard error, not a silent no-op (numerics-review
+    finding 2026-08-31): sigma_is/sigma_pc exist only in the no-SV render,
+    sigma_h_*/mu_h0_* only in the SV render."""
+    from specs.schema.base import RunSpec
+    from macrotoolkit.run import build_render_context
+
+    def spec_with(sv_shocks, priors):
+        return RunSpec.model_validate(
+            {
+                "model": {"family": "lw_sv", "options": {"sv_shocks": sv_shocks}},
+                "data": {
+                    "file": "unused.csv",
+                    "date_column": "date",
+                    "mapping": {"y": "y", "pi": "pi", "r": "r"},
+                },
+                "priors": priors,
+            }
+        )
+
+    with pytest.raises(ValueError, match="sigma_is.*does not exist in the variant"):
+        build_render_context(spec_with(["is", "pc"], {"sigma_is": {"sd": 5.0}}))
+    with pytest.raises(ValueError, match="sigma_h_is.*does not exist in the variant"):
+        build_render_context(spec_with([], {"sigma_h_is": {"sd": 0.9}}))
+
+    # The same names are accepted -- and take effect -- in their own variant.
+    ctx_no_sv = build_render_context(spec_with([], {"sigma_is": {"sd": 5.0}}))
+    assert ctx_no_sv["priors"]["sigma_is"]["sd"] == 5.0
+    ctx_sv = build_render_context(spec_with(["is", "pc"], {"sigma_h_is": {"sd": 0.9}}))
+    assert ctx_sv["priors"]["sigma_h_is"]["sd"] == 0.9
+    # And genuinely unknown names still hit the original hard error.
+    with pytest.raises(ValueError, match="not a parameter of the lw_sv family"):
+        build_render_context(spec_with([], {"sigma_typo": {"sd": 1.0}}))
+
+
 def test_compile_model_local_level_succeeds() -> None:
     source = render_stan_source("local_level.stan.j2", {})
     model, src_hash = compile_model(source)

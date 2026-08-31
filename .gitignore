@@ -12,3 +12,9 @@ __pycache__/
 # keyed by source hash -- never checked in, always reproducible from the
 # template + spec.
 .mtk_cache/
+# test-run artifacts (G3 SBC rank CSVs/histograms etc.) -- regenerable
+# records of slow-gate runs; the durable record is DECISIONS.md/HANDOFF.md.
+tests/artifacts/
+# uv tool/env lockfile -- the pytest env is a container-level uv tool install
+# (DECISIONS.md 2026-08-13), not a project-managed environment.
+uv.lock

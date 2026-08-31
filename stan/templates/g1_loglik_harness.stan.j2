@@ -12,10 +12,25 @@
 // Parameter column order (must match tests/g1_harness.py PARAM_NAMES):
 //   1 a1, 2 a2, 3 a_r, 4 b_pi, 5 b_y, 6 sigma_ystar, 7 sigma_g, 8 sigma_z,
 //   9 sigma_is, 10 sigma_pc.  c arrives as a data scalar (fixed 1.0 in S2).
+//
+// S3 additions:
+// - `loglik_tv` exercises the TIME-VARYING measurement covariance path of
+//   the generalized kalman_loglik at the same parameter points, with
+//   per-point log-variance paths h (data; column 1 = IS, 2 = PC).
+//   R_t = diag(exp(h_t)) -- h is log-VARIANCE, so exp(h) is the variance
+//   entering R and exp(h/2) is the sd (spec §1.5's pinned convention; the
+//   diag build is deliberately inline plain Stan, so this path validates
+//   the KF independently of the sv_rw helpers).
+// - `loglik_sv` exercises the PRODUCTION SV helpers
+//   (stan/functions/sv_rw_noncentered.stan): the h paths are built from
+//   per-point (h0, sigma_h, nu) data through sv_rw_noncentered and turned
+//   into R_t through sv_diag_variance_path -- the exact composition the SV
+//   template render uses -- and compared against the Python mirrors.
 
 functions {
 {% include "functions/ssm_matrices_lw.stan" %}
 {% include "functions/kalman_loglik_tv.stan" %}
+{% include "functions/sv_rw_noncentered.stan" %}
 }
 
 data {
@@ -27,19 +42,37 @@ data {
   real c;
   int<lower=1> n_points;
   matrix[n_points, 10] params;
+  array[n_points] matrix[T, 2] h;   // per-point log-variance paths [IS, PC]
+  vector[n_points] h0_is;           // per-point realized initial log-variances
+  vector[n_points] h0_pc;
+  vector[n_points] sigma_h_is;      // per-point log-variance RW scales
+  vector[n_points] sigma_h_pc;
+  array[n_points] matrix[T, 2] nu;  // per-point SV innovations [IS, PC]
 }
 
 generated quantities {
   vector[n_points] loglik;
+  vector[n_points] loglik_tv;
+  vector[n_points] loglik_sv;
   for (i in 1:n_points) {
-    loglik[i] = kalman_loglik(yobs, x,
-                              lw_F(),
-                              lw_Q(params[i, 6], params[i, 7], params[i, 8]),
-                              lw_A(params[i, 1], params[i, 2], params[i, 3],
-                                   params[i, 4], params[i, 5]),
-                              lw_Z(params[i, 1], params[i, 2], params[i, 3],
-                                   params[i, 5], c),
+    matrix[7, 7] Q = lw_Q(params[i, 6], params[i, 7], params[i, 8]);
+    matrix[6, 2] A = lw_A(params[i, 1], params[i, 2], params[i, 3],
+                          params[i, 4], params[i, 5]);
+    matrix[2, 7] Z = lw_Z(params[i, 1], params[i, 2], params[i, 3],
+                          params[i, 5], c);
+    loglik[i] = kalman_loglik(yobs, x, lw_F(), Q, A, Z,
                               lw_R(params[i, 9], params[i, 10]),
                               xi00, P00);
+    array[T] matrix[2, 2] Rt;
+    for (t in 1:T) {
+      Rt[t] = diag_matrix(exp(h[i][t]'));
+    }
+    loglik_tv[i] = kalman_loglik(yobs, x, lw_F(), Q, A, Z, Rt, xi00, P00);
+    loglik_sv[i] = kalman_loglik(
+        yobs, x, lw_F(), Q, A, Z,
+        sv_diag_variance_path(
+            sv_rw_noncentered(h0_is[i], sigma_h_is[i], col(nu[i], 1)),
+            sv_rw_noncentered(h0_pc[i], sigma_h_pc[i], col(nu[i], 2))),
+        xi00, P00);
   }
 }
