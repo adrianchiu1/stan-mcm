@@ -111,6 +111,17 @@ tests/test_g5a_hlw_replication.py   # loads tests/fixtures/hlw/derived/us_2017_r
 
 ## Open questions for S2 implementation (not blocking this prep pass)
 
+> **Status update 2026-08-31** (see `DECISIONS.md` entries of the same
+> date): question 2 is **resolved** — build the constant-covariance KF
+> for S2, generalize to time-varying `Q_t` in S3. The G5a-tolerance
+> clarification below ("near machine precision against our own
+> reproduction") is **signed off** by the user. Question 0 is
+> **answered but not yet decided**: HLW's own convention is documented
+> (MLE, no priors, `σ_ỹ`/`σ_π` free unbounded constants), option (a)
+> with Half-N(0, 1²) is the standing recommendation, awaiting user
+> confirmation before `specs/schema/lw_sv.py`'s priors are written.
+> Questions 1 and 3 remain open as written.
+
 0. **No prior exists anywhere in the spec for the no-SV variant's constant
    IS/Phillips shock scales.** Surfaced while building the G1 parameter-
    point generator (`tests/g1_harness.py`), worth a closer look than the
@@ -150,14 +161,13 @@ tests/test_g5a_hlw_replication.py   # loads tests/fixtures/hlw/derived/us_2017_r
    `tests/fixtures/hlw/HLW_2017_Code/HLW_Code_Guide.pdf` §7.5). Spec's
    default is also `c` fixed at 1.0. No conflict — just confirming G5a
    should run with `estimate_c: false` (the default), not the alternative.
-2. **`kalman_loglik_tv.stan`'s generality vs. S2's actual need**: spec
-   §2.2 says this function "must handle... time-varying state innovation
-   covariance" — S2's no-SV model doesn't need that yet (S3 does). Building
-   the general time-varying form now (unused until S3) vs. a simpler
-   constant-covariance version now and generalizing in S3 is a real
-   engineering trade-off for `stan-engineer` to make when this stage
-   starts — flagging so it's a conscious choice, not an oversight either
-   way.
+2. **`kalman_loglik_tv.stan`'s generality vs. S2's actual need** —
+   **RESOLVED 2026-08-31 (user decision)**: build the simpler
+   constant-covariance version for S2, match HLW via G5a, then generalize
+   to the time-varying-`Q_t` form when S3 adds SV. Spec §2.2's
+   time-varying contract is deferred, not dropped: S3's first task is that
+   generalization plus a regression check that the constant case still
+   reproduces S2's G1/G5a results after the rewrite.
 3. **G2's synthetic-data generator**: needs its own parameter-point +
    state-path simulator (distinct from G1's parameter-point generator,
    which doesn't simulate data, just samples parameter values). Not

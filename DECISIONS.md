@@ -116,3 +116,42 @@ Newest first.
   pulled in ~886MB of unrelated GUI/media-codec packages and failed on
   stale-mirror 404s for a few of them; `--no-install-recommends` avoided
   that entirely and installed cleanly.
+
+- **2026-08-31 — S2 open question 2 resolved: build the constant-covariance
+  KF first, generalize in S3.** User decision. `kalman_loglik_tv.stan` for
+  S2 is the simpler constant-`Q` form (all S2 needs, and all G1/G2/G5a
+  exercise); match HLW via G5a first, then generalize the function to
+  time-varying `Q_t` when S3 adds SV. Spec §2.2's "must handle time-varying
+  state innovation covariance" contract is deferred to S3, not dropped —
+  S3's first task includes that generalization plus a regression check that
+  the constant case still reproduces S2's G1/G5a results.
+
+- **2026-08-31 — S2 open question 3 signed off: G5a tolerance is against
+  our own reproduction, near machine precision.** User confirmed the
+  clarification already in `plans/S2-plan.md`: the oracle is
+  `tests/fixtures/hlw/derived/us_2017_reproduction/output/us_2017_smoothed.csv`,
+  and our KF/smoother evaluated at `us_2017_parameters.csv` must match it
+  to floating-point-level tolerance. The 0.06pp/0.31pp gap vs. the
+  published 2019Q2 vintage is a separate, documented discrepancy (data
+  revisions, optimizer path) and is not slack our code may consume.
+
+- **2026-08-31 — S2 open question 0 (constant IS/PC shock-scale priors):
+  HLW's own convention established; recommendation is option (a) with
+  Half-N(0, 1²), awaiting user confirmation.** What HLW actually does
+  (from `tests/fixtures/hlw/HLW_2017_Code/rstar.stage3.R` +
+  `unpack.parameters.stage3.R`): frequentist MLE, no priors of any kind.
+  `σ_ỹ` and `σ_π` are elements 6–7 of the stage-3 parameter vector, freely
+  estimated by L-BFGS with no bounds (the only bounded parameters are
+  `a_3 ≤ −0.0025` and `b_2 ≥ 0.025`), initialized at the OLS residual
+  standard errors of the IS and Phillips curves. The pile-up machinery
+  (median-unbiased `λ_g`, `λ_z`) constrains only `σ_g` and `σ_z`, which
+  are *derived* (`σ_g = λ_g·σ_y*`, `σ_z = λ_z·σ_ỹ/a_r`), never free.
+  So option (a)'s Bayesian analogue: `σ_IS`, `σ_PC` as free constant
+  scales with a weakly-informative prior doing no identification work.
+  Recommended concrete prior: Half-N(0, 1²) for both — matches the spec's
+  Half-Normal convention for scale parameters, comfortably covers the
+  US MLE values (σ_ỹ≈0.34, σ_π≈0.80) without centering on them (keeping
+  the prior independent of the G5a oracle, unlike option (b)), and these
+  parameters are not pile-up-prone so looseness costs nothing. Not yet
+  confirmed by the user — do not write `specs/schema/lw_sv.py`'s priors
+  until it is.

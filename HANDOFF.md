@@ -51,6 +51,19 @@ checkpoint for that decision, among the others below.
 
 ## Open questions — need your input before S2 implementation starts
 
+> **Update 2026-08-31** — user reviewed these; see the three `DECISIONS.md`
+> entries of that date for the full record. Question 2 is **resolved**
+> (constant-covariance KF for S2, generalize in S3 with a regression check).
+> Question 3 is **signed off** (G5a tolerance = near machine precision
+> against our own reproduction). Question 1 is answered but not closed:
+> HLW's own convention is straight MLE with no priors — `σ_ỹ`/`σ_π` are
+> free, unbounded constants initialized at IS/PC OLS residual SDs, and the
+> pile-up machinery (`λ_g`, `λ_z`) never touches them. Standing
+> recommendation: option (a) with Half-N(0, 1²) on `σ_IS`, `σ_PC` —
+> **awaiting user confirmation** before writing `specs/schema/lw_sv.py`'s
+> priors. That confirmation is the last input S2 implementation is
+> blocked on.
+
 1. **No prior exists anywhere in the spec for the no-SV variant's constant
    IS/Phillips shock scales.** Real spec gap, surfaced while building the
    G1 harness — not a nit. Spec's shocks table (§1.4) has `ε_IS`/`ε_PC`
