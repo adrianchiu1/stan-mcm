@@ -34,3 +34,16 @@ pile-up-prior caveat as the US example applies.
 
 Context: HLW publish no Germany model — this EA aggregate (Germany is its
 largest economy) is the closest published benchmark for Germany.
+
+## Full latest-vintage run, 2026-08-31 (run `ab363d5026a1`, experiment)
+
+`spec_full_vintage.yaml`: 1972Q1–2026Q1, COVID included, no COVID machinery
+(HLW scale EA 2020Q2–Q4 shock variances ×19.8). Diagnostics **FAIL** on the
+strict zero-divergence rule: 2 divergences in 6,000 draws (max R-hat 1.007,
+ESS > 1000) — marginal, flagged.
+
+The EA absorbs COVID differently from the US: σ_IS ≈ 0.99 (vs 0.41
+pre-COVID) and the gap's AR structure collapses (a₁,a₂ = 0.77,+0.01 vs
+1.49,−0.55); σ_y* also roughly doubles. Tracking vs published current
+estimates over 1972Q1–2026Q1: r* corr 0.929, g 0.961, gap 0.861, z 0.711.
+Use the pre-COVID run above as the reference result.

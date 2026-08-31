@@ -49,3 +49,17 @@ so less of the r* decline is attributed to headwinds). Documented cause,
 not a discrepancy to fix — the exact-replication claim lives in G5a
 (`tests/test_g5a_hlw_replication.py`), where our KF/smoother at HLW's own
 parameters matches their output to ~1e-12.
+
+## Full latest-vintage run, 2026-08-31 (run `18f32ac9793f`, experiment)
+
+`spec_full_vintage.yaml`: 1961Q1–2026Q1, COVID quarters included, **no COVID
+machinery** (HLW's 2023 model scales 2020Q2–Q4 shock variances ×7.6 and adds
+a dummy; the S2 model cannot). Diagnostics **WARN** (tail ESS 396 vs 400
+threshold; 0 divergences, max R-hat 1.002).
+
+COVID is absorbed through the potential-level shock: σ_y* ≈ 0.94 (vs 0.54
+pre-COVID) and gap persistence flattens (a₁ 1.15 vs 1.44). Tracking vs the
+published current one-sided estimates over 1961Q1–2026Q1: r* corr 0.914
+(mean |diff| 0.75pp), g 0.871, gap 0.845, z 0.871. At 2026Q1 our filtered
+r* is +2.4 vs HLW's +1.1 — the pile-up-prior σ_z effect plus COVID
+absorption. Use the pre-COVID run above as the reference result.
