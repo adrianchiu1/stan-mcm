@@ -811,6 +811,85 @@ def historical_decomposition_draw(
     return HDDraw(state_components=state_components, gap=gp["gap"], pi=gp["pi"], y=y_bars, y_growth_4q=growth)
 
 
+@dataclass
+class HDDrawsAggregated:
+    """Per-draw historical-decomposition bars (spec §3.4), stacked over the
+    posterior draws selected by ``outputs.smoother_draws`` -- same shape
+    convention as :class:`TrendCycleDraws` (one ``(n_draws, T)`` array per
+    bar, rather than :class:`HDDraw`'s one-draw-at-a-time bundle).
+
+    ``gap``/``pi``/``y``/``y_growth_4q`` mirror :class:`HDDraw`'s own
+    per-bar dicts (``GAP_BARS`` for ``gap``, ``PI_BARS`` for the other
+    three -- see that class's docstring), with each bar's value now an
+    ``(n_draws, T)`` array instead of a ``(T,)`` one.  ``state_components``
+    likewise mirrors :class:`HDDraw`'s 4-key dict (``"init"``/``"ystar"``/
+    ``"g"``/``"z"``), each an ``(n_draws, T, 7)`` array -- kept for
+    completeness/debugging even though the report (spec §3.4) only needs
+    gap/pi/y/y_growth_4q.
+
+    No aggregation/percentile/median math here -- that is ``plots.py``'s
+    job (spec §3.4: "Stacked bars (posterior-median contributions)").
+    """
+
+    draw_indices: np.ndarray  # (n_draws,) -- indices into the flattened posterior this batch used
+    dates: pd.DatetimeIndex  # (T,)
+    gap: dict[str, np.ndarray]  # bar -> (n_draws, T), GAP_BARS
+    pi: dict[str, np.ndarray]  # bar -> (n_draws, T), PI_BARS
+    y: dict[str, np.ndarray]  # bar -> (n_draws, T), PI_BARS
+    y_growth_4q: dict[str, np.ndarray]  # bar -> (n_draws, T), PI_BARS (first 4 cols NaN)
+    state_components: dict[str, np.ndarray]  # "init"/"ystar"/"g"/"z" -> (n_draws, T, 7)
+
+
+def compute_historical_decomposition_draws(lw_run: LWRun, *, seed: int | None = None) -> HDDrawsAggregated:
+    """Run :func:`historical_decomposition_for_draw` once per selected
+    posterior draw (``lw_run.spec.outputs.smoother_draws``) and stack each
+    bar's per-draw series into ``(n_draws, T)`` arrays -- the same
+    loop-and-stack pattern :func:`compute_trend_cycle_draws` /
+    :func:`compute_irf_draws` / :func:`compute_fan_draws` each already use.
+    ``seed`` defaults to ``lw_run.spec.sampler.seed``; a single
+    ``np.random.Generator`` is advanced sequentially across all selected
+    draws (matching those functions' own usage pattern), so this batch's
+    simulation-smoother draws are NOT identical to a same-seeded single-draw
+    call to :func:`historical_decomposition_for_draw` beyond the first draw
+    in the sequence.
+    """
+    flat = _flatten_posterior(lw_run)
+    n_total = flat["a1"].shape[0]
+    idx = select_draw_indices(n_total, lw_run.spec.outputs.smoother_draws)
+
+    T = lw_run.yobs.shape[0]
+    n = len(idx)
+
+    gap = {k: np.empty((n, T)) for k in GAP_BARS}
+    pi = {k: np.empty((n, T)) for k in PI_BARS}
+    y = {k: np.empty((n, T)) for k in PI_BARS}
+    y_growth_4q = {k: np.empty((n, T)) for k in PI_BARS}
+    state_components = {k: np.empty((n, T, 7)) for k in ("init", "ystar", "g", "z")}
+
+    rng = np.random.default_rng(seed if seed is not None else lw_run.spec.sampler.seed)
+
+    for j, i in enumerate(idx):
+        hd = historical_decomposition_for_draw(lw_run, flat, int(i), rng)
+        for k in GAP_BARS:
+            gap[k][j] = hd.gap[k]
+        for k in PI_BARS:
+            pi[k][j] = hd.pi[k]
+            y[k][j] = hd.y[k]
+            y_growth_4q[k][j] = hd.y_growth_4q[k]
+        for k in ("init", "ystar", "g", "z"):
+            state_components[k][j] = hd.state_components[k]
+
+    return HDDrawsAggregated(
+        draw_indices=idx,
+        dates=lw_run.dates,
+        gap=gap,
+        pi=pi,
+        y=y,
+        y_growth_4q=y_growth_4q,
+        state_components=state_components,
+    )
+
+
 def historical_decomposition_for_draw(
     lw_run: LWRun,
     flat: dict[str, np.ndarray],

@@ -33,9 +33,12 @@ import yaml
 
 from g1_harness import SYNTHETIC_DATA
 from macrotoolkit.results_lw import (
+    GAP_BARS,
+    PI_BARS,
     LWRun,
     _flatten_posterior,
     _system_matrices_for_draw,
+    compute_historical_decomposition_draws,
     compute_trend_cycle_draws,
     historical_decomposition_for_draw,
     load_lw_run,
@@ -495,3 +498,103 @@ def test_historical_decomposition_for_draw_reconstructs_at_a_later_draw_index_to
     n_total = post.sizes["chain"] * post.sizes["draw"]
     mid = n_total // 2
     _check_hd_draw_reconstructs_g6_identity(sv_lw_run, draw_index=mid, seed=20260906)
+
+
+# ---------------------------------------------------------------------------
+# compute_historical_decomposition_draws -- the S4-step-4 loop-and-stack
+# addition, exercising the SAME G6 sum identity as
+# _check_hd_draw_reconstructs_g6_identity above, but across a small BATCH of
+# draws (via the aggregation loop) instead of one hand-picked draw index --
+# a bug that only shows up from stacking into the wrong row/column would
+# slip past the single-draw checks above but not this one.
+# ---------------------------------------------------------------------------
+
+
+def _check_hd_draws_aggregated_shapes_and_identity(lw_run: LWRun, seed: int) -> None:
+    hdd = compute_historical_decomposition_draws(lw_run, seed=seed)
+
+    post = lw_run.idata.posterior
+    n_total = post.sizes["chain"] * post.sizes["draw"]
+    expected_idx = select_draw_indices(n_total, lw_run.spec.outputs.smoother_draws)
+    np.testing.assert_array_equal(hdd.draw_indices, expected_idx)
+
+    T = lw_run.yobs.shape[0]
+    n_draws = len(expected_idx)
+    assert len(hdd.dates) == T
+    pd.testing.assert_index_equal(hdd.dates, lw_run.dates)
+
+    assert set(hdd.gap) == set(GAP_BARS)
+    assert set(hdd.pi) == set(PI_BARS)
+    assert set(hdd.y) == set(PI_BARS)
+    assert set(hdd.y_growth_4q) == set(PI_BARS)
+    assert set(hdd.state_components) == {"init", "ystar", "g", "z"}
+
+    for k, arr in hdd.gap.items():
+        assert arr.shape == (n_draws, T), k
+        assert np.all(np.isfinite(arr)), k
+    for k, arr in hdd.pi.items():
+        assert arr.shape == (n_draws, T), k
+        assert np.all(np.isfinite(arr)), k
+    for k, arr in hdd.y.items():
+        assert arr.shape == (n_draws, T), k
+        assert np.all(np.isfinite(arr)), k
+    for k, arr in hdd.y_growth_4q.items():
+        assert arr.shape == (n_draws, T), k
+        # First 4 columns are NaN by four_quarter_growth's own convention;
+        # the rest must be finite.
+        assert np.all(np.isnan(arr[:, :4])), k
+        assert np.all(np.isfinite(arr[:, 4:])), k
+    for k, arr in hdd.state_components.items():
+        assert arr.shape == (n_draws, T, 7), k
+        assert np.all(np.isfinite(arr)), k
+
+    # Same G6 sum identity as _check_hd_draw_reconstructs_g6_identity, now
+    # checked for EVERY draw in the batch at once (a stacking-into-the-
+    # wrong-row bug would break this even though each draw's own HDDraw,
+    # pre-stacking, individually satisfies it).
+    xi_draw = (
+        hdd.state_components["init"]
+        + hdd.state_components["ystar"]
+        + hdd.state_components["g"]
+        + hdd.state_components["z"]
+    )  # (n_draws, T, 7)
+
+    gap_sum = sum(hdd.gap.values())  # (n_draws, T)
+    expected_gap = lw_run.yobs[None, :, 0] - xi_draw[:, :, 0]
+    diff_gap = np.abs(gap_sum - expected_gap)
+    assert np.all(diff_gap < 1e-6), f"gap HD batch reconstruction fails: worst={diff_gap.max():.3e}"
+
+    pi_sum = sum(hdd.pi.values())
+    diff_pi = np.abs(pi_sum - lw_run.yobs[None, :, 1])
+    assert np.all(diff_pi < 1e-6), f"pi HD batch reconstruction fails: worst={diff_pi.max():.3e}"
+
+    y_sum = sum(hdd.y.values())
+    diff_y = np.abs(y_sum - lw_run.yobs[None, :, 0])
+    assert np.all(diff_y < 1e-6), f"y-level HD batch reconstruction fails: worst={diff_y.max():.3e}"
+
+
+def test_compute_historical_decomposition_draws_no_sv(no_sv_lw_run: LWRun) -> None:
+    _check_hd_draws_aggregated_shapes_and_identity(no_sv_lw_run, seed=20260910)
+
+
+def test_compute_historical_decomposition_draws_sv(sv_lw_run: LWRun) -> None:
+    _check_hd_draws_aggregated_shapes_and_identity(sv_lw_run, seed=20260911)
+
+
+def test_compute_historical_decomposition_draws_honors_thin_smoother_draws(no_sv_lw_run: LWRun) -> None:
+    """Same ``outputs.smoother_draws`` respect check
+    ``test_compute_trend_cycle_draws_honors_thin_smoother_draws`` runs for
+    ``compute_trend_cycle_draws``, mirrored here for the new aggregation
+    function."""
+    thinned = dataclasses.replace(
+        no_sv_lw_run,
+        spec=no_sv_lw_run.spec.model_copy(
+            update={"outputs": no_sv_lw_run.spec.outputs.model_copy(update={"smoother_draws": ThinSpec(thin=7)})}
+        ),
+    )
+    hdd = compute_historical_decomposition_draws(thinned, seed=20260912)
+    post = thinned.idata.posterior
+    n_total = post.sizes["chain"] * post.sizes["draw"]
+    expected_idx = np.arange(0, n_total, 7)
+    np.testing.assert_array_equal(hdd.draw_indices, expected_idx)
+    assert hdd.gap["init"].shape[0] == len(expected_idx)
