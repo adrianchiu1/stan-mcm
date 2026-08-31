@@ -49,20 +49,19 @@ None of this exists yet. Per this repo's ground rules, `stan-engineer`
 human directly driving/supervising that pass — this handoff is the
 checkpoint for that decision, among the others below.
 
-## Open questions — need your input before S2 implementation starts
+## Open questions — ALL RESOLVED 2026-08-31, S2 implementation unblocked
 
-> **Update 2026-08-31** — user reviewed these; see the three `DECISIONS.md`
-> entries of that date for the full record. Question 2 is **resolved**
-> (constant-covariance KF for S2, generalize in S3 with a regression check).
-> Question 3 is **signed off** (G5a tolerance = near machine precision
-> against our own reproduction). Question 1 is answered but not closed:
-> HLW's own convention is straight MLE with no priors — `σ_ỹ`/`σ_π` are
-> free, unbounded constants initialized at IS/PC OLS residual SDs, and the
-> pile-up machinery (`λ_g`, `λ_z`) never touches them. Standing
-> recommendation: option (a) with Half-N(0, 1²) on `σ_IS`, `σ_PC` —
-> **awaiting user confirmation** before writing `specs/schema/lw_sv.py`'s
-> priors. That confirmation is the last input S2 implementation is
-> blocked on.
+> User reviewed all three; see the `DECISIONS.md` entries dated 2026-08-31
+> for the full record. Question 2: **resolved** — constant-covariance KF
+> for S2, generalize to time-varying `Q_t` in S3 with a regression check.
+> Question 3: **signed off** — G5a tolerance is near machine precision
+> against our own reproduction. Question 1: **closed** — HLW's own
+> convention is straight MLE with no priors (`σ_ỹ`/`σ_π` free, unbounded
+> constants; the pile-up machinery never touches them); user confirmed
+> option (a) with **Half-N(0, 1²) on `σ_IS`, `σ_PC`**. Nothing blocks S2
+> now except the standing ground rule that `stan-engineer` runs under
+> direct human supervision. The original questions are kept below for
+> context only.
 
 1. **No prior exists anywhere in the spec for the no-SV variant's constant
    IS/Phillips shock scales.** Real spec gap, surfaced while building the

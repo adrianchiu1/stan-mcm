@@ -116,11 +116,13 @@ tests/test_g5a_hlw_replication.py   # loads tests/fixtures/hlw/derived/us_2017_r
 > for S2, generalize to time-varying `Q_t` in S3. The G5a-tolerance
 > clarification below ("near machine precision against our own
 > reproduction") is **signed off** by the user. Question 0 is
-> **answered but not yet decided**: HLW's own convention is documented
-> (MLE, no priors, `σ_ỹ`/`σ_π` free unbounded constants), option (a)
-> with Half-N(0, 1²) is the standing recommendation, awaiting user
-> confirmation before `specs/schema/lw_sv.py`'s priors are written.
-> Questions 1 and 3 remain open as written.
+> **closed** — HLW's own convention is documented (MLE, no priors,
+> `σ_ỹ`/`σ_π` free unbounded constants) and the user confirmed
+> option (a): **Half-N(0, 1²) priors on `σ_IS`, `σ_PC`** — this is now
+> the spec for `specs/schema/lw_sv.py`'s priors and the Stan template.
+> Questions 1 and 3 remain open as written (question 1 is a
+> confirm-the-default, question 3 is a build item, neither blocks the
+> start of S2).
 
 0. **No prior exists anywhere in the spec for the no-SV variant's constant
    IS/Phillips shock scales.** Surfaced while building the G1 parameter-

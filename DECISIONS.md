@@ -155,3 +155,10 @@ Newest first.
   parameters are not pile-up-prone so looseness costs nothing. Not yet
   confirmed by the user — do not write `specs/schema/lw_sv.py`'s priors
   until it is.
+
+- **2026-08-31 — S2 open question 0 closed: user confirmed Half-N(0, 1²)
+  priors on `σ_IS`, `σ_PC`.** Option (a) as recommended in the entry
+  above: free constant scales, weakly-informative Half-N(0, 1²), no
+  relation to the SV parameters, no identification work. This was the
+  last blocking input — S2 implementation can start. All three of
+  `HANDOFF.md`'s open questions are now resolved.
