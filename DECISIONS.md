@@ -197,3 +197,15 @@ Newest first.
   coverage in [0.80, 0.97] over 200 cells, per-parameter floor 0.6,
   3-sigma t-test on sigma_g/sigma_z posterior-median errors), with the
   rationale in its docstring.
+
+- **2026-08-31 — S2 COMPLETE: all gates green.** G2 passed (20 simulated
+  datasets, pooled coverage + per-parameter floor + 3-sigma no-bias on
+  sigma_g/sigma_z, ~38 min under the `slow` marker). First real US run
+  (`examples/us_lw_sv/`, run 24b6288dddad): diagnostics PASS, structural
+  coefficients bracket the HLW MLE, smoothed r*/gap correlate 0.98 with
+  HLW's smoothed series; sigma_g/sigma_z posteriors sit below HLW's
+  MUE-implied values by design (pile-up priors replace MUE — sensitivity
+  sweep remains S5 scope). numerics-reviewer pass found no correctness
+  defects; its one hygiene fix (Cholesky-based RTS gain) is applied. S2's
+  acceptance row in spec §7 — "G1, G2, G5a pass; posterior sensible on US
+  data" — is met in full. S3 warnings recorded in HANDOFF.md.

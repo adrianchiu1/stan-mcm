@@ -1,5 +1,14 @@
 # S2 plan — LW without SV: template, KF functions, priors, Python mirror, HLW fixtures wired in
 
+> **STATUS 2026-08-31: S2 IMPLEMENTED AND COMPLETE.** All gates green — G1
+> at 3.6e-12, G5a at ~1e-12 (both vs 1e-8 gates), G2 passed (20 datasets,
+> ~38 min, `slow` marker), US posterior PASS and sensible
+> (`examples/us_lw_sv/README.md`). Every file in the "Files to create"
+> list below exists except `tests/test_g2_parameter_recovery.py`'s
+> simulator, which landed as `tests/g2_harness.py`. See `HANDOFF.md` for
+> the current state and S3 warnings; the text below is kept as the
+> original plan of record.
+
 **Status: plan only.** Per the project's ground rules, this stage's actual
 implementation (anything under `stan/`, `specs/schema/lw_sv.py`,
 `src/macrotoolkit/smoother.py`) is not started by this pass — only
