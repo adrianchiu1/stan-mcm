@@ -309,3 +309,36 @@ Newest first.
   (a comment-only change — verified 0 non-comment diff lines against the
   prior pin). The pin is expected to stay stable from here.
 
+- **2026-08-31 — G3 PASSED: SBC, no-SV variant, 200 replications.**
+  `pytest -m slow tests/test_g3_sbc.py` — 3h37m wall. Per-parameter χ²
+  uniformity (20 bins, 10 expected/bin): p-values 0.073 (a2) to 0.735
+  (σ_z), all ten parameters comfortably above the 0.001 floor with a
+  healthy spread (no clustering at either extreme). Sampler health: 5
+  divergent transitions in 200 × 3,000 = 600,000 post-warmup draws
+  (ceiling 600). Rank histograms + per-rep CSV archived from
+  `tests/artifacts/g3_sbc/` (gitignored; regenerable — seeds fixed at
+  G3_SEED_BASE = 20260901). Configuration per the recorded decisions:
+  production template + default priors with the a1/a2 override
+  N(0.8, 0.1²)/N(−0.25, 0.05²) through the production override path;
+  ranks from 1,500 pooled draws thinned to 99. The prior-to-posterior
+  pipeline (template, KF likelihood, priors-as-stamped, NUTS) is
+  calibrated end-to-end for the no-SV variant.
+
+- **2026-08-31 — S3 acceptance (G4-precursor) PASSED on the first attempt:
+  full SV model on US data, run `70ad47166eaf`.**
+  `examples/us_lw_sv/spec_sv.yaml` (sv_shocks: [is, pc], 1961Q1–2019Q2,
+  4 chains × 1500/1500, DEFAULT adapt_delta 0.95 — no retuning needed):
+  verdict **PASS** — 0 divergences, 0 treedepth hits, E-BFMI 0.88–1.01,
+  max R-hat 1.004, min bulk/tail ESS 2628/1620. The expected σ_h funnel
+  never materialized as a sampling problem: the non-centered
+  parameterization plus data-supported volatility variation (σ_h,IS
+  median 0.25 [0.14, 0.42]; σ_h,PC 0.22 [0.14, 0.32] — 5th percentiles
+  well off zero) keeps the mass away from the funnel neck. Volatility
+  paths are economically right on cue (spec §3.1): exp(h_PC/2) peaks
+  ≈1.5 at the 1974 oil shock; exp(h_IS/2) decays from ≈1.1 (late 1970s)
+  to 0.22 by 2019 — the Great Moderation. Notable posterior shifts vs
+  the S2 no-SV reference (24b6288dddad): σ_y* 0.24 (vs 0.54), a_r −0.047
+  (vs −0.070), b_y 0.036 (vs 0.073) — time-varying measurement variances
+  reallocate what the constant-scale model forced elsewhere; recorded in
+  `examples/us_lw_sv/README.md`.
+
