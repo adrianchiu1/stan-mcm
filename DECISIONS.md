@@ -373,6 +373,28 @@ Newest first.
   since `z` alone is visually near-identical to `r* − g` and `r*` is the
   object the report/README already center on.
 
+- **2026-08-31 — S4: typed `outputs` schema for `lw_sv` (`LwSvOutputs`)
+  changes lw_sv run-hash identity again (S3's precedent, DECISIONS.md's
+  "S2 run-hash stability sacrificed" entry, applies again here).**
+  `RunSpec.outputs` was a free-form `dict[str, Any]`; S4 needed it typed
+  (`horizon`, `irf_horizon`, `irf_vol_reference`, `smoother_draws`,
+  `forecast_r_rule` — spec §2.3/§3) so the output modules have a validated
+  config to read instead of hand-parsing a dict. Implemented via the same
+  manually-dispatched `FamilyEntry` pattern `model.options` already uses
+  (`specs/schema/__init__.py`'s `outputs_model`, `None` for `local_level`
+  so its `outputs` stays a free-form dict). Effect: an `outputs: {}` spec
+  (S2/S3's example specs) now canonicalizes to the full set of typed
+  defaults instead of an empty mapping, changing `to_canonical_yaml()`'s
+  output and therefore the run-identity hash for every `lw_sv` spec —
+  same tradeoff as the S3 KF generalization (old run dirs remain valid
+  immutable records; this is a schema precision improvement, not a
+  numerics change, so no gate is expected to move). The S4 acceptance
+  runs (`spec_sv.yaml`, `spec_sv_full_vintage.yaml`) were kicked off
+  *before* this schema change landed, so their hashes reflect the
+  pre-change canonical form — that's fine, they're still valid
+  regenerated records; only a *future* re-run of those specs would pick
+  up a new hash.
+
 - **2026-08-31 — S3 COVID payoff exhibit delivered: run `9d10bcf32a40`
   (full vintage through 2026Q1, SV on, no hand-set COVID machinery).**
   Diagnostics PASS (0 divergences, 0 treedepth hits, max R-hat 1.005, min

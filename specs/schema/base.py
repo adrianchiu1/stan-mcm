@@ -146,8 +146,12 @@ class RunSpec(BaseModel):
     ``specs/schema/local_level.py``); later families validate specific
     prior keys in their own options/priors handling.
 
-    ``outputs`` is likewise free-form and family-specific; ``local_level``
-    does not require any keys.
+    ``outputs`` is family-specific: validated against the family registry's
+    ``outputs_model`` when one is registered (S4 added ``lw_sv``'s --
+    ``specs/schema/lw_sv.py``'s ``LwSvOutputs``), the same manually-dispatched
+    pattern ``ModelSpec._validate_options`` uses for ``model.options``.
+    ``local_level`` has no ``outputs_model`` registered, so its ``outputs``
+    stays the free-form dict this field declares.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -156,7 +160,7 @@ class RunSpec(BaseModel):
     data: DataSpec
     priors: dict[str, Any] = Field(default_factory=dict)
     sampler: SamplerSpec = Field(default_factory=SamplerSpec)
-    outputs: dict[str, Any] = Field(default_factory=dict)
+    outputs: Any = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _validate_required_mapping(self) -> "RunSpec":
@@ -169,6 +173,28 @@ class RunSpec(BaseModel):
                 f"model.family {self.model.family!r}. It must include: "
                 f"{{{example}}}."
             )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_outputs(self) -> "RunSpec":
+        entry = get_family(self.model.family)
+        if entry.outputs_model is None:
+            if not isinstance(self.outputs, dict):
+                raise ValueError(
+                    f"outputs must be a mapping (dict); got "
+                    f"{type(self.outputs).__name__}."
+                )
+            return self
+        if isinstance(self.outputs, entry.outputs_model):
+            return self
+        raw = self.outputs if self.outputs is not None else {}
+        if not isinstance(raw, dict):
+            raise ValueError(
+                f"outputs must be a mapping (dict) of output keys for "
+                f"model.family {self.model.family!r}, got "
+                f"{type(raw).__name__}."
+            )
+        self.outputs = entry.outputs_model.model_validate(raw)
         return self
 
     def to_canonical_yaml(self) -> str:

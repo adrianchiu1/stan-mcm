@@ -16,7 +16,7 @@ from typing import Type
 from pydantic import BaseModel
 
 from specs.schema.local_level import LocalLevelOptions
-from specs.schema.lw_sv import LwSvOptions
+from specs.schema.lw_sv import LwSvOptions, LwSvOutputs
 
 
 @dataclass(frozen=True)
@@ -27,13 +27,19 @@ class FamilyEntry:
     - ``template``: filename under ``stan/templates/`` rendered for this
       family.
     - ``required_mapping``: keys that must be present in ``data.mapping``
-      for this family (e.g. ``("y",)`` for local_level; LW-SV will need
+      for this family (e.g. ``("y",)`` for local_level; LW-SV needs
       ``("y", "pi", "r")``).
+    - ``outputs_model``: Pydantic model validating ``outputs`` (S4,
+      lw-sv-spec.md §2.3/§3), or ``None`` if the family has no typed
+      output-module config yet (``outputs`` then stays the free-form dict
+      ``RunSpec`` declares -- ``local_level`` has no output modules to
+      configure).
     """
 
     options_model: Type[BaseModel]
     template: str
     required_mapping: tuple[str, ...]
+    outputs_model: Type[BaseModel] | None = None
 
 
 FAMILY_REGISTRY: dict[str, FamilyEntry] = {
@@ -46,6 +52,7 @@ FAMILY_REGISTRY: dict[str, FamilyEntry] = {
         options_model=LwSvOptions,
         template="lw_sv.stan.j2",
         required_mapping=("y", "pi", "r"),
+        outputs_model=LwSvOutputs,
     ),
 }
 
