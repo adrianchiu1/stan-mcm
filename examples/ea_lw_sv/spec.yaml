@@ -1,0 +1,24 @@
+# Euro Area Laubach-Williams example -- S2 render: LW WITHOUT SV.
+# Data derived from the NY Fed workbook's "EA input data" sheet by
+# make_data.py (1971Q1-2019Q4; first four quarters are pre-sample lags, so
+# estimation covers 1972Q1-2019Q4 -- HLW's own EA estimation start, ending
+# before COVID because the S2 model has no COVID-adjustment machinery).
+model:
+  family: lw_sv
+  options:
+    sv_shocks: []
+    estimate_c: false
+data:
+  file: data/ea_quarterly.csv
+  date_column: date
+  mapping: { y: lgdp100, pi: core_infl_ann, r: real_rate }
+  sample: { start: null, end: null }
+priors: { }
+sampler:
+  chains: 4
+  warmup: 1500
+  sampling: 1500
+  adapt_delta: 0.95
+  max_treedepth: 12
+  seed: 20260813
+outputs: { }

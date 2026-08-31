@@ -16,6 +16,7 @@ from typing import Type
 from pydantic import BaseModel
 
 from specs.schema.local_level import LocalLevelOptions
+from specs.schema.lw_sv import LwSvOptions
 
 
 @dataclass(frozen=True)
@@ -40,6 +41,11 @@ FAMILY_REGISTRY: dict[str, FamilyEntry] = {
         options_model=LocalLevelOptions,
         template="local_level.stan.j2",
         required_mapping=("y",),
+    ),
+    "lw_sv": FamilyEntry(
+        options_model=LwSvOptions,
+        template="lw_sv.stan.j2",
+        required_mapping=("y", "pi", "r"),
     ),
 }
 

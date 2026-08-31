@@ -32,6 +32,7 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TEMPLATES_DIR = REPO_ROOT / "stan" / "templates"
+STAN_DIR = REPO_ROOT / "stan"  # loader root for {% include "functions/..." %}
 CACHE_ROOT = REPO_ROOT / ".mtk_cache" / "stan"
 
 PINNED_CMDSTAN_VERSION = "2.36.0"
@@ -74,8 +75,14 @@ def get_cmdstan_version() -> str:
 
 
 def _jinja_env() -> Environment:
+    # Two loader roots: template names resolve under stan/templates/; the
+    # shared Stan functions library is pulled in with
+    # {% include "functions/<name>.stan" %}, resolving under stan/. Included
+    # this way (rather than Stan's own #include) so the rendered source is
+    # fully self-contained -- the compile cache and the run-identity hash
+    # both see the complete program text, function bodies included.
     return Environment(
-        loader=FileSystemLoader(str(TEMPLATES_DIR)),
+        loader=FileSystemLoader([str(TEMPLATES_DIR), str(STAN_DIR)]),
         undefined=StrictUndefined,  # a missing context var is a hard error, not blank output
         trim_blocks=True,
         lstrip_blocks=True,

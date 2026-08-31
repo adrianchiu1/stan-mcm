@@ -155,6 +155,15 @@ parameters (`output/us_2017_parameters.csv`) + one-sided output
 (`output/us_2017_smoothed.csv`, otherwise unavailable). Ready for S2 to
 build G5a against.
 
+**S2 addendum (2026-08-31):** the fixture also carries the stage-3 filter's
+exact initial conditions (`output/us_2017_xi00.csv`, `us_2017_P00.csv`),
+dumped verbatim from the R run because `P.00` is the product of
+`calculate.covariance.R`'s inner MLE optimization and cannot be re-derived
+faithfully outside R — see the fixture README and DECISIONS.md 2026-08-31.
+The regeneration that added them reproduced every previously committed
+output CSV byte-identically. G5a is now implemented against this oracle
+(`tests/test_g5a_hlw_replication.py`) and passes at ~1e-12.
+
 ## Bottom line for S1
 
 S1's acceptance test (`mtk run examples/toy/spec.yaml` on a synthetic

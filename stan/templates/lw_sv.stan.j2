@@ -1,0 +1,76 @@
+// lw_sv.stan -- Laubach-Williams model, rendered from lw_sv.stan.j2.
+//
+// S2 RENDER: the no-SV variant (model.options.sv_shocks == []). Constant
+// IS/PC shock scales sigma_is/sigma_pc stand in for the SV paths; S3 adds
+// the non-centered SV block to THIS template (spec §7's staged build: S2 ->
+// S3 grow one file, not two divergent ones).
+//
+// Rao-Blackwellized likelihood (spec §2.1): the linear states (y*, g, z and
+// lags) are marginalized by the Kalman filter in the model block; Stan
+// samples only the static parameters.
+//
+// All family-specific structure is stamped at render time (spec §2.3): the
+// priors below come from specs/schema/lw_sv.py DEFAULT_PRIORS merged with
+// any per-run overrides in the spec's `priors:` block; c is stamped as a
+// constant ({{ c }}) because estimate_c is false in S2.
+//
+// The initial state (xi00, P00) arrives as data, built by
+// macrotoolkit.smoother.default_initial_state from spec §1.6's
+// initial-state priors (y*_0 anchored at the first observation) -- spec
+// §2.2: the KF takes the initial mean/cov explicitly.
+
+functions {
+{% include "functions/ssm_matrices_lw.stan" %}
+{% include "functions/kalman_loglik_tv.stan" %}
+}
+
+data {
+  int<lower=1> T;
+  matrix[T, 2] yobs;        // [y_t (100*ln GDP), pi_t (annualized q/q %)]
+  matrix[T, 6] x;           // [y_{t-1}, y_{t-2}, r_{t-1}, r_{t-2}, pi_{t-1}, mean(pi_{t-2..t-4})]
+  vector[7] xi00;           // initial state mean xi_{0|0}
+  matrix[7, 7] P00;         // initial state covariance P_{0|0}
+}
+
+transformed data {
+  matrix[7, 7] F = lw_F();  // parameter-free; build once
+  real c = {{ c }};         // r* = c*g + z loading (spec §1.3; fixed, estimate_c: false)
+}
+
+parameters {
+  real a1;                          // gap AR(1) coefficient
+  real a2;                          // gap AR(2) coefficient
+  real<upper=0> a_r;                // IS slope; sign identification via support
+  real<lower=0, upper=1> b_pi;      // weight on first inflation lag
+  real<lower=0> b_y;                // Phillips slope; sign identification via support
+  real<lower=0> sigma_ystar;        // potential level shock scale
+  real<lower=0> sigma_g;            // trend growth shock scale (annualized) -- pile-up control prior
+  real<lower=0> sigma_z;            // z shock scale -- pile-up control prior
+  real<lower=0> sigma_is;           // constant IS shock scale (no-SV variant)
+  real<lower=0> sigma_pc;           // constant PC shock scale (no-SV variant)
+}
+
+model {
+  // Priors (stamped from specs/schema/lw_sv.py defaults + per-run overrides).
+  // Truncations are carried by the parameter constraints above; Stan
+  // renormalizes automatically for fixed truncation bounds.
+  a1 ~ normal({{ priors.a1.mu }}, {{ priors.a1.sd }});
+  a2 ~ normal({{ priors.a2.mu }}, {{ priors.a2.sd }});
+  a_r ~ normal({{ priors.a_r.mu }}, {{ priors.a_r.sd }});
+  b_pi ~ beta({{ priors.b_pi.a }}, {{ priors.b_pi.b }});
+  b_y ~ normal({{ priors.b_y.mu }}, {{ priors.b_y.sd }});
+  sigma_ystar ~ normal(0, {{ priors.sigma_ystar.sd }});  // Half-N via <lower=0>
+  sigma_g ~ normal(0, {{ priors.sigma_g.sd }});          // Half-N via <lower=0>
+  sigma_z ~ normal(0, {{ priors.sigma_z.sd }});          // Half-N via <lower=0>
+  sigma_is ~ normal(0, {{ priors.sigma_is.sd }});        // Half-N via <lower=0>
+  sigma_pc ~ normal(0, {{ priors.sigma_pc.sd }});        // Half-N via <lower=0>
+
+  // Marginal likelihood via the Kalman filter.
+  target += kalman_loglik(yobs, x,
+                          F,
+                          lw_Q(sigma_ystar, sigma_g, sigma_z),
+                          lw_A(a1, a2, a_r, b_pi, b_y),
+                          lw_Z(a1, a2, a_r, b_y, c),
+                          lw_R(sigma_is, sigma_pc),
+                          xi00, P00);
+}

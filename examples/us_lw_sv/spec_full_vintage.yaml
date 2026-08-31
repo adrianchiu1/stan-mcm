@@ -1,0 +1,24 @@
+# US LW on the FULL latest vintage (1960Q1-2026Q1, COVID quarters included).
+# EXPERIMENT, not the reference example: the S2 model has none of HLW's 2023
+# COVID machinery (covid.ind dummy, kappa variance scaling), so the constant
+# shock scales absorb 2020 -- read results with that in mind. Estimation
+# covers 1961Q1-2026Q1 (first 4 rows are lag quarters).
+model:
+  family: lw_sv
+  options:
+    sv_shocks: []
+    estimate_c: false
+data:
+  file: data/us_quarterly_full.csv
+  date_column: date
+  mapping: { y: lgdp100, pi: core_pce_ann, r: real_rate }
+  sample: { start: null, end: null }
+priors: { }
+sampler:
+  chains: 4
+  warmup: 1500
+  sampling: 1500
+  adapt_delta: 0.95
+  max_treedepth: 12
+  seed: 20260813
+outputs: { }

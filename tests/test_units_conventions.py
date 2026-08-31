@@ -67,6 +67,46 @@ def test_g_is_annualized_transition_uses_g_over_4() -> None:
     assert _quarterly_increment(g_annual) != pytest.approx(wrong_unscaled)
 
 
+def test_production_transition_matrix_applies_g_over_4() -> None:
+    """S2 rewiring: the same convention checked against the real
+    `macrotoolkit.smoother.build_lw_matrices`. The transition applied to a
+    clean state (y* = 100, g = 2.8 annualized, z = 0.4, no shocks) must move
+    y* by exactly g/4 = 0.7 -- and the g and z states themselves are carried
+    unscaled (g stays annualized everywhere; only the y* step divides by 4).
+    """
+    import numpy as np
+
+    from macrotoolkit.smoother import build_lw_matrices
+
+    params = {
+        "a1": 1.2, "a2": -0.4, "a_r": -0.1, "b_pi": 0.8, "b_y": 0.15,
+        "sigma_ystar": 0.4, "sigma_g": 0.12, "sigma_z": 0.08,
+        "sigma_is": 0.5, "sigma_pc": 0.8,
+    }
+    F, Q, A, Z, R = build_lw_matrices(params, c=1.0)
+
+    g_annual = 2.8
+    xi = np.array([100.0, 99.3, 98.6, g_annual, g_annual, 0.4, 0.4])
+    xi_next = F @ xi
+
+    assert xi_next[0] == pytest.approx(100.0 + _quarterly_increment(g_annual))  # y* += g/4
+    assert xi_next[0] != pytest.approx(100.0 + g_annual)  # the omitted-/4 bug
+    assert xi_next[3] == pytest.approx(g_annual)  # g itself carried unscaled
+    assert xi_next[5] == pytest.approx(0.4)  # z carried unscaled
+
+    # r* = c*g + z with g annualized needs NO 4x factor (spec §1.1): the
+    # IS-curve loading on the lagged g states is -(c*a_r/2), same magnitude
+    # as on the z states -- a 4x mismatch between them is the bug this pins.
+    assert Z[0, 3] == pytest.approx(-params["a_r"] / 2.0)
+    assert Z[0, 5] == pytest.approx(-params["a_r"] / 2.0)
+
+    # And the Q cross-term carries the /4 consistently: the y* shock is
+    # eps_ystar + eps_g/4, so cov(y* shock, g shock) = sigma_g^2 / 4 and
+    # var(y* shock) picks up sigma_g^2 / 16.
+    assert Q[0, 3] == pytest.approx(params["sigma_g"] ** 2 / 4.0)
+    assert Q[0, 0] == pytest.approx(params["sigma_ystar"] ** 2 + params["sigma_g"] ** 2 / 16.0)
+
+
 # ---------------------------------------------------------------------------
 # Convention 2: h is log-variance; sd = exp(h/2)
 # ---------------------------------------------------------------------------

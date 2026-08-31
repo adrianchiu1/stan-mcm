@@ -1,0 +1,23 @@
+# US Laubach-Williams example -- S2 render: LW WITHOUT SV (sv_shocks: []).
+# Data derived from the HLW fixture workbook by make_data.py (1960Q1-2019Q2;
+# the first four quarters are pre-sample lags, so estimation covers
+# 1961Q1-2019Q2, matching the G5a oracle's window).
+model:
+  family: lw_sv
+  options:
+    sv_shocks: []        # S3 flips this on
+    estimate_c: false
+data:
+  file: data/us_quarterly.csv
+  date_column: date
+  mapping: { y: lgdp100, pi: core_pce_ann, r: real_rate }
+  sample: { start: null, end: null }   # file is already the exact window
+priors: { }              # empty = defaults from lw-sv-spec.md §1.6
+sampler:
+  chains: 4
+  warmup: 1500
+  sampling: 1500
+  adapt_delta: 0.95
+  max_treedepth: 12
+  seed: 20260813
+outputs: { }             # output modules are S4 scope

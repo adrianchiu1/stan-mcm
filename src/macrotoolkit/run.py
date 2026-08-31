@@ -87,16 +87,80 @@ def compute_run_id(spec: RunSpec, data_hash: str, stan_hash: str, cmdstan_versio
 
 def build_stan_data(family_name: str, df: pd.DataFrame) -> dict:
     """Map the loaded/mapped DataFrame to the Stan `data` block for a given
-    family. S1 only registers `local_level`; when `lw_sv` (or any other
-    family) is added, extend this dispatch (and/or move it onto
-    `FamilyEntry` in `specs/schema/__init__.py` as a callable) rather than
-    guessing its generalized shape now.
+    family.
+
+    `lw_sv` convention (HLW's own, spec §1.2's lag structure): the loaded
+    data must INCLUDE four pre-sample lag quarters -- the first estimation
+    quarter is row 5 of the trimmed data, because the Phillips curve needs
+    pi_{t-4}. `data.sample.start` in the spec therefore points at the first
+    LAG quarter, four quarters before the first estimated one.
     """
     if family_name == "local_level":
         return {"T": int(len(df)), "y": df["y"].tolist()}
+    if family_name == "lw_sv":
+        from macrotoolkit.smoother import build_lw_regressors, default_initial_state
+
+        if len(df) < 5:
+            raise ValueError(
+                f"lw_sv needs at least 5 data rows (4 pre-sample lag "
+                f"quarters + 1 estimation quarter); the trimmed data has "
+                f"{len(df)}. Note data.sample.start must include the 4 lag "
+                f"quarters before the first estimation quarter."
+            )
+        yobs, x = build_lw_regressors(
+            df["y"].to_numpy(), df["pi"].to_numpy(), df["r"].to_numpy()
+        )
+        xi00, P00 = default_initial_state(float(df["y"].to_numpy()[4]))
+        return {
+            "T": int(yobs.shape[0]),
+            "yobs": yobs,
+            "x": x,
+            "xi00": xi00,
+            "P00": P00,
+        }
     raise NotImplementedError(
         f"build_stan_data has no mapping for model.family {family_name!r}. "
-        f"Only 'local_level' is implemented in S1."
+        f"Implemented: 'local_level', 'lw_sv'."
+    )
+
+
+def build_render_context(spec: RunSpec) -> dict:
+    """Template context for a family's Jinja render: family options plus
+    spec-derived constants. `lw_sv` stamps c and the resolved priors
+    (specs/schema/lw_sv.py defaults, overridden per key by the spec's
+    `priors:` block -- unknown prior names are a hard error, so a typo'd
+    override never silently falls back to the default)."""
+    if spec.model.family == "local_level":
+        return {}
+    if spec.model.family == "lw_sv":
+        from specs.schema.lw_sv import DEFAULT_PRIORS
+
+        priors = {name: dict(entry) for name, entry in DEFAULT_PRIORS.items()}
+        for name, override in spec.priors.items():
+            if name not in priors:
+                raise ValueError(
+                    f"priors[{name!r}] is not a parameter of the lw_sv "
+                    f"family. Valid names: {sorted(priors)}."
+                )
+            if not isinstance(override, dict):
+                raise ValueError(
+                    f"priors[{name!r}] must be a mapping of prior fields to "
+                    f"override (e.g. {{sd: 0.5}}), got {override!r}."
+                )
+            merged = {**priors[name], **override}
+            unknown = set(merged) - set(priors[name])
+            if unknown:
+                raise ValueError(
+                    f"priors[{name!r}] has unknown field(s) {sorted(unknown)}; "
+                    f"the default entry's fields are {sorted(priors[name])}."
+                )
+            priors[name] = merged
+        # estimate_c is validated false in S2 (specs/schema/lw_sv.py), so c
+        # is always the spec §1.3 default here.
+        return {"c": 1.0, "priors": priors}
+    raise NotImplementedError(
+        f"build_render_context has no context for model.family "
+        f"{spec.model.family!r}. Implemented: 'local_level', 'lw_sv'."
     )
 
 
@@ -196,7 +260,7 @@ def run(spec_path: str | Path, runs_root: str | Path | None = None) -> RunResult
 
     df, raw_hash, data_path = load_data(spec, spec_path)
 
-    context: dict = {}  # local_level's template takes no options; future families pass model.options + spec-derived constants here
+    context = build_render_context(spec)
     source = render_stan_source(family.template, context)
     src_hash = stan_source_hash(source)
     cmdstan_version = get_cmdstan_version()
@@ -264,7 +328,8 @@ def run(spec_path: str | Path, runs_root: str | Path | None = None) -> RunResult
             seed=spec.sampler.seed,
         )
 
-        idata = az.from_cmdstanpy(posterior=fit, observed_data={"y": stan_data["y"]})
+        observed_key = "yobs" if "yobs" in stan_data else "y"
+        idata = az.from_cmdstanpy(posterior=fit, observed_data={observed_key: stan_data[observed_key]})
         draws_path = run_dir / "draws.nc"
         idata.to_netcdf(str(draws_path))
         logger.info("Wrote %s", draws_path)
