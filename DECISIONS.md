@@ -162,3 +162,38 @@ Newest first.
   relation to the SV parameters, no identification work. This was the
   last blocking input — S2 implementation can start. All three of
   `HANDOFF.md`'s open questions are now resolved.
+
+- **2026-08-31 — G5a initialization: dump HLW's exact `xi.00`/`P.00` from
+  the R run rather than re-deriving them in Python.** Reading
+  `calculate.covariance.R` revealed `P.00` is the output of a *full inner
+  nloptr L-BFGS optimization* (starting from `0.2*I`, with numerical
+  gradients) — reproducing that trajectory bit-for-bit outside R is not
+  realistic, and spec §2.2 requires the KF to take the initial mean/cov
+  explicitly anyway. `run_us_2017.R` extended to write
+  `output/us_2017_xi00.csv` / `us_2017_P00.csv`; R re-installed in this
+  container per the documented apt + github.com/cran/tis procedure, and the
+  regeneration reproduced every previously committed fixture CSV
+  **byte-identically** (determinism confirmed). The G5a tests convert these
+  quarterly-g initial conditions to the spec's annualized-g state units with
+  `S = diag(1,1,1,4,4,1,1)`.
+
+- **2026-08-31 — CmdStan output precision: any test comparing Stan-computed
+  reals against Python must pass `sig_figs=18` to `model.sample`.** CmdStan
+  writes draws to CSV with 6 significant figures by default; on G1's
+  log-likelihoods (some |ll| ~ 5e4) that alone produced ~3e-2 apparent
+  "mismatch" — three orders of magnitude over the 1e-8 gate — while the
+  actual Stan-vs-Python agreement is ~4e-12. Recorded because the symptom
+  (G1 "fails" with a diff that scales with |loglik|) looks exactly like a
+  real numerics bug and invites a wild-goose chase through the KF algebra.
+
+- **2026-08-31 — S2 gates implemented and green: G1 (max diff 3.6e-12 vs
+  1e-8 gate over 50 prior draws), G5a (loglik ~6e-12, all four
+  filtered+smoothed series ~2e-12 vs the oracle, asserted at 1e-8), plus a
+  term-for-term matrix cross-check against `unpack.parameters.stage3.R`.**
+  The lw_sv state keeps g annualized (spec convention) — verified an exact
+  unit transform of HLW's quarterly-g system, so no tolerance is consumed
+  by the convention difference. G2's "~90% coverage / no systematic bias"
+  is operationalized in `tests/test_g2_parameter_recovery.py` (pooled
+  coverage in [0.80, 0.97] over 200 cells, per-parameter floor 0.6,
+  3-sigma t-test on sigma_g/sigma_z posterior-median errors), with the
+  rationale in its docstring.
