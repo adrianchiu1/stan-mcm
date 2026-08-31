@@ -395,6 +395,8 @@ Newest first.
   regenerated records; only a *future* re-run of those specs would pick
   up a new hash.
 
+- **2026-08-31 — S4 open question 2 (smoother-draw thinning) measured: `smoother_draws: all` stays the default, no thinning needed.** Benchmarked the DK simulation smoother's trend-cycle pass (`macrotoolkit.results_lw.compute_trend_cycle_draws`) on the regenerated `spec_sv.yaml` run (`runs/70ad47166eaf`, 4 chains x 1500 = 6,000 draws, T=234, SV on): **39.5 s total (~6.6 ms/draw)**, well under the ~2-minute concern threshold from `plans/S4-plan.md` — despite the two-pass DK algorithm (chosen over FFBS) roughly doubling the per-draw cost versus the original FFBS estimate. No change to the schema default (`outputs.smoother_draws: all`) or the example specs. Historical-decomposition's own per-draw cost (Part B) is comparable order-of-magnitude (same DK smoother call plus O(T) arithmetic) and expected to stay well within budget too; re-benchmark if `plots.py`/`report.py` (aggregating across all draws for every output module) turns out materially slower in practice.
+
 - **2026-08-31 — S3 COVID payoff exhibit delivered: run `9d10bcf32a40`
   (full vintage through 2026Q1, SV on, no hand-set COVID machinery).**
   Diagnostics PASS (0 divergences, 0 treedepth hits, max R-hat 1.005, min
