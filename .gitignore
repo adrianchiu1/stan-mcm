@@ -1,0 +1,14 @@
+runs/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.cmdstan/
+*.o
+*.hpp
+.pytest_cache/
+.ipynb_checkpoints/
+# render/compile cache: rendered .stan sources + compiled CmdStan executables,
+# keyed by source hash -- never checked in, always reproducible from the
+# template + spec.
+.mtk_cache/

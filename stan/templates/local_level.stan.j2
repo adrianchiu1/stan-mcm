@@ -1,0 +1,46 @@
+// local_level.stan -- S1 toy model, rendered from local_level.stan.j2.
+//
+// y_t   = mu_t + eps_t,      eps_t ~ N(0, sigma_obs^2)
+// mu_t  = mu_{t-1} + eta_t,  eta_t ~ N(0, sigma_level^2)
+// mu_1  ~ N(y_1, 10)
+// sigma_obs, sigma_level ~ Half-N(0, 1)
+//
+// Deliberately direct-samples the state path mu[1..T] as Stan parameters
+// (non-centered random walk), rather than marginalizing with a Kalman
+// filter -- the shared KF library (`kalman_loglik_tv.stan`) is S2 scope,
+// built for the LW model's time-varying-Q needs. See plans/S1-plan.md.
+//
+// This template has no runtime branching: T is fixed data, there are no
+// family options to stamp in for `local_level` (see
+// specs/schema/local_level.py). Kept as a Jinja template (not a plain
+// .stan file) so the render/compile-cache plumbing is exercised uniformly
+// across families, per lw-sv-spec.md §2.3.
+
+data {
+  int<lower=1> T;
+  vector[T] y;
+}
+
+parameters {
+  real<lower=0> sigma_obs;
+  real<lower=0> sigma_level;
+  real mu1_raw;               // mu[1] ~ N(y[1], 10), non-centered
+  vector[T - 1] eta_raw;      // standard-normal innovations, non-centered
+}
+
+transformed parameters {
+  vector[T] mu;
+  mu[1] = y[1] + 10 * mu1_raw;
+  for (t in 2:T) {
+    mu[t] = mu[t - 1] + sigma_level * eta_raw[t - 1];
+  }
+}
+
+model {
+  sigma_obs ~ normal(0, 1);    // Half-N(0,1) via lower=0 constraint above
+  sigma_level ~ normal(0, 1);  // Half-N(0,1) via lower=0 constraint above
+  mu1_raw ~ std_normal();
+  eta_raw ~ std_normal();
+
+  y ~ normal(mu, sigma_obs);
+}

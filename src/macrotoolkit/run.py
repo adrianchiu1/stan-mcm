@@ -1,0 +1,286 @@
+"""Run identity hashing, CmdStanPy execution, and the immutable run store.
+
+Run identity = SHA-256 over (canonicalized spec YAML, data file hash,
+rendered Stan source hash, CmdStan version) -- lw-sv-spec.md §2.3.
+"Canonicalized spec" means the spec parsed through the Pydantic `RunSpec`
+model and re-serialized with sorted keys (`RunSpec.to_canonical_yaml`), so
+YAML formatting, comments, or key order never change a run's hash -- only
+the validated *meaning* of the spec does.
+
+Run store layout: `runs/<hash12>/` containing `spec.yaml` (canonical form),
+`data.snapshot.csv` (byte-identical copy of the source CSV that was
+hashed), `draws.nc` (ArviZ InferenceData), `diagnostics.json`, `log.txt`,
+and a `_SUCCESS` marker written last, once every artifact above has been
+written successfully.
+
+Immutability: run directories are never mutated once written.
+  - If `runs/<hash12>/` already exists *with* `_SUCCESS`: this is an
+    idempotent no-op -- the identical spec+data was already run
+    successfully; nothing is rewritten.
+  - If it exists *without* `_SUCCESS`: a previous run crashed or was
+    interrupted partway through. We raise, telling the human to remove the
+    directory manually after inspecting `log.txt` -- we never silently
+    overwrite a partial run.
+
+Diagnostics scope (S1 placeholder -- S4 formalizes this per lw-sv-spec.md
+§4): divergence count, max-treedepth-hit count, E-BFMI per chain, and
+R-hat/bulk-ESS/tail-ESS per parameter (worst-case across each parameter's
+elements, since a vector-valued Stan parameter like `mu[1..T]` would
+otherwise blow up the JSON with per-index detail). A PASS/WARN/FAIL verdict
+is derived from fixed thresholds documented at `compute_diagnostics`.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+import shutil
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+
+import arviz as az
+import pandas as pd
+
+from specs.schema import get_family
+from specs.schema.base import RunSpec, SamplerSpec, load_spec
+
+from macrotoolkit.data import load_data
+from macrotoolkit.render import compile_model, get_cmdstan_version, render_stan_source, stan_source_hash
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+# --- diagnostics thresholds (S1 placeholder; document rationale, don't hide it) ---
+# R-hat: Vehtari et al. (2021) rank-normalized R-hat convention (warn > 1.01);
+#   > 1.05 is a much larger red flag, used here as the FAIL line.
+# ESS: same paper's rule of thumb that bulk/tail ESS >= 400 is needed for
+#   reliable posterior summaries; < 100 is treated as an outright FAIL.
+# E-BFMI: Stan's own diagnostic warning threshold is 0.3; < 0.2 is used here
+#   as the FAIL line (a materially worse energy transition).
+RHAT_WARN = 1.01
+RHAT_FAIL = 1.05
+ESS_WARN = 400
+ESS_FAIL = 100
+EBFMI_WARN = 0.3
+EBFMI_FAIL = 0.2
+
+
+@dataclass
+class RunResult:
+    run_id: str
+    run_dir: Path
+    is_new: bool
+    verdict: str | None = None
+
+
+def compute_run_id(spec: RunSpec, data_hash: str, stan_hash: str, cmdstan_version: str) -> tuple[str, str]:
+    """Returns (full_hex_digest, hash12) for the run identity."""
+    payload = {
+        "spec": spec.to_canonical_yaml(),
+        "data_sha256": data_hash,
+        "stan_source_sha256": stan_hash,
+        "cmdstan_version": cmdstan_version,
+    }
+    full = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
+    return full, full[:12]
+
+
+def build_stan_data(family_name: str, df: pd.DataFrame) -> dict:
+    """Map the loaded/mapped DataFrame to the Stan `data` block for a given
+    family. S1 only registers `local_level`; when `lw_sv` (or any other
+    family) is added, extend this dispatch (and/or move it onto
+    `FamilyEntry` in `specs/schema/__init__.py` as a callable) rather than
+    guessing its generalized shape now.
+    """
+    if family_name == "local_level":
+        return {"T": int(len(df)), "y": df["y"].tolist()}
+    raise NotImplementedError(
+        f"build_stan_data has no mapping for model.family {family_name!r}. "
+        f"Only 'local_level' is implemented in S1."
+    )
+
+
+def compute_diagnostics(idata: az.InferenceData, sampler_spec: SamplerSpec) -> dict:
+    """Compute the diagnostics summary + PASS/WARN/FAIL verdict for a
+    completed run. See module docstring for the threshold rationale."""
+    ss = idata.sample_stats
+    n_divergent = int(ss["diverging"].sum().item())
+    treedepth_hits = int((ss["tree_depth"] >= sampler_spec.max_treedepth).sum().item())
+
+    ebfmi_per_chain = [float(x) for x in az.bfmi(idata)]
+    ebfmi_min = min(ebfmi_per_chain) if ebfmi_per_chain else float("nan")
+
+    rhat_ds = az.rhat(idata)
+    ess_bulk_ds = az.ess(idata, method="bulk")
+    ess_tail_ds = az.ess(idata, method="tail")
+
+    params: dict[str, dict] = {}
+    for var in rhat_ds.data_vars:
+        params[var] = {
+            "rhat_max": float(rhat_ds[var].max().values),
+            "ess_bulk_min": float(ess_bulk_ds[var].min().values),
+            "ess_tail_min": float(ess_tail_ds[var].min().values),
+        }
+
+    rhat_max_overall = max((p["rhat_max"] for p in params.values()), default=float("nan"))
+    ess_bulk_min_overall = min((p["ess_bulk_min"] for p in params.values()), default=float("nan"))
+    ess_tail_min_overall = min((p["ess_tail_min"] for p in params.values()), default=float("nan"))
+
+    reasons: list[str] = []
+    verdict = "PASS"
+
+    def escalate(level: str, reason: str) -> None:
+        nonlocal verdict
+        reasons.append(reason)
+        if level == "FAIL":
+            verdict = "FAIL"
+        elif level == "WARN" and verdict != "FAIL":
+            verdict = "WARN"
+
+    if n_divergent > 0:
+        escalate("FAIL", f"{n_divergent} divergent transition(s)")
+    if treedepth_hits > 0:
+        escalate("WARN", f"{treedepth_hits} iteration(s) hit max_treedepth={sampler_spec.max_treedepth}")
+    if ebfmi_min < EBFMI_FAIL:
+        escalate("FAIL", f"E-BFMI {ebfmi_min:.3f} < {EBFMI_FAIL} on at least one chain (per-chain: {ebfmi_per_chain})")
+    elif ebfmi_min < EBFMI_WARN:
+        escalate("WARN", f"E-BFMI {ebfmi_min:.3f} < {EBFMI_WARN} on at least one chain (per-chain: {ebfmi_per_chain})")
+    if rhat_max_overall > RHAT_FAIL:
+        escalate("FAIL", f"max R-hat {rhat_max_overall:.4f} > {RHAT_FAIL}")
+    elif rhat_max_overall > RHAT_WARN:
+        escalate("WARN", f"max R-hat {rhat_max_overall:.4f} > {RHAT_WARN}")
+    if ess_bulk_min_overall < ESS_FAIL or ess_tail_min_overall < ESS_FAIL:
+        escalate("FAIL", f"min bulk/tail ESS ({ess_bulk_min_overall:.0f}/{ess_tail_min_overall:.0f}) < {ESS_FAIL}")
+    elif ess_bulk_min_overall < ESS_WARN or ess_tail_min_overall < ESS_WARN:
+        escalate("WARN", f"min bulk/tail ESS ({ess_bulk_min_overall:.0f}/{ess_tail_min_overall:.0f}) < {ESS_WARN}")
+
+    if not reasons:
+        reasons.append("no divergences, treedepth hits, low E-BFMI, high R-hat, or low ESS detected")
+
+    return {
+        "verdict": verdict,
+        "reasons": reasons,
+        "divergences": n_divergent,
+        "max_treedepth_hits": treedepth_hits,
+        "max_treedepth_config": sampler_spec.max_treedepth,
+        "e_bfmi_per_chain": ebfmi_per_chain,
+        "rhat_max": rhat_max_overall,
+        "ess_bulk_min": ess_bulk_min_overall,
+        "ess_tail_min": ess_tail_min_overall,
+        "params": params,
+        "thresholds": {
+            "rhat_warn": RHAT_WARN,
+            "rhat_fail": RHAT_FAIL,
+            "ess_warn": ESS_WARN,
+            "ess_fail": ESS_FAIL,
+            "ebfmi_warn": EBFMI_WARN,
+            "ebfmi_fail": EBFMI_FAIL,
+            "note": (
+                "S1 placeholder thresholds (Vehtari et al. 2021 "
+                "rank-normalized R-hat/ESS conventions; Stan's own 0.3 "
+                "E-BFMI warning heuristic). S4 formalizes diagnostics per "
+                "lw-sv-spec.md §4."
+            ),
+        },
+    }
+
+
+def run(spec_path: str | Path, runs_root: str | Path | None = None) -> RunResult:
+    """Execute (or idempotently no-op) the run described by the spec at
+    `spec_path`. Returns a `RunResult`."""
+    spec_path = Path(spec_path).resolve()
+    runs_root_path = Path(runs_root).resolve() if runs_root is not None else REPO_ROOT / "runs"
+
+    spec = load_spec(str(spec_path))
+    family = get_family(spec.model.family)
+
+    df, raw_hash, data_path = load_data(spec, spec_path)
+
+    context: dict = {}  # local_level's template takes no options; future families pass model.options + spec-derived constants here
+    source = render_stan_source(family.template, context)
+    src_hash = stan_source_hash(source)
+    cmdstan_version = get_cmdstan_version()
+
+    run_id_full, run_id = compute_run_id(spec, raw_hash, src_hash, cmdstan_version)
+    run_dir = runs_root_path / run_id
+    success_marker = run_dir / "_SUCCESS"
+
+    if run_dir.exists():
+        if success_marker.exists():
+            return RunResult(run_id=run_id, run_dir=run_dir, is_new=False)
+        raise RuntimeError(
+            f"Run directory {run_dir} already exists but has no _SUCCESS "
+            f"marker -- a previous run of this identical spec+data likely "
+            f"crashed or was interrupted partway through. Inspect "
+            f"{run_dir / 'log.txt'} if present, then remove {run_dir} "
+            f"manually before re-running. macrotoolkit never overwrites an "
+            f"existing run directory automatically."
+        )
+
+    run_dir.mkdir(parents=True)
+    log_path = run_dir / "log.txt"
+
+    logger = logging.getLogger(f"macrotoolkit.run.{run_id}")
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    file_handler = logging.FileHandler(log_path)
+    file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    logger.addHandler(file_handler)
+    cmdstanpy_logger = logging.getLogger("cmdstanpy")
+    cmdstanpy_logger.addHandler(file_handler)
+
+    try:
+        logger.info("Run id: %s (full digest: %s)", run_id, run_id_full)
+        logger.info("Spec file: %s", spec_path)
+        logger.info("Model family: %s", spec.model.family)
+        logger.info("Data file: %s (sha256=%s)", data_path, raw_hash)
+        logger.info("Rendered Stan source sha256: %s", src_hash)
+        logger.info("CmdStan version: %s", cmdstan_version)
+
+        (run_dir / "spec.yaml").write_text(spec.to_canonical_yaml())
+        shutil.copy2(data_path, run_dir / "data.snapshot.csv")
+
+        model, _ = compile_model(source, cmdstan_version)
+        logger.info("Compiled model executable: %s", model.exe_file)
+
+        stan_data = build_stan_data(spec.model.family, df)
+        logger.info(
+            "Sampling: chains=%d warmup=%d sampling=%d adapt_delta=%s max_treedepth=%d seed=%d",
+            spec.sampler.chains,
+            spec.sampler.warmup,
+            spec.sampler.sampling,
+            spec.sampler.adapt_delta,
+            spec.sampler.max_treedepth,
+            spec.sampler.seed,
+        )
+
+        fit = model.sample(
+            data=stan_data,
+            chains=spec.sampler.chains,
+            iter_warmup=spec.sampler.warmup,
+            iter_sampling=spec.sampler.sampling,
+            adapt_delta=spec.sampler.adapt_delta,
+            max_treedepth=spec.sampler.max_treedepth,
+            seed=spec.sampler.seed,
+        )
+
+        idata = az.from_cmdstanpy(posterior=fit, observed_data={"y": stan_data["y"]})
+        draws_path = run_dir / "draws.nc"
+        idata.to_netcdf(str(draws_path))
+        logger.info("Wrote %s", draws_path)
+
+        diagnostics = compute_diagnostics(idata, spec.sampler)
+        (run_dir / "diagnostics.json").write_text(json.dumps(diagnostics, indent=2, sort_keys=True))
+        logger.info("Diagnostics verdict: %s (reasons: %s)", diagnostics["verdict"], diagnostics["reasons"])
+
+        success_marker.write_text(datetime.now(timezone.utc).isoformat() + "\n")
+        logger.info("Run complete: %s", run_dir)
+
+        return RunResult(run_id=run_id, run_dir=run_dir, is_new=True, verdict=diagnostics["verdict"])
+    except Exception:
+        logger.exception("Run failed")
+        raise
+    finally:
+        logger.removeHandler(file_handler)
+        cmdstanpy_logger.removeHandler(file_handler)
+        file_handler.close()
