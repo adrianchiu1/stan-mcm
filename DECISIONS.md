@@ -3,6 +3,32 @@
 One dated line per judgment call not fixed by the spec, with rationale.
 Newest first.
 
+- **2026-08-31 — S4 COMPLETE: DK smoother, four output modules, HTML
+  report; G6 green; report renders all figures from a real run (spec §7's
+  S4 acceptance test, met in full).** Full build-order record: DK
+  simulation smoother (`smoother.py` §5, literal two-pass Durbin-Koopman
+  per the user's resolved open question); `results_lw.py`'s four parts
+  (trend-cycle §3.1, historical decomposition §3.4 + gate G6, IRF matrix
+  §3.2, fan charts §3.3); `plots.py` (matplotlib figures for all four);
+  `report.py` + `mtk report <hash>` (one self-contained HTML report,
+  base64-embedded figures, zero external references). Two real numerics
+  bugs were found and fixed by the mandatory numerics-reviewer pass in the
+  fan-chart module before commit (full account in this file's other
+  2026-08-31 entries) — the review process worked exactly as intended: the
+  DK smoother, trend-cycle, HD/G6, and IRF machinery all passed review
+  clean on the first or second pass; the fan chart (the one genuinely NEW
+  piece of stochastic-simulation machinery in this stage, as opposed to
+  reuse of already-validated recursions) needed two rounds. Both S3
+  acceptance runs (`spec_sv.yaml`, `spec_sv_full_vintage.yaml`)
+  regenerated container-locally with PASS verdicts and 0 divergences,
+  reproducing S3's own diagnostics exactly; `examples/us_lw_sv/README.md`
+  records both plus the S4 report-generation summary. Fast suite:
+  112 (S3 baseline) -> 217 passed. `tests/test_render.py::test_no_sv_
+  render_is_byte_stable` untouched throughout -- no `stan/` file was
+  edited anywhere in S4, as the task brief anticipated. `HANDOFF.md`
+  rewritten for S5 (full SBC G3/G4, G5b Bayesian HLW tracking,
+  prior-sweep notebook, docs, per spec §7's S5 row).
+
 - **2026-08-13 — `pytest` is installed as a `uv tool` with the project's
   full dependency set + an editable `macrotoolkit` install, rather than
   relying on a project-local `.venv` someone must remember to activate.**

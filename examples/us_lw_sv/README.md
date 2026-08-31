@@ -102,3 +102,37 @@ min bulk/tail ESS 1779/917; contrast the no-SV EA run's marginal FAIL).
   a1/a2 = 1.26/−0.29, essentially the SV pre-COVID values 1.28/−0.31,
   instead of the no-SV collapse to 1.15. The absorption channel
   documented in STRESS-TESTS.md §3 is closed.
+
+## S4: DK simulation smoother, output modules, HTML report
+
+Spec §7's S4 row: "DK smoother; four output modules; HTML report | G6
+pass; report renders all figures from a real run." Both S3 runs above
+were regenerated container-locally against the S4 branch (same specs,
+same seeds) to build and validate the output modules against; both
+reproduced their S3 diagnostics exactly:
+
+| Run | Spec | Verdict | Divergences | Max R-hat | Min bulk/tail ESS |
+|---|---|---|---|---|---|
+| `70ad47166eaf` | `spec_sv.yaml` | PASS | 0 | 1.0045 | 2628 / 1620 |
+| `930459224ca0` | `spec_sv_full_vintage.yaml` | PASS | 0 | 1.0046 | 1779 / 917 |
+
+(New hashes vs S3's `70ad47166eaf`→same, `9d10bcf32a40`→`930459224ca0`:
+the full-vintage run's hash changed because S4 added a typed
+`outputs:` schema for `lw_sv` — DECISIONS.md's 2026-08-31 "typed outputs
+schema" entry — which changes what an empty `outputs: {}` canonicalizes
+to; `spec_sv.yaml` happened to already carry the same hash since it was
+regenerated before that schema change landed. Numerics are unchanged;
+this is a schema-precision improvement, not a re-estimation.)
+
+Gate G6 (HD reconstruction identity, exact to 1e-6 per period per draw)
+passes on both no-SV and SV synthetic parameter points
+(`tests/test_g6_hd_identity.py`). The S4 acceptance test
+(`tests/test_report.py`) runs `mtk report` against the real
+`70ad47166eaf` run end to end: `report.html` renders all four output
+modules (trend-cycle incl. the exp(h/2) volatility panel, the 5×5 IRF
+grid, 5 fan charts, 4 historical-decomposition charts) as one
+self-contained file (11 embedded images, zero external references) plus
+the diagnostics verdict and a parameter table. Generate it yourself with
+`mtk report <hash>`; the two run directories above each now have their
+own `runs/<hash>/report.html` (gitignored, regenerate via `mtk run` +
+`mtk report`).
