@@ -1,105 +1,111 @@
 # Handoff
 
-Status as of 2026-08-31 (end of session). **S2 is complete, green, merged
-to main, and externally benchmarked.** G1, G2, G5a pass; US and EA runs
-track HLW's published estimates (see `STRESS-TESTS.md` for the full
-benchmarking + COVID stress-test record, including the full-latest-vintage
-experiments). **The next stage is S3 — `plans/S3-plan.md` is the drafted
-plan of record**, including the empirical motivation the stress test
-supplied and the mandatory KF regression check.
+Status as of 2026-08-31 (end of S3 session). **S3 is complete and green on
+branch `claude/s3-stochastic-volatility-lw-z0vvmj`** (not yet merged to
+main; the user decides when/how to PR — the G3 commits lead the branch so
+they can be split into their own PR if wanted). Spec §7's S3 row — "Add
+non-centered SV block; retune (adapt_delta, priors) | G4-precursor: clean
+sampling on US data; G3 pass" — is met in full, with **no retuning
+needed** (default adapt_delta 0.95 sampled cleanly). S2's record is one
+section down; per-run detail lives in `examples/us_lw_sv/README.md`,
+decisions and traps in `DECISIONS.md` (2026-08-31 entries).
 
-## What passed
+## What S3 delivered (all green)
 
-**S0 (preflight).** PyPI and CmdStan both work in this environment (CmdStan
-needs `version=` pinned — `api.github.com` is blocked; see `PREFLIGHT.md`).
-HLW fixtures assembled: the genuine HLW (2017) replication code (matches
-`lw-sv-spec.md` term for term), real published data/parameters/estimates,
-and a self-derived, sanity-checked G5a oracle built by running HLW's own
-code ourselves (`tests/fixtures/hlw/derived/us_2017_reproduction/` — full
-detail in `FIXTURES.md`).
+- **G3 (SBC, no-SV)** — `tests/test_g3_sbc.py`, `slow`, 200 replications,
+  3h37m: per-parameter χ² uniformity p ∈ [0.073, 0.735] over all 10
+  parameters; 5/600,000 divergent draws. Ran with the a1/a2 prior
+  overridden to N(0.8, 0.1²)/N(−0.25, 0.05²) through the PRODUCTION
+  override path — the production defaults put ~1/3 prior mass on
+  non-stationary gap dynamics whose simulated data destroys the KF in
+  float64 (measured; see the DECISIONS entry). SBC of the production
+  a1/a2 values themselves is impossible with a plain KF; recorded limit.
+- **KF generalized to time-varying R_t** — `kalman_loglik` takes an array
+  of T measurement covariances (constant-R thin overload delegates via
+  rep_array; Python mirror `_as_R_path`). G1 now covers three paths
+  (constant, data-R_t, and the production SV composition), all at
+  ~5.5e-12; G5a untouched at ~1e-12. ONE filter implementation — the
+  price was S2 run-hash stability (user decision; old run dirs remain
+  valid records).
+- **SV block** — `stan/templates/lw_sv.stan.j2` grew the non-centered SV
+  variant behind a single `{% if sv_shocks %}` conditional (schema
+  accepts only `[]` / canonical `["is","pc"]`). h paths live in
+  `transformed parameters` (authoritative for S4's outputs — do NOT
+  re-derive h from nu). mu_h0 anchors = HLW-exact OLS pass
+  (`lw_mu_h0_anchors` in run.py, mirroring rstar.stage3.R lines 22–48).
+- **Acceptance (G4-precursor)** — run `70ad47166eaf`
+  (`examples/us_lw_sv/spec_sv.yaml`, 1961Q1–2019Q2): PASS, 0 divergences,
+  0 treedepth hits, E-BFMI 0.88–1.01, max R-hat 1.004. σ_h posteriors
+  well off zero (5th pct ≈ 0.14) — the funnel neck holds no mass, which
+  is WHY sampling is clean; a dataset with weak volatility variation may
+  still need adapt_delta ≥ 0.98 (untested territory).
+- **COVID payoff exhibit** — run `9d10bcf32a40`
+  (`spec_sv_full_vintage.yaml`, through 2026Q1, no COVID machinery):
+  PASS; the four largest exp(h_IS/2) medians are exactly 2020Q1–Q4 (peak
+  3.77), and the STRESS-TESTS.md §3 contamination reverses (σ_y* 0.94 →
+  0.33; gap AR restored to pre-COVID values). The stress test's motivating
+  failure mode is closed.
 
-**S1 (spec schema, run store, render/compile/run harness, toy model).**
-`mtk run` produces an immutable, content-addressed `runs/<hash12>/`;
-idempotent re-run; hash-sensitive; refuses to overwrite a crashed partial
-run. All still green.
+## Byte-stability pin (new invariant — read before touching stan/)
 
-**S2 (LW without SV) — implemented 2026-08-31, all gates green:**
+`tests/test_render.py::test_no_sv_render_is_byte_stable` pins the no-SV
+render byte-for-byte against `tests/fixtures/render/lw_sv_no_sv.stan`.
+Any edit to the template or ANY included functions file that reaches the
+no-SV render fails it. That's the point: changing that fixture is a
+deliberate act requiring a DECISIONS.md entry (it moves every future
+no-SV run hash). SV-only helpers belong in includes the no-SV render
+doesn't pull (`sv_rw_noncentered.stan` pattern).
 
-- **G1** (`tests/test_g1_mirror.py`, live): Python KF
-  (`macrotoolkit.smoother`, numba) vs Stan KF
-  (`stan/functions/kalman_loglik_tv.stan` via the test harness template)
-  agree to **3.6e-12** over 50 prior draws — gate is 1e-8.
-- **G5a** (`tests/test_g5a_hlw_replication.py`): our KF + RTS smoother at
-  HLW's MLE parameters, with HLW's exact dumped `xi.00`/`P.00`, reproduce
-  the oracle's log-likelihood and all four filtered *and* smoothed series
-  (r*, g, z, gap) to **~1e-12** (gate 1e-8) — the near-machine-precision
-  criterion signed off on 2026-08-31. Plus a term-for-term matrix
-  cross-check against `unpack.parameters.stage3.R`.
-- **G2** (`tests/test_g2_parameter_recovery.py`, `slow` marker, ~38 min):
-  20 simulated no-SV datasets, full NUTS each; pooled 90%-CI coverage in
-  [0.80, 0.97], per-parameter floor, 3-sigma no-bias test on
-  sigma_g/sigma_z — passed 2026-08-31.
-- **Qualitative check**: first real US run (`examples/us_lw_sv/`, run
-  `24b6288dddad`) — diagnostics **PASS** (0 divergences, max R-hat 1.007),
-  every structural coefficient brackets the HLW MLE, smoothed r*/gap track
-  HLW's at 0.98 correlation. `sigma_g`/`sigma_z` posteriors sit below
-  HLW's MUE values *by design* (the spec's pile-up priors replace MUE);
-  consequences documented in `examples/us_lw_sv/README.md`.
+## Warnings for whoever builds S4
 
-Key S2 decisions and traps are in `DECISIONS.md` (2026-08-31 entries):
-the confirmed Half-N(0,1²) priors on `sigma_is`/`sigma_pc`; the
-constant-covariance-first KF; the dumped-from-R initial conditions (HLW's
-`P.00` is an inner MLE product — never re-derive it); and the
-`sig_figs=18` requirement for any Stan-vs-Python numeric comparison
-(CmdStan's 6-sig-fig CSV default mimics a numerics bug).
+- **State timing convention** (unchanged from S2): state slots 4/6
+  (1-indexed) hold `g_{t-1}`/`z_{t-1}`; copy
+  `tests/test_g5a_hlw_replication.py::_series_from_states` for reporting,
+  never re-derive from the spec's prose.
+- **h timing**: observation t uses `h[t] = h_0 + σ_h·Σ_{s≤t} ν_s`; `h_0`
+  is pre-sample (prior N(mu_h0_data, 1), non-centered via `h0_*_raw`).
+  Read h from the saved `h_is`/`h_pc` transformed parameters.
+- **The DK simulation smoother (S4) must consume the per-draw R_t path**:
+  build it as `sv_diag_variance_path(h_is, h_pc)` from that draw's h —
+  the Python mirror already accepts `(T, m, m)` R everywhere
+  (`kalman_loglik`, `kalman_smoother`). For no-SV draws pass the constant
+  R; `_as_R_path` normalizes both.
+- **Prior overrides are variant-checked**: `priors: {sigma_is: ...}` on
+  an SV spec (or `sigma_h_*`/`mu_h0_*` on a no-SV spec) is a hard error,
+  not a silent no-op (numerics-review fix, tested).
+- The G2/G3 gates fit the no-SV variant; nothing yet SBC-tests the SV
+  variant itself — that's G4 (S5 scope, per spec §7).
 
-A `numerics-reviewer` pass over the S2 KF/state-space code found no
-correctness defects (one hygiene fix applied: Cholesky-based RTS gain).
+## Environment (fresh container recipe)
 
-## What's staged, not yet built (S3)
+- `uv tool install pytest --with cmdstanpy --with numba --with arviz
+  --with pydantic --with jinja2 --with matplotlib --with pyyaml --with
+  pandas --with click --with h5netcdf --with openpyxl --with-editable .`
+  (a `uv.lock` side-product is gitignored — never commit it).
+- CmdStan **pinned 2.36.0** at `~/.cmdstan` (never call `install_cmdstan`
+  without `version=` — `api.github.com` is blocked; PREFLIGHT.md §2).
+- Fast suite `pytest -m "not slow"`: **112 passed** (~1 min warm cache;
+  first run pays Stan compiles). Slow gates: G2 ~38 min, G3 ~3.5–7 h
+  (`pytest -m slow tests/test_g3_sbc.py`).
+- The two S3 runs live in the (gitignored) run store `runs/70ad47166eaf`,
+  `runs/9d10bcf32a40` — container-local; regenerate via `mtk run
+  examples/us_lw_sv/spec_sv.yaml` / `spec_sv_full_vintage.yaml`
+  (~40–80 min each). Volatility-path figures regenerate from the run
+  store (per-draw `h_is`/`h_pc` are in `draws.nc`).
 
-Per spec §7: add the non-centered SV block to `stan/templates/lw_sv.stan.j2`
-(the same file — don't fork it), generalize
-`stan/functions/kalman_loglik_tv.stan` to time-varying covariance (per the
-2026-08-31 decision this MUST include a regression check that the constant
-case still reproduces S2's G1/G5a results), retune sampling
-(adapt_delta, priors), and pass G3 (SBC, no-SV) + clean sampling on US
-data. `LwSvOptions.sv_shocks` and the schema plumbing are already in place
-— S3 removes the validator that pins it to `[]`.
+## S2 record (unchanged, still green)
 
-Per this repo's ground rules, `stan-engineer`-type work (the SV block's
-geometry) should be driven or directly supervised by a human.
+G1 (3.6e-12 → now 5.5e-12 across three KF paths), G2 (20-dataset
+recovery), G5a (~1e-12 vs the self-derived HLW oracle,
+`tests/fixtures/hlw/derived/us_2017_reproduction/`), US/EA benchmark runs
+tracking HLW at ρ ≈ 0.94–0.99 (`STRESS-TESTS.md`). The pile-up priors
+deliberately replace HLW's MUE machinery; σ_g/σ_z sensitivity sweep
+remains S5 scope.
 
-## Warnings for whoever builds S3/S4
+## What's staged next (S4, per spec §7)
 
-- **State timing convention** (flagged by the numerics review): state
-  slots 4/6 (1-indexed) hold `g_{t-1}`/`z_{t-1}`, NOT `g_t`/`z_t`; the
-  reporting mapping (g = slot 4, z = slot 6, r* = g+z, gap = y − slot 1)
-  matches HLW's own convention and is validated against the oracle. S4's
-  `results_lw.py` must inherit this exact mapping (copy
-  `tests/test_g5a_hlw_replication.py::_series_from_states`), not re-derive
-  it from the spec's plain-English equations — doing so would introduce a
-  silent one-quarter shift.
-- In the LW form, SV on the IS/PC shocks makes the **measurement**
-  covariance R_t time-varying (those shocks are measurement errors in the
-  marginalized state-space), not the state Q_t — spec §2.2's wording
-  notwithstanding, that's where S3's generalization actually bites.
-- The Durbin-Koopman simulation smoother is S4 scope and deliberately does
-  not exist yet; `smoother.py` currently ends at the RTS smoother.
-- `default_initial_state` treats state lag slots as a priori independent
-  (documented simplification). G5a bypasses it (uses HLW's exact init);
-  G1/G2 use it consistently on both sides. Revisit only with a reason.
-
-## Everything else worth knowing
-
-- `PREFLIGHT.md`, `FIXTURES.md`, `DECISIONS.md` are the running record —
-  read them before re-deriving anything.
-- CmdStan 2.36.0 at `~/.cmdstan` (container-local); `pytest` is a `uv
-  tool` install with the project deps + editable `macrotoolkit` (re-run
-  the `uv tool install` in `DECISIONS.md` if `pyproject.toml` changes).
-- R (+ `tis` from github.com/cran/tis, `nloptr`, `mFilter` via apt) is
-  needed only to regenerate the G5a fixture; the install recipe is in
-  `DECISIONS.md`/`PREFLIGHT.md` §3. The 2026-08-31 regeneration was
-  byte-identical to the committed CSVs.
-- The G2 gate is behind `pytest -m slow` (~38 min); the fast suite
-  (`pytest -m "not slow"`) is ~20 s and covers G1 + G5a.
+DK simulation smoother (`smoother.py` currently ends at the RTS
+smoother); the four output modules (trend-cycle plots incl. the exp(h/2)
+exhibit, IRFs, fans, historical decomposition); HTML report; G6
+(HD reconstruction identity, 1e-6). `results_lw.py` must inherit the G5a
+reporting mapping verbatim.

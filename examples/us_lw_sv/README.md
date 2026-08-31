@@ -63,3 +63,42 @@ published current one-sided estimates over 1961Q1–2026Q1: r* corr 0.914
 (mean |diff| 0.75pp), g 0.871, gap 0.845, z 0.871. At 2026Q1 our filtered
 r* is +2.4 vs HLW's +1.1 — the pile-up-prior σ_z effect plus COVID
 absorption. Use the pre-COVID run above as the reference result.
+
+## S3: SV variant (`spec_sv.yaml`), 2026-08-31 — acceptance run `70ad47166eaf`
+
+`sv_shocks: [is, pc]`: non-centered SV on the IS/PC measurement shocks,
+mu_h0 anchored by the HLW-exact OLS pass (DECISIONS.md 2026-08-31). Same
+window as the S2 reference. Diagnostics **PASS at the DEFAULT
+adapt_delta 0.95 — no retuning needed**: 0 divergences, 0 treedepth hits,
+E-BFMI 0.88–1.01, max R-hat 1.004, min bulk/tail ESS 2628/1620. The
+anticipated sigma_h funnel never bit: the posteriors put sigma_h,IS at
+0.25 [0.14, 0.42] and sigma_h,PC at 0.22 [0.14, 0.32] (5th percentiles
+well off zero), so the non-centered geometry stays benign.
+
+The exp(h/2) volatility paths (spec §3.1's exhibit): PC volatility peaks
+≈1.5 around 1974 (oil shock) and IS volatility decays from ≈1.1 in the
+late 1970s to 0.22 by 2019 — the Great Moderation, visible with no
+COVID-era data in sight.
+
+Statics shift where time-varying measurement variance reallocates what
+constant scales forced elsewhere: sigma_y* 0.24 (vs 0.54 no-SV), a_r
+−0.047 (vs −0.070), b_y 0.036 (vs 0.073), a1/a2 1.28/−0.31 (vs
+1.44/−0.50). sigma_g/sigma_z are unchanged (pile-up priors still bind).
+
+## S3: COVID payoff exhibit (`spec_sv_full_vintage.yaml`), run `9d10bcf32a40`
+
+The stress test's answer (STRESS-TESTS.md §3): full vintage through
+2026Q1, COVID quarters included, SV on, **no hand-set COVID machinery**.
+Diagnostics **PASS** (0 divergences, 0 treedepth hits, max R-hat 1.005,
+min bulk/tail ESS 1779/917; contrast the no-SV EA run's marginal FAIL).
+
+- **The 2020 spike is endogenous and exactly placed:** the four largest
+  exp(h_IS/2) medians are 2020Q3 (3.77), 2020Q2 (3.52), 2020Q4 (2.48),
+  2020Q1 (2.19), decaying to 0.75 by 2022Q1 — the Bayesian counterpart
+  of HLW's hand-set 2020Q2–Q4 kappa variance scaling, discovered from
+  the data. sigma_h,IS rises to 0.60 [0.44, 0.78] to carry the jump.
+- **Structural parameters de-contaminate:** sigma_y* 0.33 [0.19, 0.42]
+  vs the no-SV full-vintage run's 0.94 (pre-COVID: 0.54); gap AR
+  a1/a2 = 1.26/−0.29, essentially the SV pre-COVID values 1.28/−0.31,
+  instead of the no-SV collapse to 1.15. The absorption channel
+  documented in STRESS-TESTS.md §3 is closed.

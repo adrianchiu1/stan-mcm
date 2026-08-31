@@ -342,3 +342,19 @@ Newest first.
   reallocate what the constant-scale model forced elsewhere; recorded in
   `examples/us_lw_sv/README.md`.
 
+- **2026-08-31 — S3 COVID payoff exhibit delivered: run `9d10bcf32a40`
+  (full vintage through 2026Q1, SV on, no hand-set COVID machinery).**
+  Diagnostics PASS (0 divergences, 0 treedepth hits, max R-hat 1.005, min
+  bulk/tail ESS 1779/917, E-BFMI 0.88–0.99). The four largest exp(h_IS/2)
+  posterior medians are exactly 2020Q1–Q4 (peak 3.77 in 2020Q3; 1.38 at
+  2019Q4, back to 0.75 by 2022Q1) — the endogenous Bayesian counterpart
+  of HLW's hand-set κ variance scaling, discovered from the data rather
+  than imposed. Structural de-contamination vs STRESS-TESTS.md §3's no-SV
+  absorption channel: σ_y* 0.33 [0.19, 0.42] (no-SV full-vintage: 0.94),
+  gap AR a1/a2 = 1.26/−0.29 ≈ the SV pre-COVID values (no-SV had
+  collapsed to 1.15). σ_h,IS rises to 0.60 [0.44, 0.78] on this window
+  (0.25 pre-COVID) — the RW scale carries the 2020 jump. Full record in
+  `examples/us_lw_sv/README.md`. Figures regenerable from the run store
+  via the session's sv_run_report script (exp(h/2) medians + 68/90%
+  bands).
+
