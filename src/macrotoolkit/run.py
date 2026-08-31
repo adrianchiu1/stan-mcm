@@ -209,14 +209,28 @@ def build_render_context(spec: RunSpec) -> dict:
     if spec.model.family == "local_level":
         return {}
     if spec.model.family == "lw_sv":
-        from specs.schema.lw_sv import DEFAULT_PRIORS
+        from specs.schema.lw_sv import (
+            DEFAULT_PRIORS,
+            NO_SV_ONLY_PRIOR_NAMES,
+            SV_ONLY_PRIOR_NAMES,
+        )
 
+        sv_on = bool(spec.model.options.sv_shocks)
+        inactive = NO_SV_ONLY_PRIOR_NAMES if sv_on else SV_ONLY_PRIOR_NAMES
         priors = {name: dict(entry) for name, entry in DEFAULT_PRIORS.items()}
         for name, override in spec.priors.items():
             if name not in priors:
                 raise ValueError(
                     f"priors[{name!r}] is not a parameter of the lw_sv "
                     f"family. Valid names: {sorted(priors)}."
+                )
+            if name in inactive:
+                variant = "sv_shocks: [is, pc]" if sv_on else "sv_shocks: []"
+                raise ValueError(
+                    f"priors[{name!r}] does not exist in the variant this "
+                    f"spec selects ({variant}) -- the override would "
+                    f"silently do nothing. These prior names belong only to "
+                    f"the other variant: {sorted(inactive)}."
                 )
             if not isinstance(override, dict):
                 raise ValueError(

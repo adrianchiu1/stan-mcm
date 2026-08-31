@@ -132,6 +132,42 @@ def test_sv_render_has_sv_blocks_and_compiles() -> None:
     assert model.exe_file is not None
 
 
+def test_prior_overrides_rejected_for_inactive_variant() -> None:
+    """A prior override naming a parameter the selected variant doesn't
+    render must be a hard error, not a silent no-op (numerics-review
+    finding 2026-08-31): sigma_is/sigma_pc exist only in the no-SV render,
+    sigma_h_*/mu_h0_* only in the SV render."""
+    from specs.schema.base import RunSpec
+    from macrotoolkit.run import build_render_context
+
+    def spec_with(sv_shocks, priors):
+        return RunSpec.model_validate(
+            {
+                "model": {"family": "lw_sv", "options": {"sv_shocks": sv_shocks}},
+                "data": {
+                    "file": "unused.csv",
+                    "date_column": "date",
+                    "mapping": {"y": "y", "pi": "pi", "r": "r"},
+                },
+                "priors": priors,
+            }
+        )
+
+    with pytest.raises(ValueError, match="sigma_is.*does not exist in the variant"):
+        build_render_context(spec_with(["is", "pc"], {"sigma_is": {"sd": 5.0}}))
+    with pytest.raises(ValueError, match="sigma_h_is.*does not exist in the variant"):
+        build_render_context(spec_with([], {"sigma_h_is": {"sd": 0.9}}))
+
+    # The same names are accepted -- and take effect -- in their own variant.
+    ctx_no_sv = build_render_context(spec_with([], {"sigma_is": {"sd": 5.0}}))
+    assert ctx_no_sv["priors"]["sigma_is"]["sd"] == 5.0
+    ctx_sv = build_render_context(spec_with(["is", "pc"], {"sigma_h_is": {"sd": 0.9}}))
+    assert ctx_sv["priors"]["sigma_h_is"]["sd"] == 0.9
+    # And genuinely unknown names still hit the original hard error.
+    with pytest.raises(ValueError, match="not a parameter of the lw_sv family"):
+        build_render_context(spec_with([], {"sigma_typo": {"sd": 1.0}}))
+
+
 def test_compile_model_local_level_succeeds() -> None:
     source = render_stan_source("local_level.stan.j2", {})
     model, src_hash = compile_model(source)

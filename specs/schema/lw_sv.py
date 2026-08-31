@@ -63,6 +63,14 @@ DEFAULT_PRIORS: dict[str, dict] = {
     "mu_h0_pc": {"dist": "normal", "sd": 1.0},
 }
 
+#: Prior names that only exist in one variant (the other variant's render
+#: never references them). Used by build_render_context to reject overrides
+#: of priors that are INACTIVE for the run's sv_shocks -- otherwise a
+#: typo'd variant override would silently do nothing (numerics-review
+#: finding, 2026-08-31).
+NO_SV_ONLY_PRIOR_NAMES = frozenset({"sigma_is", "sigma_pc"})
+SV_ONLY_PRIOR_NAMES = frozenset({"sigma_h_is", "sigma_h_pc", "mu_h0_is", "mu_h0_pc"})
+
 #: Initial-state prior (spec §1.6 "Initial states" row). y*_0 is anchored at
 #: the first observation of y at run time; the numbers here are the sds/means
 #: that don't depend on data. See macrotoolkit.smoother.default_initial_state
