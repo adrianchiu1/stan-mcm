@@ -12,6 +12,14 @@
 // Parameter column order (must match tests/g1_harness.py PARAM_NAMES):
 //   1 a1, 2 a2, 3 a_r, 4 b_pi, 5 b_y, 6 sigma_ystar, 7 sigma_g, 8 sigma_z,
 //   9 sigma_is, 10 sigma_pc.  c arrives as a data scalar (fixed 1.0 in S2).
+//
+// S3 addition: `loglik_tv` exercises the TIME-VARYING measurement
+// covariance path of the generalized kalman_loglik at the same parameter
+// points, with per-point log-variance paths h (data; column 1 = IS,
+// 2 = PC). R_t = diag(exp(h_t)) -- h is log-VARIANCE, so exp(h) is the
+// variance entering R and exp(h/2) is the sd (spec §1.5's pinned
+// convention; the diag build here is deliberately inline plain Stan, since
+// the harness validates the KF, not the sv_rw helper).
 
 functions {
 {% include "functions/ssm_matrices_lw.stan" %}
@@ -27,19 +35,25 @@ data {
   real c;
   int<lower=1> n_points;
   matrix[n_points, 10] params;
+  array[n_points] matrix[T, 2] h;  // per-point log-variance paths [IS, PC]
 }
 
 generated quantities {
   vector[n_points] loglik;
+  vector[n_points] loglik_tv;
   for (i in 1:n_points) {
-    loglik[i] = kalman_loglik(yobs, x,
-                              lw_F(),
-                              lw_Q(params[i, 6], params[i, 7], params[i, 8]),
-                              lw_A(params[i, 1], params[i, 2], params[i, 3],
-                                   params[i, 4], params[i, 5]),
-                              lw_Z(params[i, 1], params[i, 2], params[i, 3],
-                                   params[i, 5], c),
+    matrix[7, 7] Q = lw_Q(params[i, 6], params[i, 7], params[i, 8]);
+    matrix[6, 2] A = lw_A(params[i, 1], params[i, 2], params[i, 3],
+                          params[i, 4], params[i, 5]);
+    matrix[2, 7] Z = lw_Z(params[i, 1], params[i, 2], params[i, 3],
+                          params[i, 5], c);
+    loglik[i] = kalman_loglik(yobs, x, lw_F(), Q, A, Z,
                               lw_R(params[i, 9], params[i, 10]),
                               xi00, P00);
+    array[T] matrix[2, 2] Rt;
+    for (t in 1:T) {
+      Rt[t] = diag_matrix(exp(h[i][t]'));
+    }
+    loglik_tv[i] = kalman_loglik(yobs, x, lw_F(), Q, A, Z, Rt, xi00, P00);
   }
 }

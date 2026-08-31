@@ -265,3 +265,26 @@ Newest first.
   shifted hyperparameter values; SBC of the production a1/a2 values
   themselves remains impossible in float64 with a plain (non-square-root)
   KF, recorded here as a known limit.
+
+- **2026-08-31 — S2 run-hash stability sacrificed for a single KF
+  implementation (user decision resolving a conflict in plans/S3-plan.md).**
+  The plan demanded both "generalize `kalman_loglik_tv.stan`, don't fork"
+  and "the empty-`sv_shocks` render stays byte-stable so S2 run hashes
+  don't change" — jointly impossible, because the run hash covers the
+  rendered source, which INLINES the included function files: any edit to
+  the KF text changes every no-SV render's hash. Chosen: one generalized
+  filter (array-of-R_t core + a thin constant-R overload delegating via
+  rep_array; Python mirror likewise via `_as_R_path`), accepting that
+  re-running an S2 spec now produces a new run hash (old run dirs remain
+  valid immutable records; G1 at 5.5e-12 on both filter paths and G5a at
+  ~1e-12 prove the constant case is numerically unchanged). The
+  byte-stability requirement is re-scoped to what it can mean and what
+  actually matters: from the S3 baseline onward, the no-SV render is
+  pinned byte-for-byte against `tests/fixtures/render/lw_sv_no_sv.stan`
+  (`test_no_sv_render_is_byte_stable`), so the SV conditionals — and any
+  future edit — can never leak into the no-SV render unnoticed; changing
+  that fixture requires a recorded decision. A numerics-reviewer pass over
+  the generalization found no defects (one noted non-issue: the constant-R
+  overload allocates a T-array per likelihood evaluation in no-SV models —
+  accepted cost of the delegation design).
+

@@ -1,9 +1,12 @@
 """Python mirror of the Stan Kalman-filter machinery for the LW model.
 
-S2 scope ONLY (plans/S2-plan.md): the KF log-likelihood (needed for gate
-G1) and the RTS fixed-interval smoother (needed for gate G5a). The
-Durbin-Koopman *simulation* smoother of spec §2.4 is S4 scope -- do not add
-it here until S4.
+Scope (S2 + the S3 KF generalization, plans/S3-plan.md): the KF
+log-likelihood (gate G1) with constant OR time-varying measurement
+covariance R_t (in the marginalized LW form the SV shocks are measurement
+errors, so SV time variation enters through R_t; Q stays constant -- see
+HANDOFF.md's S3 warning), and the RTS fixed-interval smoother (gate G5a).
+The Durbin-Koopman *simulation* smoother of spec §2.4 is S4 scope -- do
+not add it here until S4.
 
 Three layers, mirroring the Stan side exactly:
 
@@ -21,7 +24,7 @@ State-space form (Hamilton/HLW notation; all constants stamped, no options):
                          pi_{t-1}, (pi_{t-2}+pi_{t-3}+pi_{t-4})/3]
 
     xi_t    = F xi_{t-1} + w_t,        w_t ~ N(0, Q)
-    yobs_t  = A' x_t + Z xi_t + e_t,   e_t ~ N(0, R)
+    yobs_t  = A' x_t + Z xi_t + e_t,   e_t ~ N(0, R_t)
 
 Units conventions (lw-sv-spec.md §1.1/§1.3, enforced by
 tests/test_units_conventions.py): ``g`` is ANNUALIZED everywhere in this
@@ -198,6 +201,24 @@ def default_initial_state(y_first: float) -> tuple[np.ndarray, np.ndarray]:
 LOG_2PI = np.log(2.0 * np.pi)
 
 
+def _as_R_path(R: np.ndarray, T: int) -> np.ndarray:
+    """Normalize a measurement covariance argument to the (T, m, m) path
+    ``_kf_core`` consumes: a single (m, m) matrix (the constant case) is
+    tiled to T copies -- the exact analogue of the Stan side's rep_array
+    overload -- and a (T, m, m) path passes through with its length
+    validated."""
+    R = np.asarray(R, dtype=np.float64)
+    if R.ndim == 2:
+        return np.ascontiguousarray(np.broadcast_to(R, (T, R.shape[0], R.shape[1])))
+    if R.ndim == 3:
+        if R.shape[0] != T:
+            raise ValueError(
+                f"Time-varying R has {R.shape[0]} entries but yobs has T={T} rows."
+            )
+        return np.ascontiguousarray(R)
+    raise ValueError(f"R must be (m, m) or (T, m, m); got shape {R.shape}.")
+
+
 @njit(cache=True)
 def _kf_core(yobs, x, F, Q, A, Z, R, xi00, P00, want_states):  # pragma: no cover -- numba
     """Shared filter recursion. Returns (loglik, xi_pred, P_pred, xi_filt,
@@ -205,10 +226,13 @@ def _kf_core(yobs, x, F, Q, A, Z, R, xi00, P00, want_states):  # pragma: no cove
     True (the loglik-only path skips the copies, not the math, so both
     paths produce bit-identical loglik values).
 
-    Same operation order as the Stan mirror and HLW's kalman.log.likelihood.R:
-    predict from (xi_{0|0}, P_{0|0}), then update, for t = 1..T. Cholesky of
-    the innovation covariance for both the quadratic form and the
-    log-determinant; every covariance explicitly re-symmetrized.
+    ``R`` is the (T, m, m) measurement-covariance PATH (S3 generalization,
+    DECISIONS.md 2026-08-31; the constant case arrives as T copies, built
+    by the public wrappers). Same operation order as the Stan mirror and
+    HLW's kalman.log.likelihood.R: predict from (xi_{0|0}, P_{0|0}), then
+    update, for t = 1..T. Cholesky of the innovation covariance for both
+    the quadratic form and the log-determinant; every covariance explicitly
+    re-symmetrized.
     """
     T = yobs.shape[0]
     m = yobs.shape[1]
@@ -229,7 +253,7 @@ def _kf_core(yobs, x, F, Q, A, Z, R, xi00, P00, want_states):  # pragma: no cove
         P_tp = 0.5 * (P_tp + P_tp.T)
 
         err = yobs[t] - A.T @ x[t] - Z @ xi_tp
-        S = Z @ P_tp @ Z.T + R
+        S = Z @ P_tp @ Z.T + R[t]
         S = 0.5 * (S + S.T)
         L = np.linalg.cholesky(S)
 
@@ -270,20 +294,24 @@ def kalman_loglik(
     P00: np.ndarray,
 ) -> float:
     """KF log-likelihood of ``yobs`` (T,m) given exogenous ``x`` (T,k) and
-    the constant-covariance state-space (F, Q, A, Z, R) with explicit
-    initial state (xi00 = xi_{0|0}, P00 = P_{0|0}).
+    the state-space (F, Q, A, Z, R) with explicit initial state
+    (xi00 = xi_{0|0}, P00 = P_{0|0}).
 
-    Constant-covariance form per the 2026-08-31 decision (DECISIONS.md):
-    the time-varying-Q_t generalization is S3 scope.
+    ``R`` may be a single (m, m) matrix (constant measurement covariance)
+    or a (T, m, m) path (the S3 time-varying generalization, DECISIONS.md
+    2026-08-31 -- for lw_sv with SV, R_t = diag(exp(h_IS,t), exp(h_PC,t))).
+    Q stays constant: in the marginalized LW form the SV shocks are
+    measurement errors, so time variation enters through R_t only.
     """
+    yobs = np.ascontiguousarray(yobs, dtype=np.float64)
     ll, *_ = _kf_core(
-        np.ascontiguousarray(yobs, dtype=np.float64),
+        yobs,
         np.ascontiguousarray(x, dtype=np.float64),
         np.ascontiguousarray(F, dtype=np.float64),
         np.ascontiguousarray(Q, dtype=np.float64),
         np.ascontiguousarray(A, dtype=np.float64),
         np.ascontiguousarray(Z, dtype=np.float64),
-        np.ascontiguousarray(R, dtype=np.float64),
+        _as_R_path(R, yobs.shape[0]),
         np.ascontiguousarray(xi00, dtype=np.float64),
         np.ascontiguousarray(P00, dtype=np.float64),
         False,
@@ -346,13 +374,22 @@ def kalman_smoother(
     """Run the filter + RTS smoother. Returns a dict with 'loglik',
     'xi_filt' (T,n), 'P_filt', 'xi_pred', 'P_pred', 'xi_smooth' (T,n),
     'P_smooth' -- the filtered/one-sided and smoothed/two-sided state
-    paths G5a compares against the HLW oracle."""
+    paths G5a compares against the HLW oracle. ``R`` is (m, m) constant or
+    a (T, m, m) path, as in :func:`kalman_loglik`."""
+    yobs = np.ascontiguousarray(yobs, dtype=np.float64)
     args = [
         np.ascontiguousarray(a, dtype=np.float64)
-        for a in (yobs, x, F, Q, A, Z, R, xi00, P00)
+        for a in (x, F, Q, A, Z)
     ]
-    ll, xi_pred, P_pred, xi_filt, P_filt = _kf_core(*args, True)
-    xi_sm, P_sm = _rts_smooth(xi_pred, P_pred, xi_filt, P_filt, args[2])
+    tail = [
+        np.ascontiguousarray(a, dtype=np.float64)
+        for a in (xi00, P00)
+    ]
+    R_path = _as_R_path(R, yobs.shape[0])
+    ll, xi_pred, P_pred, xi_filt, P_filt = _kf_core(
+        yobs, *args, R_path, *tail, True
+    )
+    xi_sm, P_sm = _rts_smooth(xi_pred, P_pred, xi_filt, P_filt, args[1])
     return {
         "loglik": float(ll),
         "xi_pred": xi_pred,

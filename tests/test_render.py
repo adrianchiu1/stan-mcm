@@ -55,6 +55,36 @@ def test_render_is_deterministic_across_calls() -> None:
     assert a == b
 
 
+def test_no_sv_render_is_byte_stable() -> None:
+    """The rendered no-SV lw_sv program is pinned byte-for-byte against
+    tests/fixtures/render/lw_sv_no_sv.stan (decision 2026-08-31,
+    DECISIONS.md): S3's SV additions must sit entirely behind `sv_shocks`
+    conditionals, so the empty-`sv_shocks` render -- and with it every
+    no-SV run hash -- cannot drift by accident. If this fails, either a
+    template/functions edit leaked into the no-SV render (fix the leak) or
+    the change is a DELIBERATE, reviewed no-SV change (regenerate the
+    fixture and record the decision + hash consequences in DECISIONS.md).
+    """
+    from pathlib import Path
+
+    from specs.schema.base import RunSpec
+    from macrotoolkit.run import build_render_context
+
+    spec = RunSpec.model_validate(
+        {
+            "model": {"family": "lw_sv", "options": {}},
+            "data": {
+                "file": "unused.csv",
+                "date_column": "date",
+                "mapping": {"y": "y", "pi": "pi", "r": "r"},
+            },
+        }
+    )
+    rendered = render_stan_source("lw_sv.stan.j2", build_render_context(spec))
+    pinned = (Path(__file__).parent / "fixtures" / "render" / "lw_sv_no_sv.stan").read_text()
+    assert rendered == pinned
+
+
 def test_compile_model_local_level_succeeds() -> None:
     source = render_stan_source("local_level.stan.j2", {})
     model, src_hash = compile_model(source)
