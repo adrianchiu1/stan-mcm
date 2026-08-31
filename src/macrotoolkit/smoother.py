@@ -321,8 +321,11 @@ def _rts_smooth(xi_pred, P_pred, xi_filt, P_filt, F):  # pragma: no cover -- num
     xi_sm[T - 1] = xi_filt[T - 1]
     P_sm[T - 1] = P_filt[T - 1]
     for t in range(T - 2, -1, -1):
-        # J_t = P_{t|t} F' P_{t+1|t}^-1, via solve on the (symmetric) predicted cov.
-        J = np.linalg.solve(P_pred[t + 1], F @ P_filt[t]).T
+        # J_t = P_{t|t} F' P_{t+1|t}^-1 via the Cholesky factor of the
+        # (symmetric PD) predicted covariance -- same numerics doctrine as
+        # the filter: factor once, triangular-shaped solves, no raw inverse.
+        L = np.linalg.cholesky(P_pred[t + 1])
+        J = np.linalg.solve(L.T, np.linalg.solve(L, F @ P_filt[t])).T
         xi_sm[t] = xi_filt[t] + J @ (xi_sm[t + 1] - xi_pred[t + 1])
         P_sm[t] = P_filt[t] + J @ (P_sm[t + 1] - P_pred[t + 1]) @ J.T
         P_sm[t] = 0.5 * (P_sm[t] + P_sm[t].T)
