@@ -85,6 +85,53 @@ def test_no_sv_render_is_byte_stable() -> None:
     assert rendered == pinned
 
 
+def test_sv_render_has_sv_blocks_and_compiles() -> None:
+    """The sv_shocks: [is, pc] render carries the full SV machinery -- the
+    sv function include, the mu_h0 data entries, the non-centered
+    parameters, the h transformed parameters, the SV priors, and the
+    time-varying KF call -- and none of the no-SV-only pieces; and it
+    compiles (cached after the first run)."""
+    from specs.schema.base import RunSpec
+    from macrotoolkit.run import build_render_context
+
+    spec = RunSpec.model_validate(
+        {
+            "model": {"family": "lw_sv", "options": {"sv_shocks": ["is", "pc"]}},
+            "data": {
+                "file": "unused.csv",
+                "date_column": "date",
+                "mapping": {"y": "y", "pi": "pi", "r": "r"},
+            },
+        }
+    )
+    source = render_stan_source("lw_sv.stan.j2", build_render_context(spec))
+
+    for needle in (
+        "vector sv_rw_noncentered(",
+        "real mu_h0_is;",
+        "real<lower=0> sigma_h_is;",
+        "vector[T] nu_pc;",
+        "transformed parameters {",
+        "sv_diag_variance_path(h_is, h_pc)",
+        "nu_is ~ std_normal();",
+    ):
+        assert needle in source, f"SV render is missing {needle!r}"
+    # The constant-scale machinery must be fully replaced, not coexist
+    # (the lw_R DEFINITION still rides in with the shared include; what
+    # must be gone is the constant parameters, their priors, and the call).
+    for absent in (
+        "real<lower=0> sigma_is;",
+        "real<lower=0> sigma_pc;",
+        "sigma_is ~",
+        "sigma_pc ~",
+        "lw_R(sigma_is",
+    ):
+        assert absent not in source, f"SV render still contains {absent!r}"
+
+    model, _ = compile_model(source)
+    assert model.exe_file is not None
+
+
 def test_compile_model_local_level_succeeds() -> None:
     source = render_stan_source("local_level.stan.j2", {})
     model, src_hash = compile_model(source)

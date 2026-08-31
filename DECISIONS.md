@@ -288,3 +288,24 @@ Newest first.
   overload allocates a T-array per likelihood evaluation in no-SV models —
   accepted cost of the delegation design).
 
+- **2026-08-31 — S3 SV stage landed: template conditionals, schema, OLS
+  anchor; no-SV render pin regenerated once (comment-only header change).**
+  Design points: (1) the template treats `sv_shocks` as a single boolean
+  conditional — the schema admits only `[]` and the canonical `[is, pc]`
+  (normalized from any order so run identity is order-independent;
+  single-shock SV rejected as unvalidated in v1). (2) With SV on, the
+  constant `sigma_is`/`sigma_pc` parameters are REPLACED, not shadowed;
+  h paths are built non-centered in `transformed parameters` (h_0 = mu_h0
+  + sd·h0_raw, h0_raw ~ std_normal; observation t uses h_t = h_0 +
+  σ_h·Σν) so the draws carry the authoritative log-variance paths for S4's
+  outputs. (3) `build_stan_data` computes the HLW-exact mu_h0 OLS anchors
+  unconditionally for lw_sv (CmdStan ignores unused data; the anchors are
+  deterministic functions of the trimmed data so run identity is
+  untouched); on the US 1960–2019 window they imply OLS residual sds 0.75
+  (IS) / 0.82 (PC) — PC essentially on HLW's MLE σ_π ≈ 0.80, IS above the
+  MLE σ_ỹ ≈ 0.34 exactly as HLW's own linear-detrend initialization
+  behaves. (4) The no-SV render fixture was regenerated ONCE in this
+  stage: the template header comment now documents both variants
+  (a comment-only change — verified 0 non-comment diff lines against the
+  prior pin). The pin is expected to stay stable from here.
+

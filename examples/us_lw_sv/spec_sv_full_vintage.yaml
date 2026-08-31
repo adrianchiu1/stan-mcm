@@ -1,0 +1,25 @@
+# US Laubach-Williams, SV variant, FULL latest vintage through 2026Q1 --
+# the S3 COVID payoff exhibit (plans/S3-plan.md item 4, not gated): with SV
+# on, exp(h/2) should spike in 2020 and the structural parameters should
+# de-contaminate relative to the no-SV full-vintage stress test
+# (STRESS-TESTS.md §3, run 18f32ac9793f: sigma_ystar 0.54 -> 0.94, gap AR
+# flattened). Companion to spec_full_vintage.yaml (same data, SV off).
+model:
+  family: lw_sv
+  options:
+    sv_shocks: [is, pc]
+    estimate_c: false
+data:
+  file: data/us_quarterly_full.csv
+  date_column: date
+  mapping: { y: lgdp100, pi: core_pce_ann, r: real_rate }
+  sample: { start: null, end: null }
+priors: { }
+sampler:
+  chains: 4
+  warmup: 1500
+  sampling: 1500
+  adapt_delta: 0.95
+  max_treedepth: 12
+  seed: 20260813
+outputs: { }

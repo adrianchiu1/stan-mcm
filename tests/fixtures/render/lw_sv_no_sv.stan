@@ -1,9 +1,19 @@
 // lw_sv.stan -- Laubach-Williams model, rendered from lw_sv.stan.j2.
 //
-// S2 RENDER: the no-SV variant (model.options.sv_shocks == []). Constant
-// IS/PC shock scales sigma_is/sigma_pc stand in for the SV paths; S3 adds
-// the non-centered SV block to THIS template (spec §7's staged build: S2 ->
-// S3 grow one file, not two divergent ones).
+// One template, two variants (spec §7's staged build: S2 -> S3 grew one
+// file, not two divergent ones), selected by model.options.sv_shocks:
+//
+// - sv_shocks == []: the no-SV variant. Constant IS/PC shock scales
+//   sigma_is/sigma_pc. This render is pinned byte-for-byte
+//   (tests/test_render.py::test_no_sv_render_is_byte_stable).
+// - sv_shocks == [is, pc] (the one validated non-empty combination):
+//   non-centered stochastic volatility on both measurement shocks (spec
+//   §1.5). sigma_is/sigma_pc are REPLACED by log-variance random walks
+//   h_s,t = h_s,t-1 + sigma_h_s * nu_s,t with h_s,0 ~ N(mu_h0_s, sd^2),
+//   mu_h0_s the data-side OLS anchor. h is log-VARIANCE (sd = exp(h/2));
+//   the KF sees R_t = diag(exp(h_IS,t), exp(h_PC,t)) -- in the
+//   marginalized LW form the SV shocks are MEASUREMENT errors, so time
+//   variation enters R_t, not Q (HANDOFF.md's S3 warning).
 //
 // Rao-Blackwellized likelihood (spec §2.1): the linear states (y*, g, z and
 // lags) are marginalized by the Kalman filter in the model block; Stan

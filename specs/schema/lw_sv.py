@@ -1,12 +1,14 @@
 """Options + priors fragment for the ``lw_sv`` family (lw-sv-spec.md §2.3's
-draft schema; S2 registers the no-SV variant).
+draft schema; S2 registered the no-SV variant, S3 adds SV).
 
-S2 scope (spec §7): "LW without SV". Concretely:
+Current scope (spec §7, S3):
 
-- ``sv_shocks`` must be ``[]`` -- the SV block is S3 scope. The field exists
-  now (with the spec's draft shape) so S3 flips it on without a schema
-  migration, but any non-empty value is rejected with a clear error until
-  the S3 template lands.
+- ``sv_shocks`` is ``[]`` (the no-SV variant) or ``[is, pc]`` -- spec
+  §1.5/§2.3: SV on the IS and Phillips measurement shocks jointly is the
+  ONE validated non-empty combination in v1. Single-shock combinations are
+  rejected with a clear error (they would render but are unvalidated).
+  The list is normalized to the canonical order ``["is", "pc"]`` so run
+  identity never depends on how a spec happened to order it.
 - ``estimate_c`` must be ``False`` -- spec §1.3's default. Promoting ``c``
   to a parameter (prior N(1, 0.25²) truncated positive) is deferred; the
   flag is validated, not silently ignored.
@@ -49,6 +51,16 @@ DEFAULT_PRIORS: dict[str, dict] = {
     # No-SV constant IS/PC shock scales -- DECISIONS.md 2026-08-31, not spec §1.6.
     "sigma_is": {"dist": "half_normal", "sd": 1.0},
     "sigma_pc": {"dist": "half_normal", "sd": 1.0},
+    # SV variant (spec §1.5-§1.6; only in renders with sv_shocks == [is, pc]).
+    # sigma_h_*: log-variance random-walk scales.
+    "sigma_h_is": {"dist": "half_normal", "sd": 0.2},
+    "sigma_h_pc": {"dist": "half_normal", "sd": 0.2},
+    # mu_h0_*: the h_0 ~ N(mu_h0, sd^2) initial-log-variance prior. The MEAN
+    # is data -- the 2*ln(sigma_hat_OLS) anchor build_stan_data computes
+    # (HLW-exact OLS pass, DECISIONS.md 2026-08-31) -- so only the sd is a
+    # stamped, overridable prior field here.
+    "mu_h0_is": {"dist": "normal", "sd": 1.0},
+    "mu_h0_pc": {"dist": "normal", "sd": 1.0},
 }
 
 #: Initial-state prior (spec §1.6 "Initial states" row). y*_0 is anchored at
@@ -75,15 +87,20 @@ class LwSvOptions(BaseModel):
 
     @field_validator("sv_shocks")
     @classmethod
-    def _no_sv_in_s2(cls, v: list[str]) -> list[str]:
-        if v:
+    def _validated_combinations_only(cls, v: list[str]) -> list[str]:
+        unique = set(v)
+        if len(unique) != len(v):
             raise ValueError(
-                "model.options.sv_shocks must be [] for now: the SV block is "
-                "S3 scope (lw-sv-spec.md §7) and its template does not exist "
-                "yet. S2 estimates the LW model without SV -- constant "
-                "sigma_is/sigma_pc shock scales."
+                f"model.options.sv_shocks has duplicate entries: {v!r}."
             )
-        return v
+        if unique and unique != {"is", "pc"}:
+            raise ValueError(
+                f"model.options.sv_shocks must be [] (no SV) or [is, pc] "
+                f"(SV on both measurement shocks) -- the one combination "
+                f"validated in v1 (lw-sv-spec.md §1.5, §2.3). Got {v!r}."
+            )
+        # Canonical order: run identity must not depend on spec list order.
+        return ["is", "pc"] if unique else []
 
     @field_validator("estimate_c")
     @classmethod

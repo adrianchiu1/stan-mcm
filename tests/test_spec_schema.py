@@ -278,3 +278,48 @@ def test_canonical_yaml_round_trips_through_yaml_parser() -> None:
     reparsed = yaml.safe_load(canonical)
     assert reparsed["model"]["family"] == "local_level"
     assert reparsed["data"]["mapping"] == {"y": "obs"}
+
+
+# ---------------------------------------------------------------------------
+# lw_sv options: sv_shocks combinations (S3)
+# ---------------------------------------------------------------------------
+
+
+def _lw_sv_spec_dict(sv_shocks: list) -> dict:
+    return {
+        "model": {"family": "lw_sv", "options": {"sv_shocks": sv_shocks}},
+        "data": {
+            "file": "data.csv",
+            "date_column": "date",
+            "mapping": {"y": "y", "pi": "pi", "r": "r"},
+        },
+    }
+
+
+def test_lw_sv_sv_shocks_accepts_empty_and_both() -> None:
+    assert RunSpec.model_validate(_lw_sv_spec_dict([])).model.options.sv_shocks == []
+    assert RunSpec.model_validate(_lw_sv_spec_dict(["is", "pc"])).model.options.sv_shocks == ["is", "pc"]
+
+
+def test_lw_sv_sv_shocks_normalized_to_canonical_order() -> None:
+    """Run identity must not depend on how a spec ordered the list: [pc, is]
+    canonicalizes to [is, pc], so the canonical YAML (hashed into run
+    identity) is order-independent."""
+    a = RunSpec.model_validate(_lw_sv_spec_dict(["pc", "is"]))
+    b = RunSpec.model_validate(_lw_sv_spec_dict(["is", "pc"]))
+    assert a.model.options.sv_shocks == ["is", "pc"]
+    assert a.to_canonical_yaml() == b.to_canonical_yaml()
+
+
+def test_lw_sv_sv_shocks_rejects_single_shock_and_duplicates() -> None:
+    """[is, pc] is the ONE validated non-empty combination in v1 (spec
+    §1.5/§2.3); single-shock SV would render but is unvalidated, so it must
+    be rejected loudly, naming the field."""
+    with pytest.raises(pydantic.ValidationError, match="sv_shocks"):
+        RunSpec.model_validate(_lw_sv_spec_dict(["is"]))
+    with pytest.raises(pydantic.ValidationError, match="sv_shocks"):
+        RunSpec.model_validate(_lw_sv_spec_dict(["pc"]))
+    with pytest.raises(pydantic.ValidationError, match="duplicate"):
+        RunSpec.model_validate(_lw_sv_spec_dict(["is", "is"]))
+    with pytest.raises(pydantic.ValidationError):
+        RunSpec.model_validate(_lw_sv_spec_dict(["is", "pc", "extra"]))
