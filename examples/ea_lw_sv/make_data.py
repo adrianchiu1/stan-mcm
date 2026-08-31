@@ -45,6 +45,24 @@ def main() -> None:
     out.to_csv(target, index=False)
     print(f"Wrote {target} ({len(out)} rows, {out['date'].iloc[0]}..{out['date'].iloc[-1]})")
 
+    # Full latest-vintage file (through 2026Q1, COVID quarters INCLUDED),
+    # used by spec_full_vintage.yaml -- an experiment, not the reference
+    # example: the S2 model has none of HLW's 2023 COVID machinery, so
+    # estimates over this window absorb 2020 into the constant shock scales.
+    full = pd.read_excel(SOURCE, sheet_name="EA input data", header=0)
+    full["date"] = pd.to_datetime(full["date"])
+    out_full = pd.DataFrame(
+        {
+            "date": full["date"].dt.strftime("%Y-%m-%d"),
+            "lgdp100": 100.0 * full["gdp.log"],
+            "core_infl_ann": full["inflation"],
+            "real_rate": full["interest"] - full["inflation.expectations"],
+        }
+    )
+    target_full = HERE / "data" / "ea_quarterly_full.csv"
+    out_full.to_csv(target_full, index=False)
+    print(f"Wrote {target_full} ({len(out_full)} rows, {out_full['date'].iloc[0]}..{out_full['date'].iloc[-1]})")
+
 
 if __name__ == "__main__":
     main()
