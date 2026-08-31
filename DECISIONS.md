@@ -221,3 +221,47 @@ Newest first.
   motivation for S3's stochastic volatility, now written into the S3 plan.
   Pre-COVID runs remain the reference results; full-vintage specs are
   marked experiments.
+
+- **2026-08-31 — S3 plan's three open questions resolved (user decisions,
+  start of S3 implementation).** (1) **KF signature for time-varying R**:
+  the generalized `kalman_loglik` takes an array of T measurement-covariance
+  matrices (`array[] matrix R` / `(T,m,m)` ndarray), built by a small
+  helper from the h paths — the KF stays family-agnostic; the h-vectors-
+  inside-KF alternative was rejected as baking lw_sv structure into the
+  shared function. (2) **G3 SBC scale**: 200 replications (~6–7 h under the
+  `slow` marker), ranks from posterior draws thinned to 99 (100 rank
+  values), χ² over 20 bins → 10 expected per bin; 100 was rejected as
+  underpowered (5/bin), 500 as overkill for a gate G4 will repeat.
+  (3) **μ_h0 OLS anchor**: mirror HLW's own stage-3 initialization
+  (`rstar.stage3.R` lines 22–48) on our trimmed data (which, like HLW's,
+  includes the 4 pre-sample lag quarters): gap⁰ = residual of OLS of y on
+  [const, linear trend] over the FULL trimmed sample; IS: OLS of gap⁰_t on
+  [gap⁰_{t-1}, gap⁰_{t-2}, (r_{t-1}+r_{t-2})/2, const] over estimation
+  rows, σ̂_IS = √(RSS/(n−4)); PC: OLS of π_t on [π_{t-1},
+  (π_{t-2}+π_{t-3}+π_{t-4})/3, gap⁰_{t-1}] with NO intercept,
+  σ̂_PC = √(RSS/(n−3)); μ_h0,s = 2·ln(σ̂_s). Deterministic given the
+  trimmed data, so run hashes stay reproducible.
+
+- **2026-08-31 — G3 SBC runs with the a1/a2 priors overridden to
+  N(0.8, 0.1²)/N(−0.25, 0.05²) via the production `priors:` override path;
+  everything else production-default.** User decision, forced by a measured
+  numerical fact: the production a1/a2 defaults put ~32% of prior mass on
+  non-stationary gap dynamics (a1+a2 ~ N(0.8, 0.42²)), and SBC must sample
+  the exact fitted prior (no stationarity rejection — that's G1/G2's
+  machinery, invalid here). A 3-rep smoke showed one such draw simulating
+  |y| ≈ 2e13 at T=120, at which point the KF covariance update (P entries
+  ~1e26) loses everything to float64 cancellation (`cholesky_decompose`
+  not-PD; all 10 ranks at the extremes) — garbage ranks for ~a third of
+  replications, poisoning χ² regardless of pipeline correctness, and
+  shortening T doesn't fix the tail. Under the override the stationarity
+  boundary sits ~4σ out (non-stationary mass ~3e-5), so the exact prior is
+  simulable with no rejection anywhere and SBC exactness holds. Rejected
+  alternatives: an SBC-only stationarity-truncated (a1,a2) parameterization
+  (changes the sampled geometry away from the production program and adds
+  a template branch only a test uses); sim-side rejection with the model
+  prior unchanged (breaks SBC's prior-equality requirement in a region
+  holding real prior mass — uninterpretable marginal failures). G3 thus
+  validates the production program/geometry/override path exactly, at two
+  shifted hyperparameter values; SBC of the production a1/a2 values
+  themselves remains impossible in float64 with a plain (non-square-root)
+  KF, recorded here as a known limit.
