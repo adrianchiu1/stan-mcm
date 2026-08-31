@@ -397,6 +397,48 @@ Newest first.
 
 - **2026-08-31 — S4 open question 2 (smoother-draw thinning) measured: `smoother_draws: all` stays the default, no thinning needed.** Benchmarked the DK simulation smoother's trend-cycle pass (`macrotoolkit.results_lw.compute_trend_cycle_draws`) on the regenerated `spec_sv.yaml` run (`runs/70ad47166eaf`, 4 chains x 1500 = 6,000 draws, T=234, SV on): **39.5 s total (~6.6 ms/draw)**, well under the ~2-minute concern threshold from `plans/S4-plan.md` — despite the two-pass DK algorithm (chosen over FFBS) roughly doubling the per-draw cost versus the original FFBS estimate. No change to the schema default (`outputs.smoother_draws: all`) or the example specs. Historical-decomposition's own per-draw cost (Part B) is comparable order-of-magnitude (same DK smoother call plus O(T) arithmetic) and expected to stay well within budget too; re-benchmark if `plots.py`/`report.py` (aggregating across all draws for every output module) turns out materially slower in practice.
 
+- **2026-08-31 — S4: two numerics bugs found and fixed in `results_lw.py`'s
+  fan-chart module (Part D, spec §3.3) during the mandatory
+  numerics-reviewer pass, before commit.** Both caught by the review
+  process this repo's task brief mandates for any smoother/state-space
+  change, neither present in the code that shipped.
+  (1) **Rate-gap seeding/ordering**: an earlier draft seeded
+  `rate_gap_lag1`/`rate_gap_lag2` from `r_full[-1] - (xi_draw[-1,3]+
+  xi_draw[-1,5])` / the T-1 analogue, and deferred the loop's own
+  freshly-computed `(r-r*)` value to the NEXT iteration. Because
+  `xi_draw`'s slots 3/5 carry `g`/`z` with a built-in one-period lag (this
+  state's own convention, per `smoother.py`), that seed actually equals
+  `(r-r*)_{T-1}` paired with `r_T` -- a period mismatch -- and `(r-r*)_T`
+  (needed for the FIRST forecast period's own AR term) cannot be known
+  before the loop starts at all: it requires that period's own fresh
+  process-noise draw. Fixed: reduced to a SINGLE pre-loop seed
+  (`(r-r*)_{T-1}`, the one value genuinely derivable in advance), computed
+  `(r-r*)_T` inside the loop and used it in the SAME iteration it's
+  computed, with a single carried register for the second lag. Confirmed
+  by the reviewer: the bug caused up to ~65% relative distortion of the
+  first forecast period's gap value under `forecast_r_rule: neutral`.
+  (2) **IS-curve sign error** (found by the SAME reviewer in a follow-up
+  pass, after bug 1's fix landed): `_fan_forecast_step`'s combined
+  `rate_gap = (r-r*)` term used a MINUS
+  (`-(a_r/2)*(rate_gap_lag1+rate_gap_lag2)`) carried over from
+  `gap_pi_shock_decomposition`'s per-bar convention -- but that function's
+  minus is only valid for the r*-ONLY half of a split whose OTHER half (a
+  separate `+(a_r/2)*(r_{t-1}+r_{t-2})` data-injection term, added only to
+  its "init" bar) supplies the offsetting plus; summed across bars the two
+  halves combine to a net PLUS, matching spec §1.2's IS curve. The
+  fan-chart function combines `r` and `r*` into one number up front (no
+  separate data term to cancel against), so it needs its own `+` applied
+  directly. Confirmed by the reviewer (symbolic re-derivation from
+  `build_lw_matrices` plus numerical reconstruction against a real
+  smoothed gap path): the wrong sign produced 100%+ relative distortion of
+  forecast gap values by late horizons under `forecast_r_rule:
+  last_value`. Both fixes are covered by new regression tests in
+  `tests/test_fan_charts.py`, including a standalone,
+  run-independent sign pin (`test_fan_forecast_step_is_curve_term_is_a_
+  plus_not_a_minus`) and two zero-noise deterministic reconstruction tests
+  verified (by the reviewer, empirically) to fail against the pre-fix
+  code and pass against the fix.
+
 - **2026-08-31 — S3 COVID payoff exhibit delivered: run `9d10bcf32a40`
   (full vintage through 2026Q1, SV on, no hand-set COVID machinery).**
   Diagnostics PASS (0 divergences, 0 treedepth hits, max R-hat 1.005, min

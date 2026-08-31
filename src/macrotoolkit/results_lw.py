@@ -7,7 +7,7 @@ module must not be trusted until the smoother's own gate, spec §2.4, is
 green) and validated for the historical-decomposition arithmetic specifically
 by gate G6 (``tests/test_g6_hd_identity.py``).
 
-Two independent pieces, kept separable in this file:
+Four pieces, kept separable in this file:
 
 - **Part A -- trend-cycle loading/aggregation** (``load_lw_run``,
   ``compute_trend_cycle_draws``): reconstructs a run's data/system inputs
@@ -27,6 +27,25 @@ Two independent pieces, kept separable in this file:
   an economically sensible, persistent contribution rather than a same-
   period-only residual. Aggregation across draws (e.g. posterior-median
   contributions for the stacked-bar chart) is the caller's job.
+- **Part C -- IRF matrix** (``impulse_response_for_shock``,
+  ``irf_shock_size``, ``compute_irf_draws``, spec §3.2): a theoretical
+  impulse response is a historical decomposition with no real data, no
+  "init" contribution (there is no prior/smoothed belief to carry -- gap/pi
+  start entirely at rest), and a synthetic one-off impulse instead of a
+  recovered shock path -- so this reuses Part B's own machinery (the
+  ``_propagate_shock_through_F`` state-propagation helper for the 3 trend
+  shocks, ``gap_pi_shock_decomposition``'s AR-recursion arithmetic for
+  gap/pi) rather than reimplementing it.
+- **Part D -- fan charts** (``simulate_fan_draw``, ``compute_fan_draws``,
+  spec §3.3): genuinely new STOCHASTIC forward simulation (fresh process/
+  measurement noise every period, including -- for an SV run -- continuing
+  the SV log-variance random walks forward, spec §3.3's "widening bands are
+  the point"), seeded from a draw's own terminal smoother state and the
+  REAL last few periods' gap/pi/rate-gap lag registers (not zero -- unlike
+  Part C's from-rest IRF). Reuses the same per-period IS-curve/Phillips-
+  curve arithmetic as Part B/C (factored into ``_fan_forecast_step``), just
+  combined into one stochastic realization per draw rather than a
+  shock-by-shock decomposition.
 
 Numerical conventions this module inherits from ``macrotoolkit.smoother``
 (lw-sv-spec.md §1.1/§1.3/§1.5, enforced there by
@@ -390,6 +409,69 @@ def compute_trend_cycle_draws(lw_run: LWRun, *, seed: int | None = None) -> Tren
 # ---------------------------------------------------------------------------
 
 
+def _w_ystar_injection(eps_t: float, n: int) -> np.ndarray:
+    """The y*-shock's own per-period state-innovation vector -- eps_ystar
+    only ever enters state slot 0 (``build_lw_matrices``' exact ``Q``
+    construction). Shared by :func:`state_shock_decomposition` (B1, fed a
+    real recovered shock path) and :func:`impulse_response_for_shock` (Part
+    C, fed a synthetic impulse array) via :func:`_propagate_shock_through_F`."""
+    w = np.zeros(n)
+    w[0] = eps_t
+    return w
+
+
+def _w_g_injection(eps_t: float, n: int) -> np.ndarray:
+    """The g-shock's own per-period state-innovation vector -- the
+    ANNUALIZED g innovation enters both slot 3 (g itself) and, divided by 4,
+    slot 0 (y*'s quarterly increment g/4, lw-sv-spec.md §1.3's g/4
+    convention). See :func:`_w_ystar_injection` for the sharing rationale."""
+    w = np.zeros(n)
+    w[0] = eps_t / 4.0
+    w[3] = eps_t
+    return w
+
+
+def _w_z_injection(eps_t: float, n: int) -> np.ndarray:
+    """The z-shock's own per-period state-innovation vector -- eps_z only
+    ever enters state slot 5. See :func:`_w_ystar_injection` for the
+    sharing rationale."""
+    w = np.zeros(n)
+    w[5] = eps_t
+    return w
+
+
+def _propagate_shock_through_F(F: np.ndarray, n: int, eps: np.ndarray, inject) -> np.ndarray:
+    """Propagate ONE shock stream's own process noise through the state
+    transition matrix ``F``, starting from the zero state vector at t=-1::
+
+        xi[t] = F @ xi[t-1] + inject(eps[t], n)
+
+    ``inject`` maps this period's scalar shock realization (plus the state
+    dimension ``n``) to that period's (n,) state-innovation vector (one of
+    :func:`_w_ystar_injection` / :func:`_w_g_injection` / :func:`_w_z_injection`).
+
+    Factored out of :func:`state_shock_decomposition`'s inner loop, which
+    used to triplicate this exact loop body once per shock (numerics-
+    reviewer finding, S4) -- extracting it lets :func:`impulse_response_for_shock`
+    (Part C, spec §3.2) reuse the IDENTICAL arithmetic on a synthetic impulse
+    array instead of a real recovered shock path, rather than a fourth
+    copy-pasted loop. Behavior-preserving: bit-for-bit identical float
+    operations, in the same order, as the pre-refactor inline loop --
+    confirmed by re-running ``tests/test_g6_hd_identity.py`` /
+    ``tests/test_results_lw.py`` unchanged after this extraction.
+
+    Returns an ``(len(eps), n)`` array.
+    """
+    T = len(eps)
+    xi = np.zeros((T, n))
+    prev = np.zeros(n)
+    for t in range(T):
+        cur = F @ prev + inject(eps[t], n)
+        xi[t] = cur
+        prev = cur
+    return xi
+
+
 def state_shock_decomposition(
     F: np.ndarray,
     xi_draw: np.ndarray,
@@ -446,33 +528,9 @@ def state_shock_decomposition(
     an array of shape (T, 7) -- the same state-slot layout as ``xi_draw``.
     """
     T, n = xi_draw.shape
-    xi_ystar = np.zeros((T, n))
-    xi_g = np.zeros((T, n))
-    xi_z = np.zeros((T, n))
-
-    prev_ystar = np.zeros(n)
-    prev_g = np.zeros(n)
-    prev_z = np.zeros(n)
-
-    for t in range(T):
-        w_ystar = np.zeros(n)
-        w_ystar[0] = eps_ystar[t]
-        cur_ystar = F @ prev_ystar + w_ystar
-
-        w_g = np.zeros(n)
-        w_g[0] = eps_g[t] / 4.0
-        w_g[3] = eps_g[t]
-        cur_g = F @ prev_g + w_g
-
-        w_z = np.zeros(n)
-        w_z[5] = eps_z[t]
-        cur_z = F @ prev_z + w_z
-
-        xi_ystar[t] = cur_ystar
-        xi_g[t] = cur_g
-        xi_z[t] = cur_z
-
-        prev_ystar, prev_g, prev_z = cur_ystar, cur_g, cur_z
+    xi_ystar = _propagate_shock_through_F(F, n, eps_ystar, _w_ystar_injection)
+    xi_g = _propagate_shock_through_F(F, n, eps_g, _w_g_injection)
+    xi_z = _propagate_shock_through_F(F, n, eps_z, _w_z_injection)
 
     xi_init = xi_draw - xi_ystar - xi_g - xi_z
     return {"init": xi_init, "ystar": xi_ystar, "g": xi_g, "z": xi_z}
@@ -772,4 +830,675 @@ def historical_decomposition_for_draw(
     return historical_decomposition_draw(
         F, A, Z, lw_run.x, lw_run.y_full, lw_run.pi_full, sim.xi_draw,
         sim.eps_ystar, sim.eps_g, sim.eps_z, sim.eps_is, sim.eps_pc,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Part C: IRF matrix (spec §3.2)
+# ---------------------------------------------------------------------------
+
+#: The 5 structural shocks (rows of the IRF grid) -- spec §1.4's exhaustive,
+#: named list. No selection needed (unlike the responses below): every shock
+#: gets a row.
+IRF_SHOCKS: tuple[str, ...] = ("ystar", "g", "z", "is", "pc")
+
+#: The 5 named responses (columns of the IRF grid) -- plans/S4-plan.md's
+#: "open question 3", user-confirmed 2026-08-31: gap, pi (the two
+#: measurement-equation observables besides y itself), r* (=g+z, c=1, the
+#: trend real-rate aggregate), y (level, cumulative impulse -- distinguishes
+#: permanent from transitory shocks), g (trend growth's own path, the
+#: natural "own-response" column for the g shock).
+IRF_RESPONSES: tuple[str, ...] = ("gap", "pi", "rstar", "y", "g")
+
+
+def irf_shock_size(
+    shock: str,
+    flat: dict[str, np.ndarray],
+    i: int,
+    sv_on: bool,
+    irf_vol_reference: str,
+    h_is: np.ndarray | None,
+    h_pc: np.ndarray | None,
+) -> float:
+    """One posterior draw's "one-standard-deviation shock at the reference
+    volatility" size (spec §3.2) for one of :data:`IRF_SHOCKS`.
+
+    - ``shock in {"ystar", "g", "z"}``: that draw's own constant posterior
+      scale, ``sigma_ystar``/``sigma_g``/``sigma_z`` -- these 3 shocks are
+      NEVER SV shocks in this model (spec §1.4's table restricts SV to
+      IS/PC only), so there is no "reference volatility" question for them.
+    - ``shock in {"is", "pc"}``, no-SV run: that draw's own constant
+      ``sigma_is``/``sigma_pc`` (SV is off, so there is nothing to
+      reference a point on).
+    - ``shock in {"is", "pc"}``, SV run: ``exp(h_ref / 2)`` (h is
+      log-VARIANCE, spec §1.5 -- sd is ``exp(h/2)``, never ``exp(h)``),
+      where ``h_ref`` is that draw's own ``h_is``/``h_pc`` path evaluated
+      at ``irf_vol_reference``: ``"end_of_sample"`` -> ``h[-1]``,
+      ``"sample_mean"`` -> ``h.mean()``. NOTE the ``"sample_mean"`` case
+      takes the mean of the log-variance path ITSELF and only then converts
+      to a standard deviation -- i.e. ``exp(mean(h) / 2)``, deliberately
+      NOT ``mean(exp(h / 2))`` (the mean of the already-converted sd path).
+      Both are defensible "reference volatility" conventions and only one
+      can be picked; this module picks "average the log-variance, then
+      convert once" because it reads most naturally as ONE reference h
+      (spec §3.2's own phrase), converted to a shock size a single time --
+      not an average of T already-converted numbers.
+    """
+    if shock in ("ystar", "g", "z"):
+        return float(flat[f"sigma_{shock}"][i])
+    if shock not in ("is", "pc"):
+        raise ValueError(
+            f"irf_shock_size: shock must be one of {IRF_SHOCKS!r}; got {shock!r}."
+        )
+    if not sv_on:
+        return float(flat[f"sigma_{shock}"][i])
+    h = h_is if shock == "is" else h_pc
+    if h is None:
+        raise ValueError(
+            f"irf_shock_size: sv_on=True but h_{shock} is None -- the caller "
+            f"must pass this draw's own saved h_{shock} path (from "
+            f"_system_matrices_for_draw), not None."
+        )
+    if irf_vol_reference == "end_of_sample":
+        h_ref = float(h[-1])
+    elif irf_vol_reference == "sample_mean":
+        h_ref = float(np.mean(h))
+    else:
+        raise ValueError(
+            f"irf_shock_size: outputs.irf_vol_reference must be "
+            f"'end_of_sample' or 'sample_mean'; got {irf_vol_reference!r}."
+        )
+    return float(np.exp(h_ref / 2.0))
+
+
+def impulse_response_for_shock(
+    F: np.ndarray,
+    A: np.ndarray,
+    Z: np.ndarray,
+    shock: str,
+    shock_size: float,
+    horizon: int,
+) -> dict[str, np.ndarray]:
+    """The theoretical impulse response of ONE structural shock (spec §3.2),
+    at ONE posterior draw's system matrices, for ``horizon`` periods.
+
+    Structurally, an impulse response is exactly a historical decomposition
+    with (a) no real data, (b) a single synthetic impulse instead of a real
+    recovered shock path, and (c) no "init" bar at all -- gap/pi start
+    entirely at rest (all lag registers zero) and there is no prior/smoothed
+    belief about a pre-sample state to carry forward (Part B's "init" bar
+    only ever exists because a REAL run has a genuine smoothed initial
+    condition; a synthetic impulse response has none by construction). This
+    function builds exactly that: a zero "init" state-component bar, the 3
+    trend shocks' state contributions built the SAME WAY B1's
+    :func:`state_shock_decomposition` does (via the shared
+    :func:`_propagate_shock_through_F` helper, fed a synthetic impulse array
+    -- all zero except ``shock_size`` at index 0 -- instead of a recovered
+    shock path), and gap/pi's response read directly off
+    :func:`gap_pi_shock_decomposition`'s own AR-recursion arithmetic, called
+    on all-zero real data (``x``, ``y_full``, ``pi_full``) so its "init" bar
+    is identically zero throughout (the SAME B1/B2 sum-identity logic gate
+    G6 already validates: with zero real data and a zero "init"
+    state-component, ``gap_lag1["init"] = y_full[3] - 0 = 0``, and it stays
+    zero every period) plus a synthetic ``eps_is``/``eps_pc`` impulse array
+    (measurement shocks that never enter the state at all -- their only
+    channel is gap/pi's own AR feedback).
+
+    ``shock`` must be one of :data:`IRF_SHOCKS`; ``shock_size`` is the
+    one-off impulse applied at period 0 (spec §3.2's "one-standard-deviation
+    shock at the reference volatility" -- computed by :func:`irf_shock_size`,
+    a caller concern, not this function's).
+
+    Returns :data:`IRF_RESPONSES` (``{"gap", "pi", "rstar", "y", "g"}``),
+    each a length-``horizon`` array -- the EXACT SAME reporting formulas
+    used elsewhere in this module (``compute_trend_cycle_draws``):
+    ``rstar = state[:, 3] + state[:, 5]``, ``y = gap + state[:, 0]``,
+    ``g = state[:, 3]``.
+    """
+    if shock not in IRF_SHOCKS:
+        raise ValueError(
+            f"impulse_response_for_shock: shock must be one of {IRF_SHOCKS!r}; got {shock!r}."
+        )
+    n = F.shape[0]
+
+    eps_ystar = np.zeros(horizon)
+    eps_g = np.zeros(horizon)
+    eps_z = np.zeros(horizon)
+    eps_is = np.zeros(horizon)
+    eps_pc = np.zeros(horizon)
+    {"ystar": eps_ystar, "g": eps_g, "z": eps_z, "is": eps_is, "pc": eps_pc}[shock][0] = shock_size
+
+    state_components = {
+        "init": np.zeros((horizon, n)),
+        "ystar": _propagate_shock_through_F(F, n, eps_ystar, _w_ystar_injection),
+        "g": _propagate_shock_through_F(F, n, eps_g, _w_g_injection),
+        "z": _propagate_shock_through_F(F, n, eps_z, _w_z_injection),
+    }
+
+    x_zero = np.zeros((horizon, 6))
+    y_full_zero = np.zeros(horizon + 4)
+    pi_full_zero = np.zeros(horizon + 4)
+    gp = gap_pi_shock_decomposition(
+        F, A, Z, x_zero, y_full_zero, pi_full_zero, eps_is, eps_pc, state_components
+    )
+
+    state_total = (
+        state_components["init"] + state_components["ystar"] + state_components["g"] + state_components["z"]
+    )
+    gap_response = gp["gap"][shock] if shock in GAP_BARS else np.zeros(horizon)
+    pi_response = gp["pi"][shock]
+    rstar_response = state_total[:, 3] + state_total[:, 5]
+    g_response = state_total[:, 3]
+    y_response = gap_response + state_total[:, 0]
+
+    return {
+        "gap": gap_response,
+        "pi": pi_response,
+        "rstar": rstar_response,
+        "y": y_response,
+        "g": g_response,
+    }
+
+
+@dataclass
+class IRFDraws:
+    """The full 5x5 IRF grid (spec §3.2), stacked over the posterior draws
+    selected by ``outputs.smoother_draws``.
+
+    ``responses[shock][response]`` is an ``(n_draws, irf_horizon)`` array of
+    per-draw impulse-response paths, for ``shock in IRF_SHOCKS`` and
+    ``response in IRF_RESPONSES``. No median/68%/90% banding here -- that is
+    ``plots.py``'s job (same division of labor as ``compute_trend_cycle_draws``).
+    """
+
+    draw_indices: np.ndarray  # (n_draws,) -- indices into the flattened posterior this batch used
+    horizon: int  # = outputs.irf_horizon
+    responses: dict[str, dict[str, np.ndarray]]
+
+
+def compute_irf_draws(lw_run: LWRun) -> IRFDraws:
+    """Build spec §3.2's 5x5 IRF grid across the posterior draws selected by
+    ``lw_run.spec.outputs.smoother_draws``, at horizon
+    ``outputs.irf_horizon`` and reference volatility
+    ``outputs.irf_vol_reference``.
+
+    Purely a function of each selected draw's own system matrices
+    (``F``, ``A``, ``Z``) and its own ``sigma_*``/``h_*`` posterior values --
+    unlike Part A/B/D, this needs no simulation smoother pass and no RNG (an
+    impulse response is deterministic given a shock size, spec §3.2:
+    "computed analytically from posterior draws of (Z, T, R)").
+    """
+    flat = _flatten_posterior(lw_run)
+    n_total = flat["a1"].shape[0]
+    idx = select_draw_indices(n_total, lw_run.spec.outputs.smoother_draws)
+    horizon = lw_run.spec.outputs.irf_horizon
+    vol_ref = lw_run.spec.outputs.irf_vol_reference
+
+    n = len(idx)
+    responses: dict[str, dict[str, np.ndarray]] = {
+        shock: {resp: np.empty((n, horizon)) for resp in IRF_RESPONSES} for shock in IRF_SHOCKS
+    }
+
+    for j, i in enumerate(idx):
+        i = int(i)
+        F, Q, A, Z, R, h_is, h_pc = _system_matrices_for_draw(flat, i, lw_run.sv_on)
+        for shock in IRF_SHOCKS:
+            size = irf_shock_size(shock, flat, i, lw_run.sv_on, vol_ref, h_is, h_pc)
+            resp = impulse_response_for_shock(F, A, Z, shock, size, horizon)
+            for name in IRF_RESPONSES:
+                responses[shock][name][j] = resp[name]
+
+    return IRFDraws(draw_indices=idx, horizon=horizon, responses=responses)
+
+
+# ---------------------------------------------------------------------------
+# Part D: fan charts (spec §3.3)
+# ---------------------------------------------------------------------------
+
+
+def _extract_gap_pi_coeffs(Z: np.ndarray, A: np.ndarray) -> tuple[float, float, float, float, float]:
+    """The 5 structural coefficients (a1, a2, a_r, b_y, b_pi) read directly
+    off a draw's ``Z``/``A`` system matrices -- the SAME extraction
+    :func:`gap_pi_shock_decomposition` documents and performs internally
+    (``Z[0,1] = -a1``, ``Z[0,2] = -a2``, ``Z[0,5] = -a_r/2`` -- no ``c``
+    factor, since ``a_r`` is read off the z-lag entries, matching that
+    function's own comment -- ``Z[1,1] = -b_y``, ``A[4,1] = b_pi``).
+
+    Deliberately duplicated here rather than imported out of
+    ``gap_pi_shock_decomposition`` (which is not touched by this module's S4
+    fan-chart addition at all, per the task brief's "do not modify
+    gap_pi_shock_decomposition ... behavior" constraint): the fan-chart
+    forward simulation below needs the SAME 5 numbers for its own one-step
+    AR recursion, but is not itself calling that already-G6-validated
+    function's shock-decomposition machinery, so re-deriving the 5 numbers
+    from ``Z``/``A`` directly (rather than threading a private helper
+    through an unrelated, validated function) keeps the two call sites
+    independent.
+    """
+    a1 = -Z[0, 1]
+    a2 = -Z[0, 2]
+    a_r = -2.0 * Z[0, 5]
+    b_y = -Z[1, 1]
+    b_pi = A[4, 1]
+    return a1, a2, a_r, b_y, b_pi
+
+
+def _fan_forecast_step(
+    gap_lag1: float,
+    gap_lag2: float,
+    pi_lag1: float,
+    pi_lag2: float,
+    pi_lag3: float,
+    pi_lag4: float,
+    rate_gap_lag1: float,
+    rate_gap_lag2: float,
+    a1: float,
+    a2: float,
+    a_r: float,
+    b_pi: float,
+    b_y: float,
+    eps_is_t: float,
+    eps_pc_t: float,
+) -> tuple[float, float]:
+    """One forward forecast period's gap/pi AR recursion (spec §3.3) -- the
+    SAME underlying IS-curve/Phillips-curve arithmetic
+    :func:`gap_pi_shock_decomposition` applies per bar (spec §1.2), just
+    COMBINED rather than decomposed bar-by-bar (a fan-chart draw is a single
+    stochastic realization, not a shock-by-shock attribution)::
+
+        gap_t = a1*gap_lag1 + a2*gap_lag2
+                + (a_r/2)*(rate_gap_lag1 + rate_gap_lag2) + eps_is_t
+        pi_t  = b_pi*pi_lag1 + (1-b_pi)*mean(pi_lag2, pi_lag3, pi_lag4)
+                + b_y*gap_lag1 + eps_pc_t
+
+    ``rate_gap_lag1``/``rate_gap_lag2`` are ``(r - r*)`` at the two prior
+    periods (whatever those periods' own convention: real data if still
+    in-sample, or ``forecast_r_rule``'s convention if already a forecast
+    period -- the caller's concern, not this function's).
+
+    **The IS-curve term is a PLUS, not a minus** (numerics-reviewer finding,
+    S4, confirmed independently against ``build_lw_matrices``'s own
+    construction): ``gap_pi_shock_decomposition``'s per-bar recursion uses
+    ``-(a_r/2)*(rstar1+rstar2)`` for EVERY bar plus a SEPARATE
+    ``+(a_r/2)*(r_{t-1}+r_{t-2})`` term added ONLY to the "init" bar (the
+    real-rate DATA injection) -- summed across all bars, those two pieces
+    combine into ``+(a_r/2)*[(r_{t-1}-r*_{t-1})+(r_{t-2}-r*_{t-2})]``, a
+    PLUS overall. This function combines ``r`` and ``r*`` into ONE
+    ``rate_gap`` number up front (no separate data-injection term to
+    provide the offsetting plus), so it needs its OWN plus sign applied
+    directly -- an earlier version of this function kept the minus that
+    was only ever valid for the r*-only HALF of that split, which
+  produced up to a ~100%+ relative distortion of forecast gap values
+    under ``forecast_r_rule: last_value`` by the end of a 12-period
+    horizon (confirmed numerically before this fix).
+
+    ``pi_t`` uses ``gap_lag1`` (gap ONE period before pi_t's own period,
+    spec §1.2's Phillips curve), NOT the just-computed ``gap_t`` -- matching
+    ``gap_pi_shock_decomposition``'s own "snapshot gap_lag1 BEFORE this
+    iteration's register shift" note.
+
+    Returns ``(gap_t, pi_t)``.
+    """
+    gap_t = a1 * gap_lag1 + a2 * gap_lag2 + (a_r / 2.0) * (rate_gap_lag1 + rate_gap_lag2) + eps_is_t
+    pibar_t = (pi_lag2 + pi_lag3 + pi_lag4) / 3.0
+    pi_t = b_pi * pi_lag1 + (1.0 - b_pi) * pibar_t + b_y * gap_lag1 + eps_pc_t
+    return gap_t, pi_t
+
+
+def simulate_fan_draw(
+    F: np.ndarray,
+    Q: np.ndarray,
+    a1: float,
+    a2: float,
+    a_r: float,
+    b_pi: float,
+    b_y: float,
+    xi_last: np.ndarray,
+    gap_lag1: float,
+    gap_lag2: float,
+    pi_lag1: float,
+    pi_lag2: float,
+    pi_lag3: float,
+    pi_lag4: float,
+    rate_gap_seed: float,
+    y_hist_last4: np.ndarray,
+    r_last: float,
+    forecast_r_rule: str,
+    sv_on: bool,
+    sigma_is: float | None,
+    sigma_pc: float | None,
+    h_is_last: float | None,
+    h_pc_last: float | None,
+    sigma_h_is: float | None,
+    sigma_h_pc: float | None,
+    horizon: int,
+    rng: np.random.Generator,
+) -> dict[str, np.ndarray]:
+    """One posterior draw's ONE stochastic fan-chart forward simulation
+    (spec §3.3), ``horizon`` periods ahead of that draw's own terminal
+    simulation-smoother state ``xi_last`` (= ``sim.xi_draw[-1]``, absolute
+    period T), seeded by that SAME draw's ACTUAL last few periods' real
+    gap/pi lag registers -- ``gap_lag1``/``gap_lag2`` =
+    ``yobs[-1,0]-xi_draw[-1,0]`` / ``yobs[-2,0]-xi_draw[-2,0]``,
+    ``pi_lag1..4`` = ``yobs[-1:-5:-1,1]``.
+
+    ``rate_gap_seed`` is ``(r-r*)_{T-1}`` -- the ONLY ``(r-r*)`` value
+    derivable BEFORE this function's own forward loop starts (numerics-
+    reviewer finding, S4: an earlier draft tried to also seed
+    ``(r-r*)_T`` from ``r_full[-1] - (xi_draw[-1,3]+xi_draw[-1,5])``, but
+    ``xi_draw[-1,3]``/``[-1,5]`` are ``g_{T-1}``/``z_{T-1}`` -- the state's
+    slot-3/5 one-period lag (this module's/``smoother.py``'s own
+    convention) means row T's OWN state slots never show ``g_T``/``z_T``;
+    those only become visible one ``F``-step later, which requires THIS
+    period's own fresh process-noise draw. So ``(r-r*)_T`` cannot be known
+    ahead of time -- it is computed INSIDE the loop below, in the SAME
+    iteration that needs it as ``rate_gap_lag1``, not deferred to the next
+    iteration as an earlier version of this function did (confirmed wrong
+    by direct numerical comparison against a hand-derived reference: up to
+    an ~65% relative distortion of the first forecast period's gap value
+    under the "neutral" rule, where the bug caused a nonzero historical
+    rate-gap value to leak into what should have been a zero term)).
+    ``(r-r*)_{T-1}`` has no such problem: it is read directly off row T's
+    OWN state slots (``xi_draw[-1,3]+xi_draw[-1,5]`` = ``g_{T-1}+z_{T-1}``
+    = ``r*_{T-1}`` exactly, by the same slot convention), paired with the
+    real ``r_full[-2]`` (= ``r_{T-1}``) -- both genuinely in-sample,
+    already-realized quantities, so ``forecast_r_rule`` does not apply to
+    this ONE seed (the rule only governs ``(r-r*)`` from period T onward,
+    computed inside the loop -- see below).
+
+    Per period, FRESH stochastic noise is drawn: this draw's own posterior
+    ``Q`` for the state (``xi_{T+h} = F @ xi_{T+h-1} + w``, ``w ~ N(0, Q)``,
+    via ``macrotoolkit.smoother._psd_sqrt`` -- Q is rank-deficient, see that
+    function's own docstring), and either constant ``sigma_is``/``sigma_pc``
+    (no-SV) or the CONTINUED SV log-variance random walk (SV --
+    ``h_{T+h} = h_{T+h-1} + sigma_h * nu``, ``nu ~ N(0,1)`` fresh every
+    period, starting from this draw's own last saved ``h_is``/``h_pc``) for
+    the measurement shocks. This per-period-fresh-noise draw is what makes
+    an SV run's bands genuinely WIDEN with horizon (spec §3.3: "widening
+    bands are the point") and what makes this a stochastic SIMULATION,
+    unlike :func:`gap_pi_shock_decomposition` / :func:`impulse_response_for_shock`'s
+    deterministic recursions.
+
+    ``forecast_r_rule`` governs ``(r-r*)`` from absolute period T onward
+    (every value the loop itself computes -- i.e. starting with the FIRST
+    forecast period's own "t-1" input, not just periods strictly after the
+    sample end; only ``(r-r*)_{T-1}``, the ``rate_gap_seed`` above, predates
+    the rule): ``"neutral"`` forces ``(r_t - r*_t) := 0`` for every such t
+    -- r is defined to exactly track r*; ``"last_value"`` holds
+    ``r_t := r_last`` (the run's actual last observed r) while
+    ``r*_t = xi_t[3] + xi_t[5]`` keeps evolving through the state's own
+    random walk, so the deviation genuinely moves. Only these 2 values are
+    implemented -- ``user_path`` is already rejected at the schema level
+    (``specs.schema.lw_sv.LwSvOutputs``).
+
+    ``sv_on=False``: pass ``sigma_is``/``sigma_pc`` (that draw's own
+    constant posterior scales); leave ``h_is_last``/``h_pc_last``/
+    ``sigma_h_is``/``sigma_h_pc`` as ``None`` -- the measurement covariance
+    stays constant every period, so this channel contributes NO growing
+    variance with horizon (the no-SV/SV contrast spec §3.3 calls out).
+    ``sv_on=True``: the reverse (``sigma_is``/``sigma_pc`` ``None``, the 4 SV
+    args real).
+
+    Returns ``{"y_level", "y_growth_4q", "pi", "gap", "rstar", "rate_gap"}``,
+    each length ``horizon``. ``rate_gap`` (the per-period ``(r-r*)`` INPUT
+    actually used inside the loop -- not a reporting series in its own
+    right, but a useful diagnostic) is exposed mainly so
+    ``outputs.forecast_r_rule``'s convention can be checked directly rather
+    than only indirectly through gap's own downstream path.
+    """
+    if forecast_r_rule not in ("neutral", "last_value"):
+        raise ValueError(
+            f"simulate_fan_draw: forecast_r_rule must be 'neutral' or "
+            f"'last_value' (user_path is not implemented -- rejected at the "
+            f"schema level, specs.schema.lw_sv.LwSvOutputs); got {forecast_r_rule!r}."
+        )
+    if sv_on:
+        if h_is_last is None or h_pc_last is None or sigma_h_is is None or sigma_h_pc is None:
+            raise ValueError(
+                "simulate_fan_draw: sv_on=True requires h_is_last/h_pc_last/"
+                "sigma_h_is/sigma_h_pc (that draw's own saved SV state) to "
+                "all be real numbers, not None."
+            )
+    else:
+        if sigma_is is None or sigma_pc is None:
+            raise ValueError(
+                "simulate_fan_draw: sv_on=False requires sigma_is/sigma_pc "
+                "(that draw's own constant posterior scales) to be real "
+                "numbers, not None."
+            )
+
+    from macrotoolkit.smoother import _psd_sqrt
+
+    n = F.shape[0]
+    sqrt_Q = _psd_sqrt(Q)
+
+    xi_prev = np.asarray(xi_last, dtype=np.float64).copy()
+    h_is_prev = h_is_last
+    h_pc_prev = h_pc_last
+    # (r-r*)_{T-1} -- the one seed value predating forecast_r_rule (see this
+    # function's docstring). Rolled forward into rate_gap_lag1 each
+    # iteration AFTER that iteration's _fan_forecast_step call, exactly
+    # mirroring gap_lag1/pi_lag1's own end-of-iteration shift below.
+    rate_gap_prev = rate_gap_seed
+
+    y_level = np.empty(horizon)
+    pi_path = np.empty(horizon)
+    gap_path = np.empty(horizon)
+    rstar_path = np.empty(horizon)
+    rate_gap_path = np.empty(horizon)
+
+    for t in range(horizon):
+        w = sqrt_Q @ rng.standard_normal(n)
+        xi_t = F @ xi_prev + w
+        # xi_t's slots 3/5 hold g/z ONE PERIOD BEHIND xi_t's own period
+        # (this module's/smoother.py's state-slot convention) -- so
+        # rstar_t here is r* at the period BEFORE the one xi_t nominally
+        # represents, i.e. exactly the period this loop iteration is
+        # computing gap/pi FOR (t=0 -> absolute period T, feeding forecast
+        # period T+1's gap equation as its "t-1" term). This is the value
+        # that requires xi_t's fresh process noise to become knowable --
+        # it could not have been seeded before the loop started (numerics-
+        # reviewer finding, S4 -- see rate_gap_seed's docstring above).
+        rstar_t = xi_t[3] + xi_t[5]
+
+        if forecast_r_rule == "neutral":
+            rate_gap_t = 0.0
+        else:  # "last_value"
+            rate_gap_t = r_last - rstar_t
+
+        if sv_on:
+            h_is_prev = h_is_prev + sigma_h_is * rng.standard_normal()
+            h_pc_prev = h_pc_prev + sigma_h_pc * rng.standard_normal()
+            var_is = float(np.exp(h_is_prev))  # h is log-VARIANCE (spec §1.5)
+            var_pc = float(np.exp(h_pc_prev))
+        else:
+            var_is = sigma_is**2
+            var_pc = sigma_pc**2
+
+        eps_is_t = rng.normal(0.0, np.sqrt(var_is))
+        eps_pc_t = rng.normal(0.0, np.sqrt(var_pc))
+
+        # rate_gap_t (just computed above, for THIS iteration's own period)
+        # is used immediately as "lag1" -- not deferred to the next
+        # iteration, which was the confirmed bug this fix corrects.
+        gap_t, pi_t = _fan_forecast_step(
+            gap_lag1, gap_lag2, pi_lag1, pi_lag2, pi_lag3, pi_lag4,
+            rate_gap_t, rate_gap_prev, a1, a2, a_r, b_pi, b_y, eps_is_t, eps_pc_t,
+        )
+
+        y_level[t] = gap_t + xi_t[0]
+        pi_path[t] = pi_t
+        gap_path[t] = gap_t
+        rstar_path[t] = rstar_t
+        rate_gap_path[t] = rate_gap_t
+
+        xi_prev = xi_t
+        gap_lag2, gap_lag1 = gap_lag1, gap_t
+        pi_lag4, pi_lag3, pi_lag2, pi_lag1 = pi_lag3, pi_lag2, pi_lag1, pi_t
+        rate_gap_prev = rate_gap_t
+
+    y_hist_last4 = np.asarray(y_hist_last4, dtype=np.float64)
+    y_growth_4q = np.empty(horizon)
+    for t in range(horizon):
+        # growth at forecast period T+(t+1) needs y at T+(t+1)-4 = T+(t-3):
+        # for t <= 3 that period is still in-sample (t=0 -> T-3, ...,
+        # t=3 -> T), read from the real y_hist_last4 seed; for t >= 4 it is
+        # itself an earlier forecast period, already computed in y_level.
+        ref = y_hist_last4[t] if t <= 3 else y_level[t - 4]
+        y_growth_4q[t] = y_level[t] - ref
+
+    return {
+        "y_level": y_level,
+        "y_growth_4q": y_growth_4q,
+        "pi": pi_path,
+        "gap": gap_path,
+        "rstar": rstar_path,
+        "rate_gap": rate_gap_path,
+    }
+
+
+@dataclass
+class FanDraws:
+    """Per-draw stochastic fan-chart forward simulations (spec §3.3), each
+    ``horizon`` = ``outputs.horizon`` quarters ahead of the sample end,
+    stacked over the posterior draws selected by ``outputs.smoother_draws``.
+
+    ONE combined stochastic realization per draw (not a shock-by-shock
+    decomposition, unlike Part B/C) -- aggregating draws into the
+    10/20/.../90 percentile fan bands (spec §3.3) is ``plots.py``'s job, not
+    this module's (same division of labor as ``compute_trend_cycle_draws``).
+    ``rate_gap`` is exposed as a diagnostic (see :func:`simulate_fan_draw`).
+    """
+
+    draw_indices: np.ndarray  # (n_draws,)
+    horizon: int  # = outputs.horizon
+    y_level: np.ndarray  # (n_draws, horizon)
+    y_growth_4q: np.ndarray  # (n_draws, horizon)
+    pi: np.ndarray  # (n_draws, horizon)
+    gap: np.ndarray  # (n_draws, horizon)
+    rstar: np.ndarray  # (n_draws, horizon)
+    rate_gap: np.ndarray  # (n_draws, horizon) -- diagnostic, see simulate_fan_draw
+
+
+def compute_fan_draws(lw_run: LWRun, *, seed: int | None = None) -> FanDraws:
+    """Run the DK simulation smoother once per selected posterior draw
+    (``lw_run.spec.outputs.smoother_draws``) to get that draw's terminal
+    state + real terminal lag registers, then :func:`simulate_fan_draw` for
+    ``outputs.horizon`` periods forward at ``outputs.forecast_r_rule``'s
+    convention (spec §3.3). ``seed`` defaults to
+    ``lw_run.spec.sampler.seed``; a single ``np.random.Generator`` is
+    advanced sequentially across every selected draw's smoother pass AND its
+    forward simulation (matching :func:`compute_trend_cycle_draws`'s own
+    usage pattern).
+    """
+    from macrotoolkit.smoother import simulate_smoother_draw
+
+    T = lw_run.yobs.shape[0]
+    if T < 4:
+        raise ValueError(
+            f"compute_fan_draws needs at least 4 estimation-sample quarters "
+            f"to seed pi's 4-lag register and y's 4Q-growth history; got "
+            f"T={T} for run {lw_run.run_dir}."
+        )
+
+    flat = _flatten_posterior(lw_run)
+    n_total = flat["a1"].shape[0]
+    idx = select_draw_indices(n_total, lw_run.spec.outputs.smoother_draws)
+    horizon = lw_run.spec.outputs.horizon
+    rule = lw_run.spec.outputs.forecast_r_rule
+
+    if lw_run.sv_on:
+        post = lw_run.idata.posterior
+        n_post_total = post.sizes["chain"] * post.sizes["draw"]
+        for name in ("sigma_h_is", "sigma_h_pc"):
+            if name not in post.data_vars:
+                raise ValueError(
+                    f"Posterior in {lw_run.run_dir} has no variable {name!r} "
+                    f"-- expected for an SV lw_sv run's fan-chart SV "
+                    f"random-walk continuation (spec §3.3). Available "
+                    f"variables: {sorted(post.data_vars)}."
+                )
+        sigma_h_is_flat = np.asarray(post["sigma_h_is"].values).reshape(n_post_total)
+        sigma_h_pc_flat = np.asarray(post["sigma_h_pc"].values).reshape(n_post_total)
+
+    n = len(idx)
+    y_level = np.empty((n, horizon))
+    y_growth_4q = np.empty((n, horizon))
+    pi_arr = np.empty((n, horizon))
+    gap_arr = np.empty((n, horizon))
+    rstar_arr = np.empty((n, horizon))
+    rate_gap_arr = np.empty((n, horizon))
+
+    rng = np.random.default_rng(seed if seed is not None else lw_run.spec.sampler.seed)
+
+    for j, i in enumerate(idx):
+        i = int(i)
+        F, Q, A, Z, R, h_is, h_pc = _system_matrices_for_draw(flat, i, lw_run.sv_on)
+        a1, a2, a_r, b_y, b_pi = _extract_gap_pi_coeffs(Z, A)
+        # rstar_t below (both here and inside simulate_fan_draw's loop) sums
+        # g+z unweighted, correct only for c==1.0 -- same guard
+        # gap_pi_shock_decomposition applies to itself (numerics-reviewer,
+        # S4); dormant today (estimate_c is hard-validated False everywhere,
+        # specs/schema/lw_sv.py) but fails loudly instead of silently
+        # corrupting the fan chart if that ever changes.
+        c_check = Z[0, 3] / Z[0, 5] if Z[0, 5] != 0.0 else 1.0
+        if not np.isclose(c_check, 1.0, atol=1e-9):
+            raise NotImplementedError(
+                f"compute_fan_draws assumes c == 1.0 (spec §1.3's default; "
+                f"estimate_c is not implemented anywhere in current scope), "
+                f"but the system matrices imply c = {c_check!r}. rstar_t "
+                f"sums g+z unweighted, which is only correct for c == 1.0."
+            )
+        sim = simulate_smoother_draw(lw_run.yobs, lw_run.x, F, Q, A, Z, R, lw_run.xi00, lw_run.P00, rng)
+        xi_draw = sim.xi_draw
+
+        gap_lag1 = float(lw_run.yobs[-1, 0] - xi_draw[-1, 0])
+        gap_lag2 = float(lw_run.yobs[-2, 0] - xi_draw[-2, 0])
+        pi_lag1 = float(lw_run.yobs[-1, 1])
+        pi_lag2 = float(lw_run.yobs[-2, 1])
+        pi_lag3 = float(lw_run.yobs[-3, 1])
+        pi_lag4 = float(lw_run.yobs[-4, 1])
+        # (r-r*)_{T-1} ONLY -- the sole rate-gap value derivable before
+        # simulate_fan_draw's own loop starts; see that function's
+        # rate_gap_seed docstring for why (r-r*)_T cannot be seeded here.
+        rate_gap_seed = float(lw_run.r_full[-2] - (xi_draw[-1, 3] + xi_draw[-1, 5]))
+        y_hist_last4 = lw_run.yobs[-4:, 0]
+        r_last = float(lw_run.r_full[-1])
+
+        if lw_run.sv_on:
+            sigma_is_i: float | None = None
+            sigma_pc_i: float | None = None
+            h_is_last = float(h_is[-1])
+            h_pc_last = float(h_pc[-1])
+            sigma_h_is_i = float(sigma_h_is_flat[i])
+            sigma_h_pc_i = float(sigma_h_pc_flat[i])
+        else:
+            sigma_is_i = float(flat["sigma_is"][i])
+            sigma_pc_i = float(flat["sigma_pc"][i])
+            h_is_last = h_pc_last = sigma_h_is_i = sigma_h_pc_i = None
+
+        out = simulate_fan_draw(
+            F, Q, a1, a2, a_r, b_pi, b_y,
+            xi_draw[-1], gap_lag1, gap_lag2, pi_lag1, pi_lag2, pi_lag3, pi_lag4,
+            rate_gap_seed, y_hist_last4, r_last, rule,
+            lw_run.sv_on, sigma_is_i, sigma_pc_i, h_is_last, h_pc_last,
+            sigma_h_is_i, sigma_h_pc_i, horizon, rng,
+        )
+
+        y_level[j] = out["y_level"]
+        y_growth_4q[j] = out["y_growth_4q"]
+        pi_arr[j] = out["pi"]
+        gap_arr[j] = out["gap"]
+        rstar_arr[j] = out["rstar"]
+        rate_gap_arr[j] = out["rate_gap"]
+
+    return FanDraws(
+        draw_indices=idx,
+        horizon=horizon,
+        y_level=y_level,
+        y_growth_4q=y_growth_4q,
+        pi=pi_arr,
+        gap=gap_arr,
+        rstar=rstar_arr,
+        rate_gap=rate_gap_arr,
     )
