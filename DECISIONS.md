@@ -342,6 +342,37 @@ Newest first.
   reallocate what the constant-scale model forced elsewhere; recorded in
   `examples/us_lw_sv/README.md`.
 
+- **2026-08-31 — S4 plan's three open questions resolved (user decisions,
+  start of S4 implementation, full rationale in `plans/S4-plan.md`).**
+  (1) **Simulation smoother algorithm**: the literal two-pass
+  Durbin-Koopman smoother (spec §2.4), not the FFBS alternative that was
+  proposed with rationale (FFBS reuses `_rts_smooth`'s `J_t` directly at
+  half the per-draw cost) — user chose to implement the spec's named
+  algorithm as written. Per draw: simulate a "plus" state+observation path
+  from the unconditional model at that draw's own (F, Q, A, Z, R_t),
+  filter+RTS-smooth both the real data and the plus path (reusing the
+  existing `kalman_smoother`), combine via `xi_draw = xi_smooth -
+  xi+_smooth + xi+`. Structural shocks for HD still fall out algebraically
+  from consecutive drawn states (no separate shock-smoother needed).
+  Validation: Monte Carlo mean/variance convergence to `kalman_smoother`'s
+  output, plus a deterministic zero-plus-noise check that the DK
+  combination step reduces exactly to `xi_smooth` (a code-level mirror
+  independent of RNG, standing in for G1's Stan-vs-Python mirror since
+  §2.4 is Python-only). (2) **Smoother-draw thinning**: benchmark first —
+  default `outputs.smoother_draws: all`, measure wall-clock on the
+  regenerated `spec_sv.yaml` run (6,000 draws) before writing any plotting
+  code against it; only switch the example specs' default to a thinned
+  value (proposed `thin: 10` if needed) if the full pass measurably
+  exceeds ~2 minutes, recorded here with the actual number once measured.
+  The DK choice in (1) roughly doubles the per-draw cost versus FFBS,
+  making this benchmark more likely to bind. (3) **IRF 5×5 grid
+  columns**: `gap, π, r*, y, g` (rows/shocks are already fixed by spec
+  §1.4's five named shocks) — chosen so every shock has at least one
+  column showing its own structural role (ε_IS→gap, ε_PC→π, ε_g→g,
+  ε_z→r*, ε_y*→y); `z`'s own path was dropped in favor of `r*` (their sum)
+  since `z` alone is visually near-identical to `r* − g` and `r*` is the
+  object the report/README already center on.
+
 - **2026-08-31 — S3 COVID payoff exhibit delivered: run `9d10bcf32a40`
   (full vintage through 2026Q1, SV on, no hand-set COVID machinery).**
   Diagnostics PASS (0 divergences, 0 treedepth hits, max R-hat 1.005, min
