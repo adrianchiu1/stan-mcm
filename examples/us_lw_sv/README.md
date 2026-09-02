@@ -136,3 +136,31 @@ the diagnostics verdict and a parameter table. Generate it yourself with
 `mtk report <hash>`; the two run directories above each now have their
 own `runs/<hash>/report.html` (gitignored, regenerate via `mtk run` +
 `mtk report`).
+
+## S5: regeneration at the split run identity, prior-predictive, sweep
+
+Both reference runs were regenerated once more in S5 against the
+estimation-vs-report identity split (S5-decisions item 3; the one final
+hash migration — DECISIONS.md 2026-09-02), again reproducing their
+recorded diagnostics exactly:
+
+| Run | Spec | Verdict | Divergences | Max R-hat | Min bulk/tail ESS |
+|---|---|---|---|---|---|
+| `a00958509083` | `spec_sv.yaml` | PASS | 0 | 1.0045 | 2627 / 1620 |
+| `eb73e644be0b` | `spec_sv_full_vintage.yaml` | PASS | 0 | 1.0046 | 1778 / 917 |
+
+(Hash lineage: `70ad47166eaf` → `a00958509083`; `9d10bcf32a40` →
+`930459224ca0` → `eb73e644be0b`. Every migration is a spec/identity
+schema change, never a numerics change — the diagnostics tables prove
+it.) Draw-thinned (×10) tracked copies of both live in `runs-archive/`
+as development fixtures (see its README).
+
+S5's report additions render for both runs: the spec §4 prior-predictive
+check figure (12 embedded images per report now) joins the diagnostics
+block. The mandated σ_g/σ_z prior-sensitivity sweep runs from
+`sweep_sigma_g_z.yaml` in this directory
+(`mtk sweep examples/us_lw_sv/sweep_sigma_g_z.yaml`); its comparison
+report lands under `sweeps/sigma_g_z/` with prior→posterior contraction
+readouts, and the repo-level exhibits built from these runs (G5b
+filtered-vs-published with its measured z-attribution; the COVID SV
+volatility figure) are in `docs/exhibits/`.
