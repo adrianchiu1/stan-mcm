@@ -3,6 +3,32 @@
 One dated line per judgment call not fixed by the spec, with rationale.
 Newest first.
 
+- **2026-09-02 — S4.5 item 4 landed (S5-decisions): the FamilyEntry
+  contract is complete; no if/elif family dispatch remains.**
+  `FAMILY_REGISTRY` (specs/schema) now declares every family capability:
+  the existing spec-side fields (options model, template, required
+  mapping, outputs model) plus numerics-side capabilities as LAZY
+  `"module:attr"` dotted paths -- `build_stan_data`,
+  `build_render_context`, `state_meta` (items 1-2's declarations),
+  `results_loader`, `report_writer` -- resolved on first use via
+  `FamilyEntry.resolve`. Dotted paths rather than direct references
+  because `specs.schema` must stay importable without numpy/pandas
+  (`macrotoolkit` imports it at module scope; eager references would
+  create an import cycle); a registry typo still fails loudly, and
+  `tests/test_family_registry.py` resolves EVERY declared path at test
+  time so typos cannot survive the suite. `run.py`'s
+  `build_stan_data`/`build_render_context` if/elif chains moved into
+  `macrotoolkit/families/{local_level,lw_sv}.py` (bodies unchanged;
+  `lw_mu_h0_anchors` moved with them, re-exported from `run.py` for
+  existing importers) and the run.py names remain as thin registry
+  dispatchers; `mtk report` now dispatches through the registry's
+  `report_writer` (a family without one gets a clear "no report support"
+  error instead of an lw-specific crash). VISION's "adding a family =
+  template + schema fragment + numerics module + registry entry" is now
+  mechanically true, pinned by a test asserting run.py contains no
+  family-name string branching. Fast suite 251 passed (245 + 6 registry
+  tests). S4.5 block complete.
+
 - **2026-09-02 — S4.5 item 3 landed (S5-decisions): run identity split
   into estimation identity vs report config.** `compute_run_id` now hashes
   `RunSpec.to_estimation_yaml()` -- the canonical spec MINUS `outputs:` --

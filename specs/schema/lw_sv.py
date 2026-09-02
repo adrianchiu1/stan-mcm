@@ -15,7 +15,7 @@ Current scope (spec §7, S3):
 
 Priors: the §1.6 defaults live here as ``DEFAULT_PRIORS`` -- a single
 source of truth consumed by the Stan template's render context
-(``macrotoolkit.run.build_render_context``), the G1/G2 parameter-point
+(``macrotoolkit.families.lw_sv.build_render_context``), the G1/G2 parameter-point
 generators (``tests/g1_harness.py``), and the Python KF mirror's tests.
 ``RunSpec.priors`` keys override these per run.
 

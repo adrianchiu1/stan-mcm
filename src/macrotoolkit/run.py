@@ -50,13 +50,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import arviz as az
-import numpy as np
 import pandas as pd
 
 from specs.schema import get_family
 from specs.schema.base import RunSpec, SamplerSpec, load_spec
 
 from macrotoolkit.data import load_data
+# Re-exported from the family module (S5-decisions item 4 moved it there);
+# kept importable from here for existing callers/tests.
+from macrotoolkit.families.lw_sv import lw_mu_h0_anchors  # noqa: F401
 from macrotoolkit.render import compile_model, get_cmdstan_version, render_stan_source, stan_source_hash
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -131,178 +133,31 @@ def load_run_spec(run_dir: str | Path) -> RunSpec:
     return RunSpec.model_validate(raw)
 
 
-def lw_mu_h0_anchors(y: np.ndarray, pi: np.ndarray, r: np.ndarray) -> tuple[float, float]:
-    """The mu_h0 OLS anchors for the SV variant: mu_h0_s = 2*ln(sigma_hat_
-    OLS,s) (h is log-variance, so exp(mu_h0/2) = sigma_hat), where
-    sigma_hat_OLS is the residual sd of a rough OLS pass mirroring HLW's
-    own stage-3 initialization EXACTLY (rstar.stage3.R lines 22-48;
-    user-confirmed definition, DECISIONS.md 2026-08-31):
-
-    - gap proxy: residual of OLS of y on [const, linear trend] over the
-      FULL trimmed sample (lag quarters included). y is already 100*ln(GDP)
-      (spec §1.1), so no extra x100 -- same units as HLW's `output.gap`.
-    - IS: OLS of gap_t on [gap_{t-1}, gap_{t-2}, (r_{t-1}+r_{t-2})/2, 1]
-      over the T estimation rows; sigma_hat = sqrt(RSS / (T - 4)).
-    - PC: OLS of pi_t on [pi_{t-1}, (pi_{t-2}+pi_{t-3}+pi_{t-4})/3,
-      gap_{t-1}], NO intercept; sigma_hat = sqrt(RSS / (T - 3)).
-
-    Deterministic given the trimmed data, so run identity stays
-    reproducible. Inputs are the full trimmed arrays INCLUDING the 4
-    pre-sample lag quarters (build_lw_regressors' convention).
-    """
-    y = np.asarray(y, dtype=np.float64)
-    pi = np.asarray(pi, dtype=np.float64)
-    r = np.asarray(r, dtype=np.float64)
-    n = len(y)
-    t_est = n - 4
-    if t_est <= 4:
-        raise ValueError(
-            f"mu_h0 OLS anchor needs at least 9 data rows (4 lag quarters + "
-            f"5 estimation quarters, for a positive-dof IS regression); the "
-            f"trimmed data has {n}."
-        )
-
-    trend = np.column_stack([np.ones(n), np.arange(1, n + 1, dtype=np.float64)])
-    gap = y - trend @ np.linalg.lstsq(trend, y, rcond=None)[0]
-
-    y_is = gap[4:n]
-    x_is = np.column_stack(
-        [
-            gap[3 : 3 + t_est],
-            gap[2 : 2 + t_est],
-            (r[3 : 3 + t_est] + r[2 : 2 + t_est]) / 2.0,
-            np.ones(t_est),
-        ]
-    )
-    resid_is = y_is - x_is @ np.linalg.lstsq(x_is, y_is, rcond=None)[0]
-    sigma_is = float(np.sqrt(resid_is @ resid_is / (t_est - x_is.shape[1])))
-
-    y_pc = pi[4:n]
-    x_pc = np.column_stack(
-        [
-            pi[3 : 3 + t_est],
-            (pi[2 : 2 + t_est] + pi[1 : 1 + t_est] + pi[0:t_est]) / 3.0,
-            gap[3 : 3 + t_est],
-        ]
-    )
-    resid_pc = y_pc - x_pc @ np.linalg.lstsq(x_pc, y_pc, rcond=None)[0]
-    sigma_pc = float(np.sqrt(resid_pc @ resid_pc / (t_est - x_pc.shape[1])))
-
-    if not (np.isfinite(sigma_is) and np.isfinite(sigma_pc) and sigma_is > 0 and sigma_pc > 0):
-        raise ValueError(
-            f"mu_h0 OLS anchor produced a non-positive/non-finite residual "
-            f"sd (IS {sigma_is!r}, PC {sigma_pc!r}) -- degenerate input "
-            f"data? The anchor needs genuine residual variation."
-        )
-    return 2.0 * float(np.log(sigma_is)), 2.0 * float(np.log(sigma_pc))
-
-
 def build_stan_data(family_name: str, df: pd.DataFrame) -> dict:
     """Map the loaded/mapped DataFrame to the Stan `data` block for a given
-    family.
-
-    `lw_sv` convention (HLW's own, spec §1.2's lag structure): the loaded
-    data must INCLUDE four pre-sample lag quarters -- the first estimation
-    quarter is row 5 of the trimmed data, because the Phillips curve needs
-    pi_{t-4}. `data.sample.start` in the spec therefore points at the first
-    LAG quarter, four quarters before the first estimated one.
-    """
-    if family_name == "local_level":
-        return {"T": int(len(df)), "y": df["y"].tolist()}
-    if family_name == "lw_sv":
-        from macrotoolkit.smoother import build_lw_regressors, default_initial_state
-
-        if len(df) < 5:
-            raise ValueError(
-                f"lw_sv needs at least 5 data rows (4 pre-sample lag "
-                f"quarters + 1 estimation quarter); the trimmed data has "
-                f"{len(df)}. Note data.sample.start must include the 4 lag "
-                f"quarters before the first estimation quarter."
-            )
-        yobs, x = build_lw_regressors(
-            df["y"].to_numpy(), df["pi"].to_numpy(), df["r"].to_numpy()
+    family -- pure registry dispatch (S5-decisions item 4: the former
+    if/elif chain moved into each family's own
+    `macrotoolkit/families/<family>.py` module, referenced by
+    `FAMILY_REGISTRY`'s dotted paths)."""
+    builder = get_family(family_name).resolve("build_stan_data")
+    if builder is None:
+        raise NotImplementedError(
+            f"Family {family_name!r} declares no build_stan_data capability "
+            f"in FAMILY_REGISTRY (specs/schema)."
         )
-        xi00, P00 = default_initial_state(float(df["y"].to_numpy()[4]))
-        # The mu_h0 OLS anchors are computed unconditionally: the SV render
-        # declares them as data; a no-SV render simply doesn't (CmdStan
-        # ignores unused input entries), and they don't enter run identity
-        # (the hash covers the raw data file, not this dict).
-        mu_h0_is, mu_h0_pc = lw_mu_h0_anchors(
-            df["y"].to_numpy(), df["pi"].to_numpy(), df["r"].to_numpy()
-        )
-        return {
-            "T": int(yobs.shape[0]),
-            "yobs": yobs,
-            "x": x,
-            "xi00": xi00,
-            "P00": P00,
-            "mu_h0_is": mu_h0_is,
-            "mu_h0_pc": mu_h0_pc,
-        }
-    raise NotImplementedError(
-        f"build_stan_data has no mapping for model.family {family_name!r}. "
-        f"Implemented: 'local_level', 'lw_sv'."
-    )
+    return builder(df)
 
 
 def build_render_context(spec: RunSpec) -> dict:
-    """Template context for a family's Jinja render: family options plus
-    spec-derived constants. `lw_sv` stamps c and the resolved priors
-    (specs/schema/lw_sv.py defaults, overridden per key by the spec's
-    `priors:` block -- unknown prior names are a hard error, so a typo'd
-    override never silently falls back to the default)."""
-    if spec.model.family == "local_level":
-        return {}
-    if spec.model.family == "lw_sv":
-        from specs.schema.lw_sv import (
-            DEFAULT_PRIORS,
-            NO_SV_ONLY_PRIOR_NAMES,
-            SV_ONLY_PRIOR_NAMES,
+    """Template context for a family's Jinja render -- pure registry
+    dispatch (see :func:`build_stan_data`)."""
+    builder = get_family(spec.model.family).resolve("build_render_context")
+    if builder is None:
+        raise NotImplementedError(
+            f"Family {spec.model.family!r} declares no build_render_context "
+            f"capability in FAMILY_REGISTRY (specs/schema)."
         )
-
-        sv_on = bool(spec.model.options.sv_shocks)
-        inactive = NO_SV_ONLY_PRIOR_NAMES if sv_on else SV_ONLY_PRIOR_NAMES
-        priors = {name: dict(entry) for name, entry in DEFAULT_PRIORS.items()}
-        for name, override in spec.priors.items():
-            if name not in priors:
-                raise ValueError(
-                    f"priors[{name!r}] is not a parameter of the lw_sv "
-                    f"family. Valid names: {sorted(priors)}."
-                )
-            if name in inactive:
-                variant = "sv_shocks: [is, pc]" if sv_on else "sv_shocks: []"
-                raise ValueError(
-                    f"priors[{name!r}] does not exist in the variant this "
-                    f"spec selects ({variant}) -- the override would "
-                    f"silently do nothing. These prior names belong only to "
-                    f"the other variant: {sorted(inactive)}."
-                )
-            if not isinstance(override, dict):
-                raise ValueError(
-                    f"priors[{name!r}] must be a mapping of prior fields to "
-                    f"override (e.g. {{sd: 0.5}}), got {override!r}."
-                )
-            merged = {**priors[name], **override}
-            unknown = set(merged) - set(priors[name])
-            if unknown:
-                raise ValueError(
-                    f"priors[{name!r}] has unknown field(s) {sorted(unknown)}; "
-                    f"the default entry's fields are {sorted(priors[name])}."
-                )
-            priors[name] = merged
-        # estimate_c is validated false in S2 (specs/schema/lw_sv.py), so c
-        # is always the spec §1.3 default here. sv_shocks is [] or the
-        # canonical ["is", "pc"] (schema-normalized); the template's SV
-        # blocks render iff it is non-empty.
-        return {
-            "c": 1.0,
-            "priors": priors,
-            "sv_shocks": list(spec.model.options.sv_shocks),
-        }
-    raise NotImplementedError(
-        f"build_render_context has no context for model.family "
-        f"{spec.model.family!r}. Implemented: 'local_level', 'lw_sv'."
-    )
+    return builder(spec)
 
 
 def compute_diagnostics(idata: az.InferenceData, sampler_spec: SamplerSpec) -> dict:

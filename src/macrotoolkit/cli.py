@@ -6,7 +6,6 @@ from pathlib import Path
 
 import click
 
-from macrotoolkit import report as report_module
 from macrotoolkit.run import REPO_ROOT
 from macrotoolkit.run import run as execute_run
 
@@ -65,7 +64,23 @@ def report_cmd(run_hash: str, runs_root: str | None) -> None:
         sys.exit(1)
 
     try:
-        out_path = report_module.write_report(run_dir)
+        # Registry dispatch (S5-decisions item 4): each family declares its
+        # own report assembler; a family without one is a clear error, not
+        # a guessed-at default.
+        from macrotoolkit.run import load_run_spec
+        from specs.schema import get_family
+
+        spec = load_run_spec(run_dir)
+        writer = get_family(spec.model.family).resolve("report_writer")
+        if writer is None:
+            click.echo(
+                f"error: model.family {spec.model.family!r} declares no "
+                f"report assembler in FAMILY_REGISTRY (specs/schema) -- "
+                f"this family has no report support yet.",
+                err=True,
+            )
+            sys.exit(1)
+        out_path = writer(run_dir)
     except Exception as exc:
         click.echo(f"error: {exc}", err=True)
         sys.exit(1)
