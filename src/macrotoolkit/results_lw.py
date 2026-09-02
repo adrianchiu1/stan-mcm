@@ -73,7 +73,27 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from macrotoolkit.families.lw_sv import (
+    LW_STATE_META,
+    require_c_is_one,
+    structural_coefficients,
+)
 from specs.schema.base import RunSpec, load_spec
+
+# Named state-slot indices (S5-decisions item 2): the ONE source of the
+# lw_sv slot layout is macrotoolkit.families.lw_sv.LW_STATE_META (pinned
+# against build_lw_matrices by tests/test_state_metadata.py); this module
+# only ever addresses the state through these named lookups. The (name,
+# offset) labels carry the state's own timing convention explicitly --
+# e.g. ("g", -1) IS the "slot 3 holds g lagged one period" fact both S4
+# fan-chart bugs tripped over when it lived only in comments.
+_S_YSTAR = LW_STATE_META.slot("ystar", 0)
+_S_YSTAR_M1 = LW_STATE_META.slot("ystar", -1)
+_S_YSTAR_M2 = LW_STATE_META.slot("ystar", -2)
+_S_G_M1 = LW_STATE_META.slot("g", -1)
+_S_G_M2 = LW_STATE_META.slot("g", -2)
+_S_Z_M1 = LW_STATE_META.slot("z", -1)
+_S_Z_M2 = LW_STATE_META.slot("z", -2)
 
 # ---------------------------------------------------------------------------
 # Part A: loading a completed run + trend-cycle series (spec §3.1)
@@ -375,11 +395,14 @@ def compute_trend_cycle_draws(lw_run: LWRun, *, seed: int | None = None) -> Tren
         F, Q, A, Z, R, h_is, h_pc = _system_matrices_for_draw(flat, int(i), lw_run.sv_on)
         sim = simulate_smoother_draw(lw_run.yobs, lw_run.x, F, Q, A, Z, R, lw_run.xi00, lw_run.P00, rng)
         xi = sim.xi_draw
-        ystar[j] = xi[:, 0]
-        output_gap[j] = lw_run.yobs[:, 0] - xi[:, 0]
-        g_arr[j] = xi[:, 3]
-        z_arr[j] = xi[:, 5]
-        rstar[j] = xi[:, 3] + xi[:, 5]
+        # Reporting convention (verbatim from the G5a oracle mapping, per
+        # this module's docstring): row t reports the (g, -1)/(z, -1) slots
+        # -- HLW's own layout, validated against their output at ~1e-12.
+        ystar[j] = xi[:, _S_YSTAR]
+        output_gap[j] = lw_run.yobs[:, 0] - xi[:, _S_YSTAR]
+        g_arr[j] = xi[:, _S_G_M1]
+        z_arr[j] = xi[:, _S_Z_M1]
+        rstar[j] = xi[:, _S_G_M1] + xi[:, _S_Z_M1]
         if lw_run.sv_on:
             # h is log-VARIANCE (spec §1.5); exp(h/2) is the standard
             # deviation -- exp(h) would be the variance, a units bug.
@@ -409,64 +432,38 @@ def compute_trend_cycle_draws(lw_run: LWRun, *, seed: int | None = None) -> Tren
 # ---------------------------------------------------------------------------
 
 
-def _w_ystar_injection(eps_t: float, n: int) -> np.ndarray:
-    """The y*-shock's own per-period state-innovation vector -- eps_ystar
-    only ever enters state slot 0 (``build_lw_matrices``' exact ``Q``
-    construction). Shared by :func:`state_shock_decomposition` (B1, fed a
-    real recovered shock path) and :func:`impulse_response_for_shock` (Part
-    C, fed a synthetic impulse array) via :func:`_propagate_shock_through_F`."""
-    w = np.zeros(n)
-    w[0] = eps_t
-    return w
-
-
-def _w_g_injection(eps_t: float, n: int) -> np.ndarray:
-    """The g-shock's own per-period state-innovation vector -- the
-    ANNUALIZED g innovation enters both slot 3 (g itself) and, divided by 4,
-    slot 0 (y*'s quarterly increment g/4, lw-sv-spec.md §1.3's g/4
-    convention). See :func:`_w_ystar_injection` for the sharing rationale."""
-    w = np.zeros(n)
-    w[0] = eps_t / 4.0
-    w[3] = eps_t
-    return w
-
-
-def _w_z_injection(eps_t: float, n: int) -> np.ndarray:
-    """The z-shock's own per-period state-innovation vector -- eps_z only
-    ever enters state slot 5. See :func:`_w_ystar_injection` for the
-    sharing rationale."""
-    w = np.zeros(n)
-    w[5] = eps_t
-    return w
-
-
-def _propagate_shock_through_F(F: np.ndarray, n: int, eps: np.ndarray, inject) -> np.ndarray:
+def _propagate_shock_through_F(F: np.ndarray, b: np.ndarray, eps: np.ndarray) -> np.ndarray:
     """Propagate ONE shock stream's own process noise through the state
     transition matrix ``F``, starting from the zero state vector at t=-1::
 
-        xi[t] = F @ xi[t-1] + inject(eps[t], n)
+        xi[t] = F @ xi[t-1] + b * eps[t]
 
-    ``inject`` maps this period's scalar shock realization (plus the state
-    dimension ``n``) to that period's (n,) state-innovation vector (one of
-    :func:`_w_ystar_injection` / :func:`_w_g_injection` / :func:`_w_z_injection`).
+    ``b`` is the shock's declared (n,) state-loading vector
+    (``LW_STATE_META.injection_vector(shock)`` -- the family's OWN
+    declaration of where each named shock lands in the state, S5-decisions
+    item 2; e.g. the annualized g shock loads 1.0 into ``("g", -1)`` and
+    0.25 into ``("ystar", 0)``, the quarterly g/4 increment).
 
     Factored out of :func:`state_shock_decomposition`'s inner loop, which
     used to triplicate this exact loop body once per shock (numerics-
     reviewer finding, S4) -- extracting it lets :func:`impulse_response_for_shock`
     (Part C, spec §3.2) reuse the IDENTICAL arithmetic on a synthetic impulse
     array instead of a real recovered shock path, rather than a fourth
-    copy-pasted loop. Behavior-preserving: bit-for-bit identical float
-    operations, in the same order, as the pre-refactor inline loop --
-    confirmed by re-running ``tests/test_g6_hd_identity.py`` /
-    ``tests/test_results_lw.py`` unchanged after this extraction.
+    copy-pasted loop. Behavior-preserving vs the hand-rolled per-shock
+    injection helpers this replaced: the loading coefficients are exact
+    binary fractions (1.0, 0.25), so ``b * eps[t]`` is bit-identical to the
+    old ``w[slot] = eps / 4.0``-style construction -- confirmed by re-running
+    ``tests/test_g6_hd_identity.py`` / ``tests/test_results_lw.py``
+    unchanged.
 
     Returns an ``(len(eps), n)`` array.
     """
     T = len(eps)
+    n = b.shape[0]
     xi = np.zeros((T, n))
     prev = np.zeros(n)
     for t in range(T):
-        cur = F @ prev + inject(eps[t], n)
+        cur = F @ prev + b * eps[t]
         xi[t] = cur
         prev = cur
     return xi
@@ -527,10 +524,9 @@ def state_shock_decomposition(
     Returns a dict with keys ``"init"``, ``"ystar"``, ``"g"``, ``"z"``, each
     an array of shape (T, 7) -- the same state-slot layout as ``xi_draw``.
     """
-    T, n = xi_draw.shape
-    xi_ystar = _propagate_shock_through_F(F, n, eps_ystar, _w_ystar_injection)
-    xi_g = _propagate_shock_through_F(F, n, eps_g, _w_g_injection)
-    xi_z = _propagate_shock_through_F(F, n, eps_z, _w_z_injection)
+    xi_ystar = _propagate_shock_through_F(F, LW_STATE_META.injection_vector("ystar"), eps_ystar)
+    xi_g = _propagate_shock_through_F(F, LW_STATE_META.injection_vector("g"), eps_g)
+    xi_z = _propagate_shock_through_F(F, LW_STATE_META.injection_vector("z"), eps_z)
 
     xi_init = xi_draw - xi_ystar - xi_g - xi_z
     return {"init": xi_init, "ystar": xi_ystar, "g": xi_g, "z": xi_z}
@@ -620,34 +616,18 @@ def gap_pi_shock_decomposition(
             f"{len(y_full)}, {len(pi_full)}."
         )
 
-    a1 = -Z[0, 1]
-    a2 = -Z[0, 2]
-    # a_r read off the z-lag entries (Z[0,5]/Z[0,6] = -a_r/2, no c factor --
-    # build_lw_matrices only multiplies the G-lag entries Z[0,3]/Z[0,4] by
-    # c), so this stays correct regardless of c; the c==1.0 assertion below
-    # is what actually needs c to be 1, not this extraction.
-    a_r = -2.0 * Z[0, 5]
-    b_y = -Z[1, 1]
-    b_pi = A[4, 1]
+    # Named structural-coefficient extraction (S5-decisions item 2): the
+    # matrix positions live in ONE place, macrotoolkit.families.lw_sv.
     # rstar1/rstar2 below are computed as the UNWEIGHTED sum g+z (c=1's
-    # r*=g+z), matching build_lw_matrices' c=1.0 fixed default everywhere in
-    # current scope (estimate_c is hard-validated False --
-    # specs/schema/lw_sv.py). Numerics-reviewer finding (S4): if
-    # estimate_c ever becomes true, Z[0,3]/Z[0,4] (the g lags) would carry a
-    # c != 1 factor the z lags don't, and a naive unweighted g+z sum would
-    # silently corrupt the historical decomposition (verified numerically:
-    # c=1.5 produces a gap-HD reconstruction error of ~0.36 against G6's
-    # 1e-6 tolerance) -- fail loudly instead of silently.
-    c_check = Z[0, 3] / Z[0, 5] if Z[0, 5] != 0.0 else 1.0
-    if not np.isclose(c_check, 1.0, atol=1e-9):
-        raise NotImplementedError(
-            f"gap_pi_shock_decomposition assumes c == 1.0 (spec §1.3's "
-            f"default; estimate_c is not implemented anywhere in current "
-            f"scope), but the system matrices imply c = {c_check!r}. The "
-            f"rstar1/rstar2 computation below sums g+z unweighted, which is "
-            f"only correct for c == 1.0 -- generalize it (weight the g "
-            f"terms by c) before removing this guard."
-        )
+    # r*=g+z); require_c_is_one is the numerics-reviewer-mandated loud
+    # failure if the matrices ever imply c != 1 (see its docstring).
+    coeffs = structural_coefficients(Z, A)
+    require_c_is_one(coeffs["c"], "gap_pi_shock_decomposition")
+    a1 = coeffs["a1"]
+    a2 = coeffs["a2"]
+    a_r = coeffs["a_r"]
+    b_y = coeffs["b_y"]
+    b_pi = coeffs["b_pi"]
 
     gap = {k: np.zeros(T) for k in GAP_BARS}
     pi = {k: np.zeros(T) for k in PI_BARS}
@@ -673,8 +653,8 @@ def gap_pi_shock_decomposition(
     # feedback and does not decay away within a typical sample length
     # (empirically confirmed while developing this module -- verify by
     # reverting to xi00 and re-running tests/test_g6_hd_identity.py).
-    gap_lag1["init"] = float(y_full[3] - state_components["init"][0, 1])
-    gap_lag2["init"] = float(y_full[2] - state_components["init"][0, 2])
+    gap_lag1["init"] = float(y_full[3] - state_components["init"][0, _S_YSTAR_M1])
+    gap_lag2["init"] = float(y_full[2] - state_components["init"][0, _S_YSTAR_M2])
 
     pi_lag1 = {k: 0.0 for k in PI_BARS}
     pi_lag2 = {k: 0.0 for k in PI_BARS}
@@ -695,8 +675,10 @@ def gap_pi_shock_decomposition(
                 rstar1 = rstar2 = 0.0
             else:
                 comp = state_components[k]
-                rstar1 = comp[i, 3] + comp[i, 5]
-                rstar2 = comp[i, 4] + comp[i, 6]
+                # r*_{t-1} / r*_{t-2} contributions off the named lag slots
+                # (r* = g + z, c == 1 guaranteed by the guard above).
+                rstar1 = comp[i, _S_G_M1] + comp[i, _S_Z_M1]
+                rstar2 = comp[i, _S_G_M2] + comp[i, _S_Z_M2]
             val = a1 * gap_lag1[k] + a2 * gap_lag2[k] - (a_r / 2.0) * (rstar1 + rstar2)
             if k == "is":
                 val += eps_is[i]
@@ -758,7 +740,7 @@ def y_level_decomposition(gap: dict[str, np.ndarray], state_components: dict[str
     """
     y: dict[str, np.ndarray] = {}
     for k in ("init", "ystar", "g", "z"):
-        y[k] = gap[k] + state_components[k][:, 0]
+        y[k] = gap[k] + state_components[k][:, _S_YSTAR]
     # "is" and "rdata" have no state (y*) component: their only channel into
     # y is via gap (eps_is by definition; the real-rate data because r never
     # enters the state either -- same reasoning as their zero rstar terms in
@@ -1063,7 +1045,7 @@ def impulse_response_for_shock(
         raise ValueError(
             f"impulse_response_for_shock: shock must be one of {IRF_SHOCKS!r}; got {shock!r}."
         )
-    n = F.shape[0]
+    n = LW_STATE_META.n_state
 
     eps_ystar = np.zeros(horizon)
     eps_g = np.zeros(horizon)
@@ -1074,9 +1056,9 @@ def impulse_response_for_shock(
 
     state_components = {
         "init": np.zeros((horizon, n)),
-        "ystar": _propagate_shock_through_F(F, n, eps_ystar, _w_ystar_injection),
-        "g": _propagate_shock_through_F(F, n, eps_g, _w_g_injection),
-        "z": _propagate_shock_through_F(F, n, eps_z, _w_z_injection),
+        "ystar": _propagate_shock_through_F(F, LW_STATE_META.injection_vector("ystar"), eps_ystar),
+        "g": _propagate_shock_through_F(F, LW_STATE_META.injection_vector("g"), eps_g),
+        "z": _propagate_shock_through_F(F, LW_STATE_META.injection_vector("z"), eps_z),
     }
 
     x_zero = np.zeros((horizon, 6))
@@ -1091,9 +1073,9 @@ def impulse_response_for_shock(
     )
     gap_response = gp["gap"][shock] if shock in GAP_BARS else np.zeros(horizon)
     pi_response = gp["pi"][shock]
-    rstar_response = state_total[:, 3] + state_total[:, 5]
-    g_response = state_total[:, 3]
-    y_response = gap_response + state_total[:, 0]
+    rstar_response = state_total[:, _S_G_M1] + state_total[:, _S_Z_M1]
+    g_response = state_total[:, _S_G_M1]
+    y_response = gap_response + state_total[:, _S_YSTAR]
 
     return {
         "gap": gap_response,
@@ -1161,30 +1143,14 @@ def compute_irf_draws(lw_run: LWRun) -> IRFDraws:
 
 
 def _extract_gap_pi_coeffs(Z: np.ndarray, A: np.ndarray) -> tuple[float, float, float, float, float]:
-    """The 5 structural coefficients (a1, a2, a_r, b_y, b_pi) read directly
-    off a draw's ``Z``/``A`` system matrices -- the SAME extraction
-    :func:`gap_pi_shock_decomposition` documents and performs internally
-    (``Z[0,1] = -a1``, ``Z[0,2] = -a2``, ``Z[0,5] = -a_r/2`` -- no ``c``
-    factor, since ``a_r`` is read off the z-lag entries, matching that
-    function's own comment -- ``Z[1,1] = -b_y``, ``A[4,1] = b_pi``).
-
-    Deliberately duplicated here rather than imported out of
-    ``gap_pi_shock_decomposition`` (which is not touched by this module's S4
-    fan-chart addition at all, per the task brief's "do not modify
-    gap_pi_shock_decomposition ... behavior" constraint): the fan-chart
-    forward simulation below needs the SAME 5 numbers for its own one-step
-    AR recursion, but is not itself calling that already-G6-validated
-    function's shock-decomposition machinery, so re-deriving the 5 numbers
-    from ``Z``/``A`` directly (rather than threading a private helper
-    through an unrelated, validated function) keeps the two call sites
-    independent.
-    """
-    a1 = -Z[0, 1]
-    a2 = -Z[0, 2]
-    a_r = -2.0 * Z[0, 5]
-    b_y = -Z[1, 1]
-    b_pi = A[4, 1]
-    return a1, a2, a_r, b_y, b_pi
+    """The 5 structural coefficients (a1, a2, a_r, b_y, b_pi) as a tuple --
+    a thin unpacking of :func:`macrotoolkit.families.lw_sv.
+    structural_coefficients` (the ONE place the matrix positions live,
+    S5-decisions item 2; this replaced an earlier deliberate duplication of
+    the extraction). Kept because the fan-chart tests exercise it directly;
+    new code should consume the named dict instead."""
+    coeffs = structural_coefficients(Z, A)
+    return coeffs["a1"], coeffs["a2"], coeffs["a_r"], coeffs["b_y"], coeffs["b_pi"]
 
 
 def _fan_forecast_step(
@@ -1408,7 +1374,7 @@ def simulate_fan_draw(
         # that requires xi_t's fresh process noise to become knowable --
         # it could not have been seeded before the loop started (numerics-
         # reviewer finding, S4 -- see rate_gap_seed's docstring above).
-        rstar_t = xi_t[3] + xi_t[5]
+        rstar_t = xi_t[_S_G_M1] + xi_t[_S_Z_M1]
 
         if forecast_r_rule == "neutral":
             rate_gap_t = 0.0
@@ -1435,7 +1401,7 @@ def simulate_fan_draw(
             rate_gap_t, rate_gap_prev, a1, a2, a_r, b_pi, b_y, eps_is_t, eps_pc_t,
         )
 
-        y_level[t] = gap_t + xi_t[0]
+        y_level[t] = gap_t + xi_t[_S_YSTAR]
         pi_path[t] = pi_t
         gap_path[t] = gap_t
         # REPORTING alignment (pre-S5 review fix, 2026-09-02, DECISIONS.md):
@@ -1465,7 +1431,7 @@ def simulate_fan_draw(
     # seed) is unchanged by this alignment fix.
     w_final = sqrt_Q @ rng.standard_normal(n)
     xi_final = F @ xi_prev + w_final
-    rstar_path[horizon - 1] = xi_final[3] + xi_final[5]
+    rstar_path[horizon - 1] = xi_final[_S_G_M1] + xi_final[_S_Z_M1]
 
     y_hist_last4 = np.asarray(y_hist_last4, dtype=np.float64)
     y_growth_4q = np.empty(horizon)
@@ -1564,26 +1530,20 @@ def compute_fan_draws(lw_run: LWRun, *, seed: int | None = None) -> FanDraws:
     for j, i in enumerate(idx):
         i = int(i)
         F, Q, A, Z, R, h_is, h_pc = _system_matrices_for_draw(flat, i, lw_run.sv_on)
-        a1, a2, a_r, b_y, b_pi = _extract_gap_pi_coeffs(Z, A)
-        # rstar_t below (both here and inside simulate_fan_draw's loop) sums
-        # g+z unweighted, correct only for c==1.0 -- same guard
-        # gap_pi_shock_decomposition applies to itself (numerics-reviewer,
-        # S4); dormant today (estimate_c is hard-validated False everywhere,
-        # specs/schema/lw_sv.py) but fails loudly instead of silently
-        # corrupting the fan chart if that ever changes.
-        c_check = Z[0, 3] / Z[0, 5] if Z[0, 5] != 0.0 else 1.0
-        if not np.isclose(c_check, 1.0, atol=1e-9):
-            raise NotImplementedError(
-                f"compute_fan_draws assumes c == 1.0 (spec §1.3's default; "
-                f"estimate_c is not implemented anywhere in current scope), "
-                f"but the system matrices imply c = {c_check!r}. rstar_t "
-                f"sums g+z unweighted, which is only correct for c == 1.0."
-            )
+        # Named coefficient extraction + the c == 1 guard (rstar_t below,
+        # both here and inside simulate_fan_draw's loop, sums g+z
+        # unweighted -- numerics-reviewer, S4; dormant today but fails
+        # loudly instead of silently corrupting the fan chart).
+        coeffs = structural_coefficients(Z, A)
+        require_c_is_one(coeffs["c"], "compute_fan_draws")
+        a1, a2, a_r, b_y, b_pi = (
+            coeffs["a1"], coeffs["a2"], coeffs["a_r"], coeffs["b_y"], coeffs["b_pi"],
+        )
         sim = simulate_smoother_draw(lw_run.yobs, lw_run.x, F, Q, A, Z, R, lw_run.xi00, lw_run.P00, rng)
         xi_draw = sim.xi_draw
 
-        gap_lag1 = float(lw_run.yobs[-1, 0] - xi_draw[-1, 0])
-        gap_lag2 = float(lw_run.yobs[-2, 0] - xi_draw[-2, 0])
+        gap_lag1 = float(lw_run.yobs[-1, 0] - xi_draw[-1, _S_YSTAR])
+        gap_lag2 = float(lw_run.yobs[-2, 0] - xi_draw[-2, _S_YSTAR])
         pi_lag1 = float(lw_run.yobs[-1, 1])
         pi_lag2 = float(lw_run.yobs[-2, 1])
         pi_lag3 = float(lw_run.yobs[-3, 1])
@@ -1591,7 +1551,7 @@ def compute_fan_draws(lw_run: LWRun, *, seed: int | None = None) -> FanDraws:
         # (r-r*)_{T-1} ONLY -- the sole rate-gap value derivable before
         # simulate_fan_draw's own loop starts; see that function's
         # rate_gap_seed docstring for why (r-r*)_T cannot be seeded here.
-        rate_gap_seed = float(lw_run.r_full[-2] - (xi_draw[-1, 3] + xi_draw[-1, 5]))
+        rate_gap_seed = float(lw_run.r_full[-2] - (xi_draw[-1, _S_G_M1] + xi_draw[-1, _S_Z_M1]))
         y_hist_last4 = lw_run.yobs[-4:, 0]
         r_last = float(lw_run.r_full[-1])
 

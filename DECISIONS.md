@@ -3,6 +3,30 @@
 One dated line per judgment call not fixed by the spec, with rationale.
 Newest first.
 
+- **2026-09-02 — S4.5 item 2 landed (S5-decisions): named state/coefficient
+  metadata replaces slot-peeking.** New `macrotoolkit/families/` package
+  (numerics-side family declarations, kept separate from `specs/schema/`'s
+  spec-side fragments to avoid an import cycle): `base.StateSpaceMeta` is
+  the generic machinery; `lw_sv.LW_STATE_META` declares the state labels
+  with explicit time offsets (`("g", -1)` IS the "slot 3 holds g lagged"
+  convention, now in the label rather than the reader's memory), the
+  per-shock state loadings (a declared B matrix; `Q == B diag(σ²) Bᵀ`
+  pinned against `build_lw_matrices` by `tests/test_state_metadata.py`),
+  and the measurement-shock order; `lw_sv.structural_coefficients(Z, A)`
+  is now the ONE place structural-coefficient matrix positions are read,
+  with the c≠1 guard consolidated into `require_c_is_one` (same ratio,
+  tolerance, exception type, and control-flow position as the two former
+  inline guards). `results_lw.py` consumes names only. `smoother.py` was
+  deliberately NOT edited: it DEFINES the layout (validated to ~1e-12 by
+  G1/G5a), so the metadata is pinned against it by tests instead of the
+  core being rewritten. Behavior preservation demonstrated two ways:
+  bit-for-bit identical HD bars / state components / all 25 IRF cells /
+  seeded fan-draw outputs on the g1_harness synthetic fixture before vs
+  after the refactor (the g loading 0.25·eps is an exact power-of-two
+  scale, so even the injection rewrite is bit-identical), and the full
+  fast suite green unchanged (231 passed = 219 baseline + 12 new metadata
+  pins). Fresh numerics-reviewer pass: clean, no findings.
+
 - **2026-09-02 — Pre-S5 framework review: decision menu recorded in
   `plans/S5-decisions.md`; engineering doctrine promoted to
   `ENGINEERING.md`.** The review re-framed S1–S4 as a dry run of the
