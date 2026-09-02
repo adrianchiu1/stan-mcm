@@ -3,6 +3,32 @@
 One dated line per judgment call not fixed by the spec, with rationale.
 Newest first.
 
+- **2026-08-31 — S4 COMPLETE: DK smoother, four output modules, HTML
+  report; G6 green; report renders all figures from a real run (spec §7's
+  S4 acceptance test, met in full).** Full build-order record: DK
+  simulation smoother (`smoother.py` §5, literal two-pass Durbin-Koopman
+  per the user's resolved open question); `results_lw.py`'s four parts
+  (trend-cycle §3.1, historical decomposition §3.4 + gate G6, IRF matrix
+  §3.2, fan charts §3.3); `plots.py` (matplotlib figures for all four);
+  `report.py` + `mtk report <hash>` (one self-contained HTML report,
+  base64-embedded figures, zero external references). Two real numerics
+  bugs were found and fixed by the mandatory numerics-reviewer pass in the
+  fan-chart module before commit (full account in this file's other
+  2026-08-31 entries) — the review process worked exactly as intended: the
+  DK smoother, trend-cycle, HD/G6, and IRF machinery all passed review
+  clean on the first or second pass; the fan chart (the one genuinely NEW
+  piece of stochastic-simulation machinery in this stage, as opposed to
+  reuse of already-validated recursions) needed two rounds. Both S3
+  acceptance runs (`spec_sv.yaml`, `spec_sv_full_vintage.yaml`)
+  regenerated container-locally with PASS verdicts and 0 divergences,
+  reproducing S3's own diagnostics exactly; `examples/us_lw_sv/README.md`
+  records both plus the S4 report-generation summary. Fast suite:
+  112 (S3 baseline) -> 217 passed. `tests/test_render.py::test_no_sv_
+  render_is_byte_stable` untouched throughout -- no `stan/` file was
+  edited anywhere in S4, as the task brief anticipated. `HANDOFF.md`
+  rewritten for S5 (full SBC G3/G4, G5b Bayesian HLW tracking,
+  prior-sweep notebook, docs, per spec §7's S5 row).
+
 - **2026-08-13 — `pytest` is installed as a `uv tool` with the project's
   full dependency set + an editable `macrotoolkit` install, rather than
   relying on a project-local `.venv` someone must remember to activate.**
@@ -341,6 +367,103 @@ Newest first.
   (vs −0.070), b_y 0.036 (vs 0.073) — time-varying measurement variances
   reallocate what the constant-scale model forced elsewhere; recorded in
   `examples/us_lw_sv/README.md`.
+
+- **2026-08-31 — S4 plan's three open questions resolved (user decisions,
+  start of S4 implementation, full rationale in `plans/S4-plan.md`).**
+  (1) **Simulation smoother algorithm**: the literal two-pass
+  Durbin-Koopman smoother (spec §2.4), not the FFBS alternative that was
+  proposed with rationale (FFBS reuses `_rts_smooth`'s `J_t` directly at
+  half the per-draw cost) — user chose to implement the spec's named
+  algorithm as written. Per draw: simulate a "plus" state+observation path
+  from the unconditional model at that draw's own (F, Q, A, Z, R_t),
+  filter+RTS-smooth both the real data and the plus path (reusing the
+  existing `kalman_smoother`), combine via `xi_draw = xi_smooth -
+  xi+_smooth + xi+`. Structural shocks for HD still fall out algebraically
+  from consecutive drawn states (no separate shock-smoother needed).
+  Validation: Monte Carlo mean/variance convergence to `kalman_smoother`'s
+  output, plus a deterministic zero-plus-noise check that the DK
+  combination step reduces exactly to `xi_smooth` (a code-level mirror
+  independent of RNG, standing in for G1's Stan-vs-Python mirror since
+  §2.4 is Python-only). (2) **Smoother-draw thinning**: benchmark first —
+  default `outputs.smoother_draws: all`, measure wall-clock on the
+  regenerated `spec_sv.yaml` run (6,000 draws) before writing any plotting
+  code against it; only switch the example specs' default to a thinned
+  value (proposed `thin: 10` if needed) if the full pass measurably
+  exceeds ~2 minutes, recorded here with the actual number once measured.
+  The DK choice in (1) roughly doubles the per-draw cost versus FFBS,
+  making this benchmark more likely to bind. (3) **IRF 5×5 grid
+  columns**: `gap, π, r*, y, g` (rows/shocks are already fixed by spec
+  §1.4's five named shocks) — chosen so every shock has at least one
+  column showing its own structural role (ε_IS→gap, ε_PC→π, ε_g→g,
+  ε_z→r*, ε_y*→y); `z`'s own path was dropped in favor of `r*` (their sum)
+  since `z` alone is visually near-identical to `r* − g` and `r*` is the
+  object the report/README already center on.
+
+- **2026-08-31 — S4: typed `outputs` schema for `lw_sv` (`LwSvOutputs`)
+  changes lw_sv run-hash identity again (S3's precedent, DECISIONS.md's
+  "S2 run-hash stability sacrificed" entry, applies again here).**
+  `RunSpec.outputs` was a free-form `dict[str, Any]`; S4 needed it typed
+  (`horizon`, `irf_horizon`, `irf_vol_reference`, `smoother_draws`,
+  `forecast_r_rule` — spec §2.3/§3) so the output modules have a validated
+  config to read instead of hand-parsing a dict. Implemented via the same
+  manually-dispatched `FamilyEntry` pattern `model.options` already uses
+  (`specs/schema/__init__.py`'s `outputs_model`, `None` for `local_level`
+  so its `outputs` stays a free-form dict). Effect: an `outputs: {}` spec
+  (S2/S3's example specs) now canonicalizes to the full set of typed
+  defaults instead of an empty mapping, changing `to_canonical_yaml()`'s
+  output and therefore the run-identity hash for every `lw_sv` spec —
+  same tradeoff as the S3 KF generalization (old run dirs remain valid
+  immutable records; this is a schema precision improvement, not a
+  numerics change, so no gate is expected to move). The S4 acceptance
+  runs (`spec_sv.yaml`, `spec_sv_full_vintage.yaml`) were kicked off
+  *before* this schema change landed, so their hashes reflect the
+  pre-change canonical form — that's fine, they're still valid
+  regenerated records; only a *future* re-run of those specs would pick
+  up a new hash.
+
+- **2026-08-31 — S4 open question 2 (smoother-draw thinning) measured: `smoother_draws: all` stays the default, no thinning needed.** Benchmarked the DK simulation smoother's trend-cycle pass (`macrotoolkit.results_lw.compute_trend_cycle_draws`) on the regenerated `spec_sv.yaml` run (`runs/70ad47166eaf`, 4 chains x 1500 = 6,000 draws, T=234, SV on): **39.5 s total (~6.6 ms/draw)**, well under the ~2-minute concern threshold from `plans/S4-plan.md` — despite the two-pass DK algorithm (chosen over FFBS) roughly doubling the per-draw cost versus the original FFBS estimate. No change to the schema default (`outputs.smoother_draws: all`) or the example specs. Historical-decomposition's own per-draw cost (Part B) is comparable order-of-magnitude (same DK smoother call plus O(T) arithmetic) and expected to stay well within budget too; re-benchmark if `plots.py`/`report.py` (aggregating across all draws for every output module) turns out materially slower in practice.
+
+- **2026-08-31 — S4: two numerics bugs found and fixed in `results_lw.py`'s
+  fan-chart module (Part D, spec §3.3) during the mandatory
+  numerics-reviewer pass, before commit.** Both caught by the review
+  process this repo's task brief mandates for any smoother/state-space
+  change, neither present in the code that shipped.
+  (1) **Rate-gap seeding/ordering**: an earlier draft seeded
+  `rate_gap_lag1`/`rate_gap_lag2` from `r_full[-1] - (xi_draw[-1,3]+
+  xi_draw[-1,5])` / the T-1 analogue, and deferred the loop's own
+  freshly-computed `(r-r*)` value to the NEXT iteration. Because
+  `xi_draw`'s slots 3/5 carry `g`/`z` with a built-in one-period lag (this
+  state's own convention, per `smoother.py`), that seed actually equals
+  `(r-r*)_{T-1}` paired with `r_T` -- a period mismatch -- and `(r-r*)_T`
+  (needed for the FIRST forecast period's own AR term) cannot be known
+  before the loop starts at all: it requires that period's own fresh
+  process-noise draw. Fixed: reduced to a SINGLE pre-loop seed
+  (`(r-r*)_{T-1}`, the one value genuinely derivable in advance), computed
+  `(r-r*)_T` inside the loop and used it in the SAME iteration it's
+  computed, with a single carried register for the second lag. Confirmed
+  by the reviewer: the bug caused up to ~65% relative distortion of the
+  first forecast period's gap value under `forecast_r_rule: neutral`.
+  (2) **IS-curve sign error** (found by the SAME reviewer in a follow-up
+  pass, after bug 1's fix landed): `_fan_forecast_step`'s combined
+  `rate_gap = (r-r*)` term used a MINUS
+  (`-(a_r/2)*(rate_gap_lag1+rate_gap_lag2)`) carried over from
+  `gap_pi_shock_decomposition`'s per-bar convention -- but that function's
+  minus is only valid for the r*-ONLY half of a split whose OTHER half (a
+  separate `+(a_r/2)*(r_{t-1}+r_{t-2})` data-injection term, added only to
+  its "init" bar) supplies the offsetting plus; summed across bars the two
+  halves combine to a net PLUS, matching spec §1.2's IS curve. The
+  fan-chart function combines `r` and `r*` into one number up front (no
+  separate data term to cancel against), so it needs its own `+` applied
+  directly. Confirmed by the reviewer (symbolic re-derivation from
+  `build_lw_matrices` plus numerical reconstruction against a real
+  smoothed gap path): the wrong sign produced 100%+ relative distortion of
+  forecast gap values by late horizons under `forecast_r_rule:
+  last_value`. Both fixes are covered by new regression tests in
+  `tests/test_fan_charts.py`, including a standalone,
+  run-independent sign pin (`test_fan_forecast_step_is_curve_term_is_a_
+  plus_not_a_minus`) and two zero-noise deterministic reconstruction tests
+  verified (by the reviewer, empirically) to fail against the pre-fix
+  code and pass against the fix.
 
 - **2026-08-31 — S3 COVID payoff exhibit delivered: run `9d10bcf32a40`
   (full vintage through 2026Q1, SV on, no hand-set COVID machinery).**

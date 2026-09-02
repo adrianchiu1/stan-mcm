@@ -84,6 +84,69 @@ INITIAL_STATE_PRIOR = {
 }
 
 
+class ThinSpec(BaseModel):
+    """``outputs.smoother_draws: {thin: k}`` -- use every ``k``-th posterior
+    draw for the simulation-smoother-derived output modules (trend-cycle
+    bands, fans, HD) instead of every draw. ``k`` must be a positive
+    integer (``thin: 1`` is equivalent to, but not the same spelling as,
+    ``smoother_draws: all``)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    thin: int = Field(gt=0, description="Use every k-th posterior draw; must be >= 1.")
+
+
+class LwSvOutputs(BaseModel):
+    """Options for ``lw_sv``'s ``outputs:`` block (spec §2.3 draft schema,
+    §3.1-3.5's output modules). Defaults match the spec §2.3 example YAML.
+
+    ``smoother_draws``: the Durbin-Koopman simulation smoother
+    (``macrotoolkit.smoother``) re-runs once per posterior draw used here --
+    a real per-draw cost, benchmarked and documented in DECISIONS.md
+    (2026-08-31 S4 open question 2). ``"all"`` is the spec's own example
+    default; ``{thin: k}`` is the documented fallback if the full pass is
+    too slow for interactive report generation.
+
+    ``forecast_r_rule``: spec §3.3 exposes three values in the schema but
+    only mandates implementing two in v1 (``neutral``: hold the real-rate
+    *gap* input at r_{T+h} = r*_{T+h}; ``last_value``: hold r_{T+h} at its
+    last observed value). ``user_path`` is schema-only for now -- accepted
+    by the type so the schema documents the full spec vocabulary, but
+    rejected by a validator with a clear "not implemented yet" message
+    (same pattern as ``LwSvOptions.estimate_c`` below), not silently
+    treated as ``neutral``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    horizon: int = Field(default=12, ge=1, description="Fan-chart forecast horizon in quarters.")
+    irf_horizon: int = Field(default=20, ge=1, description="IRF horizon in quarters.")
+    irf_vol_reference: Literal["end_of_sample", "sample_mean"] = Field(
+        default="end_of_sample",
+        description="Reference point for the 'one-sd shock' IRF convention (spec §3.2).",
+    )
+    smoother_draws: Literal["all"] | ThinSpec = Field(
+        default="all",
+        description="'all' (every posterior draw) or {thin: k} (every k-th draw).",
+    )
+    forecast_r_rule: Literal["neutral", "last_value", "user_path"] = Field(
+        default="neutral",
+        description="Real-rate-gap convention for fan-chart forecasting (spec §3.3).",
+    )
+
+    @field_validator("forecast_r_rule")
+    @classmethod
+    def _user_path_not_implemented(cls, v: str) -> str:
+        if v == "user_path":
+            raise ValueError(
+                "outputs.forecast_r_rule: user_path is not implemented yet "
+                "-- spec §3.3 mandates only 'neutral' and 'last_value' in "
+                "v1. Use one of those, or supply a user path via a later "
+                "stage once user_path exists."
+            )
+        return v
+
+
 class LwSvOptions(BaseModel):
     """Options for ``model.family: lw_sv`` (spec §2.3 draft schema)."""
 

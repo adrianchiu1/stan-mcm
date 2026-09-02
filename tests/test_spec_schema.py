@@ -323,3 +323,74 @@ def test_lw_sv_sv_shocks_rejects_single_shock_and_duplicates() -> None:
         RunSpec.model_validate(_lw_sv_spec_dict(["is", "is"]))
     with pytest.raises(pydantic.ValidationError):
         RunSpec.model_validate(_lw_sv_spec_dict(["is", "pc", "extra"]))
+
+
+# ---------------------------------------------------------------------------
+# lw_sv outputs schema (S4, lw-sv-spec.md §2.3/§3; specs/schema/lw_sv.py
+# LwSvOutputs) -- typed per-family validation via FamilyEntry.outputs_model,
+# the same manually-dispatched pattern model.options already uses.
+# ---------------------------------------------------------------------------
+
+
+def test_lw_sv_outputs_defaults_match_spec_example() -> None:
+    spec = RunSpec.model_validate(_lw_sv_spec_dict(["is", "pc"]))
+    out = spec.outputs
+    assert out.horizon == 12
+    assert out.irf_horizon == 20
+    assert out.irf_vol_reference == "end_of_sample"
+    assert out.smoother_draws == "all"
+    assert out.forecast_r_rule == "neutral"
+
+
+def test_lw_sv_outputs_accepts_thin_spec() -> None:
+    d = _lw_sv_spec_dict(["is", "pc"])
+    d["outputs"] = {"smoother_draws": {"thin": 10}}
+    spec = RunSpec.model_validate(d)
+    assert spec.outputs.smoother_draws.thin == 10
+
+
+def test_lw_sv_outputs_thin_must_be_positive() -> None:
+    d = _lw_sv_spec_dict(["is", "pc"])
+    d["outputs"] = {"smoother_draws": {"thin": 0}}
+    with pytest.raises(pydantic.ValidationError, match="thin"):
+        RunSpec.model_validate(d)
+
+
+def test_lw_sv_outputs_accepts_last_value_forecast_rule() -> None:
+    d = _lw_sv_spec_dict(["is", "pc"])
+    d["outputs"] = {"forecast_r_rule": "last_value"}
+    spec = RunSpec.model_validate(d)
+    assert spec.outputs.forecast_r_rule == "last_value"
+
+
+def test_lw_sv_outputs_rejects_user_path_as_not_implemented() -> None:
+    """spec §3.3 exposes user_path in the schema vocabulary but v1 only
+    implements neutral/last_value -- a spec asking for user_path must fail
+    loudly, not silently fall back to neutral."""
+    d = _lw_sv_spec_dict(["is", "pc"])
+    d["outputs"] = {"forecast_r_rule": "user_path"}
+    with pytest.raises(pydantic.ValidationError, match="user_path"):
+        RunSpec.model_validate(d)
+
+
+def test_lw_sv_outputs_extra_forbid_rejects_unknown_key() -> None:
+    d = _lw_sv_spec_dict(["is", "pc"])
+    d["outputs"] = {"not_a_real_key": 1}
+    with pytest.raises(pydantic.ValidationError, match="not_a_real_key"):
+        RunSpec.model_validate(d)
+
+
+def test_lw_sv_outputs_non_dict_rejected() -> None:
+    d = _lw_sv_spec_dict(["is", "pc"])
+    d["outputs"] = "all"
+    with pytest.raises(pydantic.ValidationError, match="outputs must be a mapping"):
+        RunSpec.model_validate(d)
+
+
+def test_local_level_outputs_stays_free_form_dict() -> None:
+    """local_level has no registered outputs_model -- outputs stays the
+    free-form dict RunSpec declares, unaffected by lw_sv's typed schema."""
+    d = _valid_spec_dict()
+    d["outputs"] = {"anything": "goes"}
+    spec = RunSpec.model_validate(d)
+    assert spec.outputs == {"anything": "goes"}

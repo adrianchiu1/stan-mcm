@@ -1,19 +1,25 @@
 """Python mirror of the Stan Kalman-filter machinery for the LW model.
 
-Scope (S2 + the S3 KF generalization, plans/S3-plan.md): the KF
-log-likelihood (gate G1) with constant OR time-varying measurement
-covariance R_t (in the marginalized LW form the SV shocks are measurement
-errors, so SV time variation enters through R_t; Q stays constant -- see
-HANDOFF.md's S3 warning), and the RTS fixed-interval smoother (gate G5a).
-The Durbin-Koopman *simulation* smoother of spec §2.4 is S4 scope -- do
-not add it here until S4.
+Scope (S2 + the S3 KF generalization, plans/S3-plan.md, + S4's simulation
+smoother, plans/S4-plan.md): the KF log-likelihood (gate G1) with constant
+OR time-varying measurement covariance R_t (in the marginalized LW form
+the SV shocks are measurement errors, so SV time variation enters through
+R_t; Q stays constant -- see HANDOFF.md's S3 warning), the RTS
+fixed-interval smoother (gate G5a), and the Durbin-Koopman *simulation*
+smoother of spec §2.4 (Python-only -- no `stan/` mirror; validated by
+tests/test_smoother_sim.py instead of a G1-style Stan comparison).
 
-Three layers, mirroring the Stan side exactly:
+Four layers, the first three mirroring the Stan side exactly:
 
 1. ``build_lw_matrices``      <-> ``stan/functions/ssm_matrices_lw.stan``
 2. ``kalman_loglik``           <-> ``stan/functions/kalman_loglik_tv.stan``
-3. ``kalman_smoother``         (Python only until S4's simulation smoother;
-                                validated against the HLW oracle in G5a)
+3. ``kalman_smoother``         (Python only; validated against the HLW
+                                oracle in G5a)
+4. ``simulate_smoother_draw``  (Python only, S4; per-draw joint state +
+                                structural-shock path draws feeding the
+                                trend-cycle objects, historical
+                                decomposition, and fan-chart seeds -- spec
+                                §2.4)
 
 State-space form (Hamilton/HLW notation; all constants stamped, no options):
 
@@ -49,6 +55,8 @@ every covariance after each update, in the same order as the Stan function,
 so the two mirrors agree to ~1e-8 (gate G1) rather than merely "closely".
 """
 from __future__ import annotations
+
+from dataclasses import dataclass
 
 import numpy as np
 from numba import njit
@@ -434,3 +442,304 @@ def kalman_smoother(
         "xi_smooth": xi_sm,
         "P_smooth": P_sm,
     }
+
+
+# ---------------------------------------------------------------------------
+# 5. Durbin-Koopman simulation smoother (spec §2.4, plans/S4-plan.md "open
+#    question 1", user-confirmed 2026-08-31: the literal two-pass DK
+#    algorithm, not FFBS). Per posterior draw, at that draw's own (F, Q, A,
+#    Z, R_t) and the REAL yobs/x, produces a joint draw of the full state
+#    path from its exact smoothing distribution p(xi_1:T | yobs), plus the
+#    five structural shocks it implies (spec §2.4 point 2) -- feeding the
+#    trend-cycle objects, historical decomposition, and fan-chart seeds
+#    downstream (results_lw.py, S4 next step).
+#
+#    GATE: this section's correctness is gated by tests/test_smoother_sim.py
+#    (Monte Carlo mean/variance convergence to kalman_smoother's xi_smooth/
+#    P_smooth, plus a deterministic zero-plus-noise identity check standing
+#    in for a Stan-side G1 mirror, since §2.4 is Python-only) -- do not
+#    build results_lw.py against this section's output until that file is
+#    green.
+#
+#    HANDOFF.md's S4 warning applies here as much as to results_lw.py: for
+#    an SV draw, build R as sv_diag_variance_path(h_is, h_pc) from that
+#    draw's OWN saved h_is/h_pc transformed parameters -- never re-derive h
+#    from nu.
+# ---------------------------------------------------------------------------
+
+
+def _psd_sqrt(M: np.ndarray) -> np.ndarray:
+    """A symmetric matrix square root of a symmetric positive-semidefinite
+    matrix M (or a batch of them: any leading shape, last two dims square --
+    ``np.linalg.eigh`` batches automatically), robust to exact rank
+    deficiency.
+
+    Needed because Q is NOT full rank: per ``build_lw_matrices``'s
+    construction, only Q[0,0], Q[0,3]/Q[3,0], Q[3,3], Q[5,5] are nonzero --
+    rows/cols 1, 2, 4, 6 (the deterministic lag-copy states, HANDOFF.md's
+    state-slot warning) are identically zero, making Q rank 3 of 7. A plain
+    Cholesky factor (``np.linalg.cholesky``, used everywhere else in this
+    module) raises ``LinAlgError: Matrix is not positive definite`` on a
+    rank-deficient input even though Q is a perfectly good covariance to
+    simulate from -- eigendecomposition sidesteps that: ``M = V diag(w)
+    V'``, any tiny/negative eigenvalues (floating-point noise around exact
+    zeros) clipped to 0 before the sqrt, so ``L @ L.T == M`` (up to
+    floating-point round-off) for any PSD input, full-rank or not.
+
+    Re-symmetrizes ``M`` first (``0.5 * (M + M.T)``, batched over any
+    leading dims) -- the same explicit-symmetrization discipline
+    ``_kf_core``/``_rts_smooth`` apply to every propagated covariance
+    elsewhere in this module (numerics-reviewer, S4). ``np.linalg.eigh``
+    would otherwise silently read only ``M``'s lower triangle, masking a
+    genuinely asymmetric input rather than catching or averaging it.
+    """
+    M = 0.5 * (M + np.swapaxes(M, -1, -2))
+    w, v = np.linalg.eigh(M)
+    w = np.clip(w, 0.0, None)
+    sqrt_w = np.sqrt(w)
+    return v * sqrt_w[..., None, :]  # V @ diag(sqrt(w)), batched
+
+
+def _simulate_plus_path(
+    F: np.ndarray,
+    Q: np.ndarray,
+    A: np.ndarray,
+    Z: np.ndarray,
+    R_path: np.ndarray,
+    x: np.ndarray,
+    xi00: np.ndarray,
+    P00: np.ndarray,
+    rng: np.random.Generator,
+    zero_noise: bool = False,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Simulate one draw from the *unconditional* linear-Gaussian model at
+    the given system matrices (Durbin & Koopman 2002's "plus" path, step 1
+    of plans/S4-plan.md's algorithm): ``xi+_0 ~ N(xi00, P00)``,
+    ``xi+_t = F @ xi+_{t-1} + w+_t`` (``w+_t ~ N(0, Q)``),
+    ``y+_t = A'x_t + Z @ xi+_t + e+_t`` (``e+_t ~ N(0, R_t)``) for
+    t = 1..T. Reuses the real ``x``/``A``/``Z``/``R_path``; only the noise
+    draws and the resulting state/obs path are simulated. Returns
+    ``(xi_plus, y_plus)``, both length T, indexed exactly like
+    ``kalman_smoother``'s ``xi_pred``/``xi_filt`` (row t = period t+1 in
+    the ``xi+_1, ..., xi+_T`` notation above).
+
+    ``zero_noise=True`` short-circuits every noise draw to exactly zero
+    (``xi+_0 = xi00`` exactly, no ``w+``/``e+`` at any t) -- the
+    deterministic "plus" system used by the zero-plus-noise identity check
+    in tests/test_smoother_sim.py. It exercises the same code path as the
+    real stochastic draw (same matrix multiplies, same loop), just with the
+    RNG draws replaced by zeros, so that test is a real check of the DK
+    combination step downstream, not a re-derivation of the same formula.
+
+    Ordinary numpy-random Python function, not ``@njit``: numba's RNG story
+    is awkward for multivariate-normal draws (plans/S4-plan.md's resolved
+    open question 1), and the per-draw cost here is dominated by the two
+    ``kalman_smoother`` passes this feeds, not this O(T) simulation loop --
+    matching numba style would fight the RNG for no real benefit.
+    """
+    T = x.shape[0]
+    n = F.shape[0]
+    m = A.shape[1]
+
+    xi_plus = np.zeros((T, n))
+    y_plus = np.zeros((T, m))
+
+    if zero_noise:
+        xi_prev = xi00.copy()
+    else:
+        sqrt_P00 = _psd_sqrt(P00)
+        xi_prev = xi00 + sqrt_P00 @ rng.standard_normal(n)
+
+    sqrt_Q = None if zero_noise else _psd_sqrt(Q)
+    # R_path may be time-varying (SV); eigh batches over the leading T
+    # dimension in one call rather than T separate decompositions.
+    sqrt_R_path = None if zero_noise else _psd_sqrt(R_path)
+
+    for t in range(T):
+        w_plus = np.zeros(n) if zero_noise else sqrt_Q @ rng.standard_normal(n)
+        xi_t = F @ xi_prev + w_plus
+        e_plus = np.zeros(m) if zero_noise else sqrt_R_path[t] @ rng.standard_normal(m)
+        y_plus[t] = A.T @ x[t] + Z @ xi_t + e_plus
+        xi_plus[t] = xi_t
+        xi_prev = xi_t
+
+    return xi_plus, y_plus
+
+
+@dataclass
+class SimSmootherDraw:
+    """One Durbin-Koopman simulation-smoother draw: the joint state path
+    ``xi_draw`` (T, 7), drawn from its exact smoothing distribution
+    p(xi_1:T | yobs) at one posterior draw's system matrices, plus the five
+    structural shocks it implies (spec §2.4 point 2), recovered
+    algebraically from consecutive drawn states (process noise) and the
+    per-period measurement residual (measurement error) -- no extra
+    randomness beyond the plus-path draw itself.
+
+    Shock naming matches spec §1.4's structural list: ``eps_ystar``
+    (potential-output level shock), ``eps_g`` (trend-growth shock, ANNUALIZED
+    per this module's units convention), ``eps_z`` (other r*/headwinds
+    shock), ``eps_is`` (IS/demand measurement shock), ``eps_pc``
+    (Phillips-curve/supply measurement shock). Each is length T, aligned
+    with ``xi_draw``'s rows (period t's shock realizes going INTO state t,
+    i.e. the same period-t indexing ``kalman_smoother`` uses throughout).
+    """
+
+    xi_draw: np.ndarray
+    eps_ystar: np.ndarray
+    eps_g: np.ndarray
+    eps_z: np.ndarray
+    eps_is: np.ndarray
+    eps_pc: np.ndarray
+
+
+def _recover_structural_shocks(
+    xi_draw: np.ndarray,
+    xi00: np.ndarray,
+    yobs: np.ndarray,
+    x: np.ndarray,
+    A: np.ndarray,
+    Z: np.ndarray,
+    F: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Algebraically invert a drawn state path ``xi_draw`` (T, 7) into the
+    five structural shocks, given ``build_lw_matrices``'s EXACT Q
+    construction (Q[0,0] = s_ystar^2 + s_g^2/16, Q[0,3] = Q[3,0] = s_g^2/4,
+    Q[3,3] = s_g^2, Q[5,5] = s_z^2, all else zero -- so the y* process noise
+    row is exactly ``eps_ystar,t + eps_g,t/4`` and rows 1, 2, 4, 6 are the
+    deterministic lag-copy states with zero process noise, per this module's
+    top-of-file state-space docstring and HANDOFF.md's state-slot warning).
+
+    Process noise ``w_t = xi_draw[t] - F @ xi_draw[t-1]`` for t = 1..T-1 and
+    ``w_0 = xi_draw[0] - F @ xi00`` for t = 0 (xi00 is the real period-0
+    state, NOT the plus-path draw -- the drawn path is conditioned on the
+    real initial state). Measurement error
+    ``e_t = yobs[t] - A'x[t] - Z @ xi_draw[t]`` for every t; R is diagonal
+    (no IS/PC correlation in this model), so ``e_t`` decomposes directly
+    into ``(eps_is,t, eps_pc,t)`` with no further work.
+
+    Vectorized over t (no explicit T-loop): ``xi_prev @ F.T`` row t equals
+    ``F @ xi_prev[t]`` for every row (a standard vec-identity), so the
+    process-noise recovery is one matrix multiply, not a per-period loop.
+
+    BOUNDARY NOTE (measured, tests/test_smoother_sim.py pins it): rows 1, 2,
+    4, 6 of ``w`` (the deterministic lag-copy states, e.g. w[t][1] should
+    equal ``xi_draw[t][1] - xi_draw[t-1][0]``, which the model forces to be
+    EXACTLY zero for t = 1..T-1, confirmed to machine precision) are NOT
+    close to zero at t = 0 specifically. That is expected, not a bug: t=0's
+    "previous state" is the raw prior ``xi00`` (its mean, per
+    :func:`default_initial_state`'s pragmatic independent-lag-slots
+    simplification), not a smoothed/updated estimate -- ``xi_draw[0][1]`` is
+    the FULL-SAMPLE smoothed belief about y*_{-1}, which can and does differ
+    from its PRE-DATA prior mean ``xi00[0]``. Downstream code should not
+    treat w_0's rows 1, 2, 4, 6 as diagnostic of a bug.
+    """
+    xi_prev = np.vstack([xi00[None, :], xi_draw[:-1]])
+    w = xi_draw - xi_prev @ F.T  # (T, 7)
+
+    eps_g = w[:, 3]
+    eps_z = w[:, 5]
+    eps_ystar = w[:, 0] - eps_g / 4.0
+
+    e = yobs - x @ A - xi_draw @ Z.T  # (T, 2); A'x_t == x_t @ A row-wise
+    eps_is = e[:, 0]
+    eps_pc = e[:, 1]
+
+    return eps_ystar, eps_g, eps_z, eps_is, eps_pc
+
+
+def simulate_smoother_draw(
+    yobs: np.ndarray,
+    x: np.ndarray,
+    F: np.ndarray,
+    Q: np.ndarray,
+    A: np.ndarray,
+    Z: np.ndarray,
+    R: np.ndarray,
+    xi00: np.ndarray,
+    P00: np.ndarray,
+    rng: np.random.Generator,
+    xi_smooth: np.ndarray | None = None,
+    *,
+    zero_noise: bool = False,
+) -> SimSmootherDraw:
+    """One Durbin & Koopman (2002) simulation-smoother draw
+    (plans/S4-plan.md's resolved open question 1, the literal two-pass DK
+    algorithm): a joint draw of the full state path from its exact
+    smoothing distribution p(xi_1:T | yobs), at this posterior draw's own
+    system matrices ``(F, Q, A, Z, R)`` and the REAL data ``(yobs, x)``,
+    plus the five structural shocks it implies.
+
+    Algorithm (spec §2.4, plans/S4-plan.md):
+      1. Simulate an unconditional "plus" path ``(xi+, y+)`` at the same
+         system matrices (:func:`_simulate_plus_path`).
+      2. Smooth the REAL data -> ``xi_smooth`` (via :func:`kalman_smoother`,
+         unless the caller already has it -- see ``xi_smooth`` below).
+      3. Smooth the SIMULATED ``y+`` -> ``xi+_smooth`` (another
+         :func:`kalman_smoother` call, same system matrices).
+      4. ``xi_draw = xi_smooth - xi+_smooth + xi+`` -- the DK identity: the
+         smoothing error ``xi_smooth - xi+_smooth`` has exactly the
+         conditional distribution needed to add back onto the known plus
+         path, since both smooths share the same linear smoothing operator
+         and their Gaussian innovations cancel it exactly.
+
+    ``R`` accepts the same constant-(m,m)-or-(T,m,m)-path forms as
+    :func:`kalman_loglik`/:func:`kalman_smoother` (normalized via
+    :func:`_as_R_path`) -- for an SV draw, pass
+    ``sv_diag_variance_path(h_is, h_pc)`` built from THAT draw's own saved
+    h_is/h_pc transformed parameters (HANDOFF.md's S4 warning: never
+    re-derive h from nu).
+
+    ``rng`` must be an ``np.random.Generator`` (e.g.
+    ``np.random.default_rng(seed)``) -- never the legacy global numpy
+    random state, so a caller drawing many samples at the same or different
+    parameter points controls reproducibility explicitly.
+
+    ``xi_smooth``: if the caller already has the real-data smooth (e.g.
+    doing many draws at the same parameter point), pass it in to skip the
+    redundant recompute; otherwise it is computed internally via
+    :func:`kalman_smoother`. (Only ``xi_smooth`` is needed for step 4 above
+    -- not ``P_smooth`` -- so there is no ``P_smooth`` parameter.)
+
+    ``zero_noise``: testing seam only (see :func:`_simulate_plus_path`) --
+    forces the plus path's noise to exactly zero, which by the DK identity
+    collapses ``xi_draw`` to exactly ``xi_smooth`` (tests/test_smoother_sim.py's
+    zero-plus-noise identity check, the "G1-style mirror" spec §2.4 calls
+    for since there is no Stan-side smoother to mirror against).
+
+    Returns a :class:`SimSmootherDraw` with the drawn state path and the
+    five recovered structural shocks (spec §2.4 point 2), each length T.
+    """
+    yobs = np.ascontiguousarray(yobs, dtype=np.float64)
+    x = np.ascontiguousarray(x, dtype=np.float64)
+    F = np.ascontiguousarray(F, dtype=np.float64)
+    Q = np.ascontiguousarray(Q, dtype=np.float64)
+    A = np.ascontiguousarray(A, dtype=np.float64)
+    Z = np.ascontiguousarray(Z, dtype=np.float64)
+    xi00 = np.ascontiguousarray(xi00, dtype=np.float64)
+    P00 = np.ascontiguousarray(P00, dtype=np.float64)
+    R_path = _as_R_path(R, yobs.shape[0])
+
+    if xi_smooth is None:
+        xi_smooth = kalman_smoother(yobs, x, F, Q, A, Z, R_path, xi00, P00)["xi_smooth"]
+    xi_smooth = np.ascontiguousarray(xi_smooth, dtype=np.float64)
+
+    xi_plus, y_plus = _simulate_plus_path(
+        F, Q, A, Z, R_path, x, xi00, P00, rng, zero_noise=zero_noise
+    )
+    xi_plus_smooth = kalman_smoother(y_plus, x, F, Q, A, Z, R_path, xi00, P00)["xi_smooth"]
+
+    xi_draw = xi_smooth - xi_plus_smooth + xi_plus
+
+    eps_ystar, eps_g, eps_z, eps_is, eps_pc = _recover_structural_shocks(
+        xi_draw, xi00, yobs, x, A, Z, F
+    )
+
+    return SimSmootherDraw(
+        xi_draw=xi_draw,
+        eps_ystar=eps_ystar,
+        eps_g=eps_g,
+        eps_z=eps_z,
+        eps_is=eps_is,
+        eps_pc=eps_pc,
+    )
