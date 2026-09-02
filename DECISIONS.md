@@ -3,6 +3,59 @@
 One dated line per judgment call not fixed by the spec, with rationale.
 Newest first.
 
+- **2026-09-02 — G4 PRE-REGISTRATION (S5-decisions item 10): the full-SV
+  SBC design, fixed BEFORE the run starts; and the family-parameterized
+  SBC engine (item 11).** The reduced design, recorded here so it cannot
+  quietly shrink (or grow) to pass -- pinned literally by
+  `tests/test_g4_sbc.py::test_g4_design_constants_are_the_preregistered_ones`:
+
+  - **N_REPLICATIONS = 100**, **SIM_T = 80** (vs G3's 200 x 120 -- the
+    item-10 reduction sized toward ~1 day of compute);
+  - sampler per replication: **2 chains x 750 warmup + 750 sampling**,
+    adapt_delta 0.95, max_treedepth 12 (G3's exact per-rep settings, so
+    the only reductions are reps and T);
+  - ranks from **99** evenly thinned pooled draws, **10** chi^2 bins (10
+    expected/bin at 100 reps, G3's per-bin resolution), p-value floor
+    **0.001** per parameter; total-divergence ceiling **150** (0.1% of
+    pooled post-warmup draws, G3's fraction);
+  - **12 ranked quantities**: the 10 scalar statics (a1, a2, a_r, b_pi,
+    b_y, sigma_ystar, sigma_g, sigma_z, sigma_h_is, sigma_h_pc) plus the
+    initial log-variances h0_is/h0_pc recovered from the posterior's
+    non-centered h0_*_raw via h0 = mu_h0 + sd*raw (the template's own
+    line);
+  - seeds: G4_SEED_BASE = 20260910 (rep i fully reproducible from
+    seed_base + i), conditioning data from CONDITIONING_SEED = 20260909
+    (G3's fixed-conditioning pattern at G4's own seed and T);
+  - prior config: production defaults + the documented
+    SBC_STATIONARITY_PRIOR_CONFIG (item 6 -- the exact a1/a2 override G3
+    ran and passed with), through the production override path, with
+    render-time assertion that the stamped prior equals the sampled prior;
+  - **fixed mu_h0 anchors** (the SV analogue of G3's fixed Y_ANCHOR):
+    production derives mu_h0 from the run's own data, but an SBC
+    simulator draws h_0 before any data exists, so both the simulator's
+    h_0 draw and the fit's data use the constants 2*ln(0.75) (IS) /
+    2*ln(0.80) (PC) -- the magnitudes the real US window produces. The
+    Stan program takes mu_h0 as plain data, so this validates the same
+    program the runtime runs, at a fixed rather than data-chosen anchor.
+
+  Execution rule: a <=3-replication smoke may run first SOLELY to measure
+  per-replication wall cost (its reps use the same seeds and are part of
+  the design, re-run identically in the full pass); if the measured cost
+  extrapolates materially beyond ~1 day for the 100 reps, STOP AND ASK
+  before changing anything (per the session's standing instruction) --
+  the design above does not shrink silently.
+
+  Item 11 alongside: `tests/sbc_harness.py` is the generic engine
+  (design in -- family, options, prior config, prior sampler, simulator,
+  data builder, ranked quantities, constants -- rank statistics out),
+  built by generalizing G3's loop verbatim. G3's gate file is retained
+  UNCHANGED (its recorded 2026-08-31 pass corresponds to that exact
+  code); a fast equivalence pin proves the engine reproduces G3's
+  recorded per-replication generation path byte-for-byte from the same
+  seeds, so future gates (G4 now, UCSV later) are instantiations, not
+  reconstructions. G1/G2 harness family-parameterization audit deferred
+  to the stage-end docs pass, per plan.
+
 - **2026-09-02 — S5 item 9 landed: `mtk sweep`, the reusable prior-
   sensitivity sweep tool; the mandated sigma_g/sigma_z sweep is its first
   use.** Design decisions: (1) a sweep adds NO storage concept -- every
