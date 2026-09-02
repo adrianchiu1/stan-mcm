@@ -231,10 +231,49 @@ def test_4q_growth_blends_real_history_for_early_horizons(s4_no_sv_lw_run) -> No
 
 
 def test_last_value_rate_gap_equals_r_last_minus_rstar(s4_no_sv_lw_run) -> None:
+    """Under the 2026-09-02 r* reporting alignment (rstar[t] is r*_{T+t+1},
+    matching gap/pi/y's own period indexing, while rate_gap[t] remains the
+    per-period INPUT (r-r*)_{T+t}), the identity relates rate_gap at index t
+    to rstar at index t-1: rate_gap[t] = r_last - rstar[t-1] for t >= 1.
+    (rate_gap[0] pairs with r*_T, which the aligned rstar series no longer
+    carries -- it is checked directly in
+    test_first_forecast_period_gap_last_value_uses_current_period_rstar.)"""
     lv_run = _with_forecast_r_rule(s4_no_sv_lw_run, "last_value")
     fans = compute_fan_draws(lv_run, seed=_SEED_NO_SV)
     r_last = float(lv_run.r_full[-1])
-    np.testing.assert_allclose(fans.rate_gap, r_last - fans.rstar)
+    np.testing.assert_allclose(fans.rate_gap[:, 1:], r_last - fans.rstar[:, :-1])
+
+
+def test_fan_rstar_is_aligned_to_gap_pi_period_indexing() -> None:
+    """Regression pin on the 2026-09-02 r* alignment fix: with zero noise,
+    index t of the returned rstar series must be r* at absolute period
+    T+t+1 -- i.e. slots 3/5 of the period-(T+t+2) state F^(t+2) @ xi_last --
+    matching gap/pi/y's own indexing, NOT the one-quarter-stale
+    F^(t+1) @ xi_last value the pre-fix code recorded. Standalone (synthetic
+    parameter point from g1_harness, no MCMC run needed)."""
+    from g1_harness import C_FIXED, generate_parameter_points
+    from macrotoolkit.results_lw import simulate_fan_draw
+    from macrotoolkit.smoother import build_lw_matrices
+
+    params = generate_parameter_points(1, seed=20260902)[0]
+    F, Q, A, Z, R = build_lw_matrices(params, c=params.get("c", C_FIXED))
+    xi_last = np.array([100.0, 99.9, 99.8, 2.5, 2.4, 0.3, 0.2])
+
+    out = simulate_fan_draw(
+        F, Q, params["a1"], params["a2"], params["a_r"], params["b_pi"], params["b_y"],
+        xi_last,
+        gap_lag1=0.5, gap_lag2=0.3,
+        pi_lag1=2.0, pi_lag2=1.9, pi_lag3=1.8, pi_lag4=1.7,
+        rate_gap_seed=0.1, y_hist_last4=np.array([99.0, 99.3, 99.6, 100.5]),
+        r_last=2.0, forecast_r_rule="neutral",
+        sv_on=False, sigma_is=0.4, sigma_pc=0.8,
+        h_is_last=None, h_pc_last=None, sigma_h_is=None, sigma_h_pc=None,
+        horizon=3, rng=_ZeroNoiseRNG(),
+    )
+    for t in range(3):
+        xi_future = np.linalg.matrix_power(F, t + 2) @ xi_last  # period T+t+2's state
+        expected_rstar = xi_future[3] + xi_future[5]  # = g_{T+t+1} + z_{T+t+1} = r*_{T+t+1}
+        assert out["rstar"][t] == pytest.approx(expected_rstar, abs=1e-12), t
 
 
 # ---------------------------------------------------------------------------

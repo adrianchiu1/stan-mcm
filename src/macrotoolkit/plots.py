@@ -42,7 +42,7 @@ some of these):
   wants to place them independently.
 - **Color palette**: matplotlib's default ``tab10`` cycle for generic
   series; a small fixed name -> color dict (``_BAR_COLORS`` below) for the
-  5-6 historical-decomposition/IRF shock bars, kept CONSISTENT across the
+  historical-decomposition/IRF bars, kept CONSISTENT across the
   HD and (implicitly, by shock identity) any future cross-referencing so a
   reader learns "orange = trend growth shock" once.
 - **Figure sizing**: module-level constants below (``_FIGSIZE_*``); nothing
@@ -103,10 +103,11 @@ _ALPHA_90 = 0.15
 #: bands" -- 9 levels, adjacent pairs shaded, see module docstring).
 _FAN_PERCENTILES = (10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0)
 
-#: Named colors for the 6 historical-decomposition/IRF shock bars -- kept
+#: Named colors for the 7 historical-decomposition/IRF bars -- kept
 #: consistent everywhere a bar/shock name appears (module docstring).
 _BAR_COLORS: dict[str, str] = {
     "init": "0.55",  # neutral grey -- not a structural shock
+    "rdata": "tab:brown",  # exogenous real-rate data -- also not a structural shock
     "ystar": "tab:blue",
     "g": "tab:orange",
     "z": "tab:green",
@@ -117,6 +118,7 @@ _BAR_COLORS: dict[str, str] = {
 #: Human-readable bar/shock labels for legends and IRF row titles.
 _BAR_LABELS: dict[str, str] = {
     "init": "Initial condition",
+    "rdata": "Real rate (data)",
     "ystar": "eps_y* (potential level)",
     "g": "eps_g (trend growth)",
     "z": "eps_z (other r*)",
@@ -268,7 +270,19 @@ def plot_irf_matrix(irf: "IRFDraws", irf_vol_reference: str) -> Figure:
         f"(median + 68%/90% credible bands, lw-sv-spec.md §3.2)",
         fontsize=13,
     )
-    fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.96))
+    # Convention stamp (pre-S5 review decision, 2026-09-02, DECISIONS.md):
+    # these IRFs hold the real rate r FIXED (no policy response), so shocks
+    # that move r* (eps_g, eps_z) open a permanent (r - r*) gap whose gap/pi
+    # effects persist -- amplified by the near-unit-root gap AR(2) -- rather
+    # than decaying to zero. That is a deliberate convention, not a bug, and
+    # must be stated ON the figure so a reader is not left inferring it.
+    fig.text(
+        0.5, 0.955,
+        "Convention: the real rate r is held FIXED (no policy response), so eps_g/eps_z shocks "
+        "open a permanent (r - r*) gap -- their gap/pi responses persist by design.",
+        ha="center", fontsize=10, color="0.35",
+    )
+    fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.945))
     return fig
 
 

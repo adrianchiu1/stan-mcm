@@ -3,6 +3,47 @@
 One dated line per judgment call not fixed by the spec, with rationale.
 Newest first.
 
+- **2026-09-02 — Pre-S5 framework review: decision menu recorded in
+  `plans/S5-decisions.md`; engineering doctrine promoted to
+  `ENGINEERING.md`.** The review re-framed S1–S4 as a dry run of the
+  GENERAL SSM-via-NUTS framework (VISION.md), with the user confirming
+  that exact HLW replication is not a goal (its value — the ~1e-12 G5a
+  validation of the KF/smoother core — is banked). Seventeen recorded
+  decisions, headline items: endogenous lags become a declared per-family
+  "feedback map" consumed by generic output engines (companion-form
+  rejected for v1); families export named state/coefficient metadata
+  (slot-peeking like `-Z[0,1]` is banned); run identity splits into
+  estimation identity vs report config; the FamilyEntry contract is
+  completed (no if/elif family dispatch); family #2 is UCSV; G5b is
+  demoted from hard gate to informational exhibit (spec amendment); the
+  prior sweep ships as a reusable `mtk sweep`; G4 runs as a
+  pre-registered reduced design; the SBC harness goes family-generic
+  while building G4.
+
+- **2026-09-02 — Three S4 output-layer fixes (pre-S5 review findings),
+  landed together on the review branch.** (1) **Gap HD "rdata" bar**: the
+  exogenous real-rate injection `+(a_r/2)(r_{t-1}+r_{t-2})` is split out
+  of the "init" bar into its own AR-propagated, labeled bar
+  (`GAP_BARS`/`PI_BARS` gain "rdata") — folding the entire cumulative
+  policy contribution into a dashed line labeled "Initial condition" was
+  misleading (it never decays). Pure re-attribution between the two
+  non-structural bars: every G6 sum identity is unchanged
+  (`tests/test_g6_hd_identity.py` passes untouched); new pins in
+  `tests/test_hd_rdata_bar.py` (rdata satisfies its own recursion; init
+  is now invariant to the r data). (2) **IRF constant-r convention
+  stamped on the figure**: the IRFs hold r fixed (no policy response), so
+  eps_g/eps_z open a permanent (r−r*) gap whose gap/π responses persist —
+  amplified by the near-unit-root gap AR(2). Kept as the convention
+  (r-follows-r* rejected for now) and stated ON the chart so nobody
+  debugs it as a bug. (3) **Fan-chart r\* alignment**: `simulate_fan_draw`
+  recorded r\* one quarter behind its axis label (the slot-3/5 lag
+  convention again); the reported series is now aligned to gap/π/y's own
+  period indexing, with the final horizon point realized by one extra
+  post-loop F-step (drawn after the loop so in-loop noise streams — and
+  therefore all gap/π/y values at a given seed — are unchanged).
+  `rate_gap` deliberately keeps its input-diagnostic timing. Regression
+  pin: `test_fan_rstar_is_aligned_to_gap_pi_period_indexing`.
+
 - **2026-08-31 — S4 COMPLETE: DK smoother, four output modules, HTML
   report; G6 green; report renders all figures from a real run (spec §7's
   S4 acceptance test, met in full).** Full build-order record: DK

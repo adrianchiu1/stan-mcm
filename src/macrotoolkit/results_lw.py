@@ -536,8 +536,17 @@ def state_shock_decomposition(
     return {"init": xi_init, "ystar": xi_ystar, "g": xi_g, "z": xi_z}
 
 
-#: The 5 shock-bars gap's own IS-curve recursion decomposes into (spec §3.4).
-GAP_BARS: tuple[str, ...] = ("init", "ystar", "g", "z", "is")
+#: The 6 bars gap's own IS-curve recursion decomposes into (spec §3.4's 5
+#: structural shocks' bars plus "rdata"): "rdata" is the exogenous REAL-RATE
+#: DATA contribution -- the ``+(a_r/2)*(r_{t-1}+r_{t-2})`` injection AR-
+#: propagated through gap's own recursion. It used to be folded into "init"
+#: (pre-S5 review decision, 2026-09-02, DECISIONS.md): that made the
+#: "Initial condition" line silently carry the entire cumulative
+#: monetary-policy contribution, dominating the chart forever under a
+#: misleading label. Splitting it out changes NO sums (G6's per-period
+#: reconstruction identity is bar-count-independent by construction);
+#: it only re-attributes between the two non-structural bars.
+GAP_BARS: tuple[str, ...] = ("init", "rdata", "ystar", "g", "z", "is")
 #: pi's own Phillips-curve recursion adds one more bar: "pc" (eps_pc never
 #: touches gap, so it is not in GAP_BARS -- its gap contribution is
 #: identically zero every period, by construction of the recursion below).
@@ -573,9 +582,9 @@ def gap_pi_shock_decomposition(
     ``state_components`` is B1's output (:func:`state_shock_decomposition`):
     the "init"/"ystar"/"g"/"z" bars' own r* = g+z contributions feed gap's
     recursion via ``rstar1 = comp[i,3] + comp[i,5]`` (g_{t-1}+z_{t-1}),
-    ``rstar2 = comp[i,4] + comp[i,6]`` (g_{t-2}+z_{t-2}) -- the "is" bar has
-    no state component (eps_is never enters the state), so its rstar terms
-    are 0.
+    ``rstar2 = comp[i,4] + comp[i,6]`` (g_{t-2}+z_{t-2}) -- the "is" and
+    "rdata" bars have no state component (neither eps_is nor the real-rate
+    data ever enters the state), so their rstar terms are 0.
 
     ``y_full``/``pi_full`` are the FULL length-(T+4) data series (including
     the 4 pre-sample lag quarters, same convention as
@@ -590,10 +599,12 @@ def gap_pi_shock_decomposition(
     inflation is raw exogenous data at every lag, prior or not -- so it
     reads directly off ``pi_full``. ``x`` is the (T,6) exogenous-regressor
     matrix (``build_lw_regressors``' output); columns 2/3 are
-    r_{t-1}/r_{t-2}, used only by the "init" bar's data-injection term (the
-    real-rate data enters the gap equation exogenously, so it belongs
-    entirely to the initial-condition bar, not to any of the 5 structural
-    shocks).
+    r_{t-1}/r_{t-2}, used only by the "rdata" bar's data-injection term (the
+    real-rate data enters the gap equation exogenously, so it belongs to
+    its own labeled bar, not to any of the 5 structural shocks -- and, per
+    the 2026-09-02 pre-S5 review decision in DECISIONS.md, no longer to the
+    "init" bar either: folding the entire cumulative policy contribution
+    into a line labeled "Initial condition" was judged misleading).
 
     Returns ``{"gap": {bar: (T,) array for bar in GAP_BARS}, "pi": {bar:
     (T,) array for bar in PI_BARS}}``. Sum-checked to 1e-6 per period by
@@ -675,10 +686,12 @@ def gap_pi_shock_decomposition(
     pi_lag4["init"] = float(pi_full[0])
 
     for i in range(T):
-        # --- B2: this period's gap, for each of the 5 gap bars ---
+        # --- B2: this period's gap, for each of the 6 gap bars ---
         gap_t: dict[str, float] = {}
         for k in GAP_BARS:
-            if k == "is":
+            if k in ("is", "rdata"):
+                # Neither eps_is nor the real-rate data ever enters the
+                # STATE, so these two bars have no r* = g+z component.
                 rstar1 = rstar2 = 0.0
             else:
                 comp = state_components[k]
@@ -687,7 +700,12 @@ def gap_pi_shock_decomposition(
             val = a1 * gap_lag1[k] + a2 * gap_lag2[k] - (a_r / 2.0) * (rstar1 + rstar2)
             if k == "is":
                 val += eps_is[i]
-            if k == "init":
+            if k == "rdata":
+                # The exogenous real-rate DATA injection (spec §1.2's
+                # +(a_r/2)(r_{t-1}+r_{t-2}) term), formerly folded into the
+                # "init" bar -- split out 2026-09-02 (DECISIONS.md) so the
+                # cumulative policy contribution is its own labeled bar
+                # instead of silently inflating "Initial condition".
                 val += (a_r / 2.0) * (x[i, 2] + x[i, 3])
             gap_t[k] = val
 
@@ -697,7 +715,7 @@ def gap_pi_shock_decomposition(
         # computed gap_t.
         gap_lag1_pre = dict(gap_lag1)
 
-        # --- B3: this period's pi, for each of the 6 pi bars ---
+        # --- B3: this period's pi, for each of the 7 pi bars ---
         pi_t: dict[str, float] = {}
         for k in PI_BARS:
             pibar = (pi_lag2[k] + pi_lag3[k] + pi_lag4[k]) / 3.0
@@ -724,12 +742,13 @@ def gap_pi_shock_decomposition(
 
 
 def y_level_decomposition(gap: dict[str, np.ndarray], state_components: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
-    """B4: y-level bars, ``y = gap + y*`` decomposed additively across the 6
+    """B4: y-level bars, ``y = gap + y*`` decomposed additively across the 7
     bars (``PI_BARS``' full set, since y needs a "pc" bar too, always
     identically zero -- eps_pc never touches y):
 
         y_k = gap_k + state_components[k][:, 0]   for k in {init, ystar, g, z}
         y_is = gap_is                              # eps_is's only channel into y is via gap
+        y_rdata = gap_rdata                        # likewise: r data never enters the state
         y_pc = 0
 
     Sum-check (exact, no tolerance needed beyond floating point): ``sum(
@@ -740,7 +759,12 @@ def y_level_decomposition(gap: dict[str, np.ndarray], state_components: dict[str
     y: dict[str, np.ndarray] = {}
     for k in ("init", "ystar", "g", "z"):
         y[k] = gap[k] + state_components[k][:, 0]
+    # "is" and "rdata" have no state (y*) component: their only channel into
+    # y is via gap (eps_is by definition; the real-rate data because r never
+    # enters the state either -- same reasoning as their zero rstar terms in
+    # gap_pi_shock_decomposition).
     y["is"] = gap["is"].copy()
+    y["rdata"] = gap["rdata"].copy()
     y["pc"] = np.zeros_like(gap["is"])
     return y
 
@@ -765,13 +789,13 @@ class HDDraw:
 
     - ``state_components``: B1's 4-key dict (``"init"``/``"ystar"``/``"g"``/
       ``"z"``), each (T, 7) -- sums to ``xi_draw``.
-    - ``gap``: B2's 5-key dict (``GAP_BARS``), each (T,) -- sums to
+    - ``gap``: B2's 6-key dict (``GAP_BARS``), each (T,) -- sums to
       ``yobs[:,0] - xi_draw[:,0]``.
-    - ``pi``: B3's 6-key dict (``PI_BARS``), each (T,) -- sums to
+    - ``pi``: B3's 7-key dict (``PI_BARS``), each (T,) -- sums to
       ``yobs[:,1]``.
-    - ``y``: B4's 6-key dict (``PI_BARS``), each (T,) -- sums to
+    - ``y``: B4's 7-key dict (``PI_BARS``), each (T,) -- sums to
       ``yobs[:,0]``.
-    - ``y_growth_4q``: B4's 6-key dict, each (T,) with the first 4 entries
+    - ``y_growth_4q``: B4's 7-key dict, each (T,) with the first 4 entries
       ``NaN`` -- sums (where defined) to ``yobs[4:,0] - yobs[:-4,0]``.
     """
 
@@ -1015,11 +1039,12 @@ def impulse_response_for_shock(
     -- all zero except ``shock_size`` at index 0 -- instead of a recovered
     shock path), and gap/pi's response read directly off
     :func:`gap_pi_shock_decomposition`'s own AR-recursion arithmetic, called
-    on all-zero real data (``x``, ``y_full``, ``pi_full``) so its "init" bar
-    is identically zero throughout (the SAME B1/B2 sum-identity logic gate
-    G6 already validates: with zero real data and a zero "init"
-    state-component, ``gap_lag1["init"] = y_full[3] - 0 = 0``, and it stays
-    zero every period) plus a synthetic ``eps_is``/``eps_pc`` impulse array
+    on all-zero real data (``x``, ``y_full``, ``pi_full``) so its "init" and
+    "rdata" bars are identically zero throughout (the SAME B1/B2
+    sum-identity logic gate G6 already validates: with zero real data and a
+    zero "init" state-component, ``gap_lag1["init"] = y_full[3] - 0 = 0``
+    and the "rdata" injection ``(a_r/2)*(x[i,2]+x[i,3])`` is 0, so both
+    stay zero every period) plus a synthetic ``eps_is``/``eps_pc`` impulse array
     (measurement shocks that never enter the state at all -- their only
     channel is gap/pi's own AR feedback).
 
@@ -1319,7 +1344,12 @@ def simulate_fan_draw(
     args real).
 
     Returns ``{"y_level", "y_growth_4q", "pi", "gap", "rstar", "rate_gap"}``,
-    each length ``horizon``. ``rate_gap`` (the per-period ``(r-r*)`` INPUT
+    each length ``horizon``. Index ``t`` of ``y_level``/``pi``/``gap``/
+    ``rstar`` is absolute period T+t+1 for ALL FOUR series -- ``rstar`` is
+    explicitly re-aligned (see the in-loop comment; pre-S5 review fix,
+    2026-09-02): the state's slot-3/5 lag convention would otherwise leave
+    the r* fan one quarter behind its axis label and behind the other
+    panels. ``rate_gap`` (the per-period ``(r-r*)`` INPUT
     actually used inside the loop -- not a reporting series in its own
     right, but a useful diagnostic) is exposed mainly so
     ``outputs.forecast_r_rule``'s convention can be checked directly rather
@@ -1408,13 +1438,34 @@ def simulate_fan_draw(
         y_level[t] = gap_t + xi_t[0]
         pi_path[t] = pi_t
         gap_path[t] = gap_t
-        rstar_path[t] = rstar_t
+        # REPORTING alignment (pre-S5 review fix, 2026-09-02, DECISIONS.md):
+        # rstar_t is r* at absolute period T+t (the slot-3/5 lag convention
+        # again), while iteration t's gap/pi/y values are for period T+t+1.
+        # Recording rstar_t at index t therefore plotted every fan point one
+        # quarter behind its axis label AND behind the other four panels.
+        # Aligned: index t-1 gets r*_{T+t}; the final index is filled after
+        # the loop by one extra F-step (r*_{T+H} only becomes visible in the
+        # period-(T+H+1) state). rate_gap_path is NOT shifted -- it remains
+        # the per-period (r-r*) INPUT used by iteration t (a diagnostic of
+        # forecast_r_rule, documented in this function's docstring), not a
+        # reporting series.
+        if t >= 1:
+            rstar_path[t - 1] = rstar_t
         rate_gap_path[t] = rate_gap_t
 
         xi_prev = xi_t
         gap_lag2, gap_lag1 = gap_lag1, gap_t
         pi_lag4, pi_lag3, pi_lag2, pi_lag1 = pi_lag3, pi_lag2, pi_lag1, pi_t
         rate_gap_prev = rate_gap_t
+
+    # r*_{T+H} for the final fan index: one more state step (fresh process
+    # noise, same as every in-loop step) makes the period-(T+H+1) state,
+    # whose slots 3/5 hold g_{T+H}/z_{T+H}. Drawn AFTER the loop so the
+    # in-loop noise sequence (and therefore every gap/pi/y value at a given
+    # seed) is unchanged by this alignment fix.
+    w_final = sqrt_Q @ rng.standard_normal(n)
+    xi_final = F @ xi_prev + w_final
+    rstar_path[horizon - 1] = xi_final[3] + xi_final[5]
 
     y_hist_last4 = np.asarray(y_hist_last4, dtype=np.float64)
     y_growth_4q = np.empty(horizon)

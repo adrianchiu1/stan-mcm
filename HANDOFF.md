@@ -132,12 +132,18 @@ README.md` for full detail, including the COVID payoff exhibit (SV
 absorbs the 2020 shock endogenously; structural parameters de-contaminate
 vs. the no-SV stress test).
 
-## What's staged next (S5, per spec §7)
+## What's staged next (S5, per spec §7 — AMENDED 2026-09-02)
 
-"Full SBC (G3, G4), Bayesian HLW tracking (G5b), prior-sweep notebook,
-docs | All gates green; README with G5a/G5b figures." Concretely: G4 (SBC
-on the full SV variant — G3's machinery generalizes, but expect the same
-kind of prior-override care G3 needed for a1/a2's non-stationary tail);
-G5b (SV off, HLW-like loose priors, tracking their published data within
-±50bp/±0.5pp over 2000–2019); the σ_g/σ_z prior-sensitivity sweep spec
-§1.6 mandates (a notebook, `examples/us_lw_sv/`); final docs pass.
+**Read `plans/S5-decisions.md` first — it is binding scope**, recorded
+with the user in the 2026-09-02 pre-S5 review (framework perspective:
+lw_sv is a dry run of the general SSM tool; exact HLW replication is NOT
+a goal). Headlines vs the original spec §7 row: S5 opens with an "S4.5"
+refactor block (feedback map, named metadata, run-identity split,
+FamilyEntry contract) BEFORE feature work; G5b is demoted from hard gate
+to informational exhibit (compare our FILTERED series with the published
+one-sided series — HLW publish no smoothed estimates); the σ_g/σ_z sweep
+ships as a reusable `mtk sweep` tool, not a notebook; G4 runs as a
+pre-registered reduced design (~1 day of compute) built BY generalizing
+G3's SBC engine; the spec §4 prior-predictive figure gets implemented
+generically. Family #2 after S5 is UCSV. Engineering doctrine is now in
+`ENGINEERING.md`.
