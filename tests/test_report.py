@@ -34,10 +34,11 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 REAL_RUN_HASH = "70ad47166eaf"
 REAL_RUN_DIR = REPO_ROOT / "runs" / REAL_RUN_HASH
 
-# 1 trend-cycle + 1 IRF matrix + 5 fan charts + 4 historical-decomposition
-# figures -- exact counts from plots.py's own return shapes (module
-# docstring / spec §3.1-§3.4), not a loose ">0" check.
-EXPECTED_IMG_COUNT = 1 + 1 + 5 + 4
+# 1 prior-predictive (spec §4, S5-decisions item 7) + 1 trend-cycle +
+# 1 IRF matrix + 5 fan charts + 4 historical-decomposition figures --
+# exact counts from plots.py's own return shapes (module docstring /
+# spec §3.1-§3.4 and §4), not a loose ">0" check.
+EXPECTED_IMG_COUNT = 1 + 1 + 1 + 5 + 4
 
 
 class _TagCollector(HTMLParser):

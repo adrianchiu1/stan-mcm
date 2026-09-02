@@ -70,6 +70,28 @@ LW_STATE_META = StateSpaceMeta(
 #: Observation-row order (measurement equation rows of yobs/Z/R).
 OBS_NAMES = LW_STATE_META.obs_names
 
+#: The documented, reusable SBC PRIOR CONFIG (S5-decisions item 6 -- the
+#: G3-style prior overrides "promoted from ad hoc to a documented, reusable
+#: mechanism, used by G4"; ENGINEERING.md "Stationarity for SBC"). SBC must
+#: sample EXACTLY the fitted prior -- no stationarity rejection, which is
+#: G1/G2 machinery and invalid for calibration -- but the production a1/a2
+#: defaults put ~1/3 of prior mass on non-stationary gap dynamics whose
+#: simulated data is numerically un-filterable in float64 (measured
+#: 2026-08-31, DECISIONS.md: |y| ~ 2e13 at T=120, KF covariance update
+#: loses everything to cancellation, ranks come out garbage). Under THIS
+#: override the stationarity boundary sits ~4 sigma out (non-stationary
+#: mass ~3e-5), so the exact prior is simulable with no rejection anywhere.
+#: Applied through the PRODUCTION `priors:` override path on the fit side
+#: and to the prior sampler on the simulation side, so the two stay exactly
+#: equal -- every SBC design (G3's no-SV gate, G4's full-SV gate, any
+#: future family analogue) consumes this one declaration. A stationarity-
+#: enforcing PACF parameterization for AR blocks is framework backlog, not
+#: S5 scope (S5-decisions item 6).
+SBC_STATIONARITY_PRIOR_CONFIG: dict[str, dict] = {
+    "a1": {"mu": 0.8, "sd": 0.1},
+    "a2": {"mu": -0.25, "sd": 0.05},
+}
+
 #: The "neutral" forecast_r_rule's declaration (spec §3.3: r_{T+h} :=
 #: r*_{T+h}, neutral policy): r's previous-period value resolves as
 #: r* = g + z read off the named offset -1 slots -- valid for c == 1 only
@@ -285,6 +307,89 @@ def build_render_context(spec) -> dict:
     }
 
 
+def sample_prior_params(
+    priors: dict[str, dict],
+    sv_on: bool,
+    rng: np.random.Generator,
+    mu_h0_is: float | None = None,
+    mu_h0_pc: float | None = None,
+) -> dict[str, float]:
+    """Draw ONE parameter point from the lw_sv prior (S5-decisions item 7:
+    the prior-predictive check simulates from the RUN'S OWN resolved
+    priors -- ``build_render_context(spec)["priors"]``, i.e. the defaults
+    plus the spec's overrides, the exact config the template stamped).
+
+    Distribution semantics mirror the template's own declarations
+    (``stan/templates/lw_sv.stan.j2``): ``normal(mu, sd)``;
+    ``beta(a, b)``; ``half_normal(sd)`` = |N(0, sd^2)|; and the two
+    TRUNCATED normals expressed in Stan as parameter CONSTRAINTS rather
+    than in the prior density -- ``a_r`` has ``<upper=0>`` and ``b_y``
+    ``<lower=0>`` -- sampled here by rejection so the draws live on the
+    same support the sampler explores.
+
+    ``sv_on=False`` draws include ``sigma_is``/``sigma_pc``;
+    ``sv_on=True`` draws instead include ``sigma_h_is``/``sigma_h_pc``
+    and the initial log-variances ``h0_is``/``h0_pc`` ~ N(mu_h0, sd)
+    (spec §1.5) -- the caller supplies the data-derived mu_h0 anchors
+    (:func:`lw_mu_h0_anchors`).
+    """
+
+    def draw(name: str, *, lower: float | None = None, upper: float | None = None, mean_override: float | None = None) -> float:
+        entry = priors[name]
+        dist = entry["dist"]
+        if dist == "normal":
+            mu = mean_override if mean_override is not None else entry["mu"]
+            # Rejection from the untruncated normal == Stan's renormalized
+            # truncated prior. Capped so a pathological override (mean far
+            # beyond the truncation bound) fails loudly instead of
+            # spinning (numerics-reviewer suggestion; same 10k cap as
+            # g3_harness's historical sampler).
+            for _ in range(10_000):
+                v = rng.normal(mu, entry["sd"])
+                if (lower is None or v > lower) and (upper is None or v < upper):
+                    return float(v)
+            raise RuntimeError(
+                f"sample_prior_params: failed to draw {name!r} inside its "
+                f"truncation bound within 10,000 attempts -- the resolved "
+                f"prior (mu={mu}, sd={entry['sd']}, lower={lower}, "
+                f"upper={upper}) puts essentially no mass on the "
+                f"parameter's support."
+            )
+        if dist == "beta":
+            return float(rng.beta(entry["a"], entry["b"]))
+        if dist == "half_normal":
+            return float(abs(rng.normal(0.0, entry["sd"])))
+        raise ValueError(
+            f"sample_prior_params: unknown prior dist {dist!r} for "
+            f"{name!r} -- the template stamps only normal/beta/half_normal."
+        )
+
+    params: dict[str, float] = {
+        "a1": draw("a1"),
+        "a2": draw("a2"),
+        "a_r": draw("a_r", upper=0.0),  # template constraint <upper=0>
+        "b_pi": draw("b_pi"),
+        "b_y": draw("b_y", lower=0.0),  # template constraint <lower=0>
+        "sigma_ystar": draw("sigma_ystar"),
+        "sigma_g": draw("sigma_g"),
+        "sigma_z": draw("sigma_z"),
+    }
+    if sv_on:
+        if mu_h0_is is None or mu_h0_pc is None:
+            raise ValueError(
+                "sample_prior_params: sv_on=True needs the data-derived "
+                "mu_h0_is/mu_h0_pc anchors (lw_mu_h0_anchors)."
+            )
+        params["sigma_h_is"] = draw("sigma_h_is")
+        params["sigma_h_pc"] = draw("sigma_h_pc")
+        params["h0_is"] = draw("mu_h0_is", mean_override=mu_h0_is)
+        params["h0_pc"] = draw("mu_h0_pc", mean_override=mu_h0_pc)
+    else:
+        params["sigma_is"] = draw("sigma_is")
+        params["sigma_pc"] = draw("sigma_pc")
+    return params
+
+
 def require_c_is_one(c: float, where: str) -> None:
     """Fail loudly if the system matrices imply ``c != 1.0`` (spec §1.3's
     fixed default; ``estimate_c`` is hard-validated ``False`` everywhere in
@@ -308,3 +413,58 @@ def require_c_is_one(c: float, where: str) -> None:
             f"generalize it (weight the g terms by c) before removing this "
             f"guard."
         )
+
+
+def prior_scalar_sds(spec, df, n_draws: int = 10_000, seed: int = 20260902) -> dict[str, float]:
+    """Monte-Carlo prior standard deviations of the family's scalar
+    parameters under a spec's RESOLVED priors (defaults + overrides) --
+    the prior side of the sweep report's prior→posterior contraction
+    readout (S5-decisions item 9). Monte Carlo through
+    :func:`sample_prior_params` rather than closed forms so ANY prior the
+    family can stamp (truncated normals included) is covered by the same
+    code path the prior-predictive check uses. ``df`` is the trimmed
+    model-ready DataFrame (needed for the SV variant's data-derived mu_h0
+    anchors). Deterministic given ``seed``.
+    """
+    resolved = build_render_context(spec)["priors"]
+    sv_on = bool(spec.model.options.sv_shocks)
+    mu_h0_is = mu_h0_pc = None
+    if sv_on:
+        mu_h0_is, mu_h0_pc = lw_mu_h0_anchors(
+            df["y"].to_numpy(), df["pi"].to_numpy(), df["r"].to_numpy()
+        )
+    rng = np.random.default_rng(seed)
+    draws: dict[str, list[float]] = {}
+    for _ in range(n_draws):
+        p = sample_prior_params(resolved, sv_on, rng, mu_h0_is=mu_h0_is, mu_h0_pc=mu_h0_pc)
+        for k, v in p.items():
+            draws.setdefault(k, []).append(v)
+    return {k: float(np.std(np.asarray(v))) for k, v in draws.items()}
+
+
+def headline_series(run_dir, thin: int = 5, seed: int | None = None) -> dict[str, tuple]:
+    """The family's headline smoothed series for cross-run comparison
+    overlays (the sweep report, S5-decisions item 9): posterior-median r*
+    and output gap from the trend-cycle machinery, with smoother draws
+    thinned x``thin`` (report-side only -- stored runs are untouched; the
+    sweep overlay needs medians, not full band resolution). Returns
+    ``{name: (dates, median_path)}``.
+    """
+    import dataclasses
+
+    from macrotoolkit.results_lw import compute_trend_cycle_draws, load_lw_run
+    from specs.schema.lw_sv import ThinSpec
+
+    lw_run = load_lw_run(run_dir)
+    if thin > 1:
+        lw_run = dataclasses.replace(
+            lw_run,
+            spec=lw_run.spec.model_copy(
+                update={"outputs": lw_run.spec.outputs.model_copy(update={"smoother_draws": ThinSpec(thin=thin)})}
+            ),
+        )
+    tcd = compute_trend_cycle_draws(lw_run, seed=seed)
+    return {
+        "rstar": (tcd.dates, np.median(tcd.rstar, axis=0)),
+        "gap": (tcd.dates, np.median(tcd.output_gap, axis=0)),
+    }

@@ -133,6 +133,18 @@ class LwSvOutputs(BaseModel):
         default="neutral",
         description="Real-rate-gap convention for fan-chart forecasting (spec §3.3).",
     )
+    # Since the run-identity split (S5-decisions item 3) outputs sits
+    # OUTSIDE the hash, so adding report options like this one no longer
+    # orphans existing MCMC runs.
+    prior_predictive_draws: int = Field(
+        default=200,
+        ge=1,
+        description=(
+            "Number of full observable paths simulated from the run's own "
+            "resolved priors for the prior-predictive check figure "
+            "(spec §4, S5-decisions item 7)."
+        ),
+    )
 
     @field_validator("forecast_r_rule")
     @classmethod

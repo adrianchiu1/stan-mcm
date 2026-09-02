@@ -75,6 +75,7 @@ import pandas as pd
 from macrotoolkit.engine import (
     ConstantExogRule,
     ConstantMeasurementNoise,
+    DataPathExogRule,
     RandomWalkLogVarianceNoise,
     StateLinearExogRule,
     observable_recursion,
@@ -1349,4 +1350,136 @@ def compute_fan_draws(lw_run: LWRun, *, seed: int | None = None) -> FanDraws:
         gap=gap_arr,
         rstar=rstar_arr,
         rate_gap=rate_gap_arr,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Part E: prior-predictive check (spec §4, S5-decisions item 7)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class PriorPredictiveDraws:
+    """Prior-predictive observable paths (spec §4's "what do my priors
+    imply about observable paths" check, S5-decisions item 7): ``n_draws``
+    full generative simulations over the estimation sample, each at a
+    FRESH parameter point drawn from the run's own RESOLVED priors (the
+    defaults plus the spec's overrides -- the exact config the template
+    stamped, so priors doing deliberate identification work, like the
+    sigma_g/sigma_z pile-up controls, show up exactly as the sampler sees
+    them).
+
+    ``gap``/``pi``/``y`` are ``(n_draws, T)`` simulated paths;
+    ``pi_actual``/``y_actual`` the real data for overlay. Aggregation to
+    percentile bands is ``plots.py``'s job, as everywhere else.
+    """
+
+    n_draws: int
+    dates: pd.DatetimeIndex  # (T,)
+    gap: np.ndarray  # (n_draws, T)
+    pi: np.ndarray  # (n_draws, T)
+    y: np.ndarray  # (n_draws, T)
+    pi_actual: np.ndarray  # (T,)
+    y_actual: np.ndarray  # (T,)
+
+
+def compute_prior_predictive_draws(lw_run: LWRun, *, seed: int | None = None) -> PriorPredictiveDraws:
+    """Simulate ``lw_run.spec.outputs.prior_predictive_draws`` full
+    observable paths from the prior, through the SAME machinery the run
+    itself used (S5-decisions item 7): parameters from the run's resolved
+    priors (:func:`macrotoolkit.families.lw_sv.sample_prior_params` --
+    including the template's own truncation constraints and, for an SV
+    run, the data-anchored mu_h0 initial log-variances), matrices from
+    ``build_lw_matrices``, and paths from the generic engine's
+    :func:`macrotoolkit.engine.simulate_forward` -- initial state drawn
+    from the run's own (xi00, P00) prior, endogenous y/pi feedback closed
+    through the family's declared feedback map, the REAL r series supplied
+    as the exogenous input (:class:`macrotoolkit.engine.DataPathExogRule`),
+    and the real 4 pre-sample lag quarters seeding the observable
+    registers. Needs no posterior draws at all -- only the run's spec and
+    data snapshot.
+
+    ``seed`` defaults to ``lw_run.spec.sampler.seed`` (documented,
+    reproducible default, same convention as the other compute_* entry
+    points).
+    """
+    from macrotoolkit.families.lw_sv import lw_mu_h0_anchors, sample_prior_params
+    from macrotoolkit.run import build_render_context
+    from macrotoolkit.smoother import _psd_sqrt, build_lw_matrices
+
+    T = lw_run.yobs.shape[0]
+    n_draws = lw_run.spec.outputs.prior_predictive_draws
+    priors = build_render_context(lw_run.spec)["priors"]
+    sv_on = lw_run.sv_on
+
+    mu_h0_is = mu_h0_pc = None
+    if sv_on:
+        mu_h0_is, mu_h0_pc = lw_mu_h0_anchors(lw_run.y_full, lw_run.pi_full, lw_run.r_full)
+
+    y_row = LW_STATE_META.obs_index("y")
+    pi_row = LW_STATE_META.obs_index("pi")
+    # Observable seeds: the real 4 pre-sample lag quarters (full-array
+    # indices 0..3; estimation row 0 = full index 4).
+    obs_seeds = {
+        "y": {1: float(lw_run.y_full[3]), 2: float(lw_run.y_full[2])},
+        "pi": {
+            1: float(lw_run.pi_full[3]),
+            2: float(lw_run.pi_full[2]),
+            3: float(lw_run.pi_full[1]),
+            4: float(lw_run.pi_full[0]),
+        },
+    }
+    # Real r as the exogenous input: step t (estimation row t, period t+1)
+    # needs r_{t} = full index t+3 as its lag-1 value; the lag-2 seed is
+    # r at full index 2.
+    r_lag1_path = lw_run.r_full[3 : 3 + T]
+    exog_seeds = {"r": {2: float(lw_run.r_full[2])}}
+
+    sqrt_P00 = _psd_sqrt(lw_run.P00)
+
+    gap = np.empty((n_draws, T))
+    pi = np.empty((n_draws, T))
+    y = np.empty((n_draws, T))
+
+    rng = np.random.default_rng(seed if seed is not None else lw_run.spec.sampler.seed)
+
+    for j in range(n_draws):
+        params = sample_prior_params(priors, sv_on, rng, mu_h0_is=mu_h0_is, mu_h0_pc=mu_h0_pc)
+        if sv_on:
+            # build_lw_matrices needs SOME sigma_is/sigma_pc to shape R,
+            # which the engine's SV noise model then replaces entirely --
+            # same placeholder convention as _system_matrices_for_draw.
+            mat_params = {**params, "sigma_is": 1.0, "sigma_pc": 1.0}
+            meas_noise = RandomWalkLogVarianceNoise(
+                (params["h0_is"], params["h0_pc"]),
+                (params["sigma_h_is"], params["sigma_h_pc"]),
+            )
+        else:
+            mat_params = params
+            meas_noise = ConstantMeasurementNoise((params["sigma_is"], params["sigma_pc"]))
+        F, Q, A, Z, _ = build_lw_matrices(mat_params, c=1.0)
+
+        # Initial state from the run's own explicit prior (spec §2.2: no
+        # ad-hoc diffuse hacks) -- one fresh draw per parameter point.
+        xi_init = lw_run.xi00 + sqrt_P00 @ rng.standard_normal(len(lw_run.xi00))
+
+        out = simulate_forward(
+            F, Q, A, Z, LW_STATE_META,
+            xi_init, obs_seeds, exog_seeds,
+            {"r": DataPathExogRule(r_lag1_path)}, meas_noise, T, rng,
+        )
+        obs = out["obs"]
+        states = out["states"]
+        y[j] = obs[:, y_row]
+        pi[j] = obs[:, pi_row]
+        gap[j] = obs[:, y_row] - states[:T, _S_YSTAR]
+
+    return PriorPredictiveDraws(
+        n_draws=n_draws,
+        dates=lw_run.dates,
+        gap=gap,
+        pi=pi,
+        y=y,
+        pi_actual=lw_run.yobs[:, 1].copy(),
+        y_actual=lw_run.yobs[:, 0].copy(),
     )

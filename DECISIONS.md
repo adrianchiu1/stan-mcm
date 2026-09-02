@@ -3,6 +3,38 @@
 One dated line per judgment call not fixed by the spec, with rationale.
 Newest first.
 
+- **2026-09-02 — S5 item 7 landed: the spec §4 prior-predictive check,
+  generically, in every run report.** `compute_prior_predictive_draws`
+  (results_lw Part E) simulates `outputs.prior_predictive_draws` (default
+  200; a new outputs field, addable without orphaning runs thanks to item
+  3's split) full observable paths from the run's OWN RESOLVED priors --
+  `build_render_context(spec)["priors"]`, defaults + overrides, exactly
+  what the template stamped -- through the same machinery the run used:
+  parameters via the new `families.lw_sv.sample_prior_params` (template
+  distributions and truncation constraints mirrored; rejection sampling
+  for the constrained normals, which equals Stan's renormalized truncated
+  prior; capped at 10k attempts so a pathological override fails loudly),
+  matrices via `build_lw_matrices`, paths via the generic engine's
+  `simulate_forward` with xi_0 ~ N(xi00, P00), real pre-sample seeds, the
+  real r series as exogenous input (new stateful `DataPathExogRule`;
+  engine contract: rules resolve exactly once per step in order), and --
+  SV variant -- the data-anchored h_0 draw feeding
+  `RandomWalkLogVarianceNoise`. One figure per report (gap + inflation
+  paths, spec §4's wording; real inflation overlaid), grouped under the
+  DIAGNOSTICS block per the reviewer's ordering finding (spec §3.5
+  numbers only §3.1-3.4 as output sections). Needs no posterior draws.
+  Fresh numerics-reviewer pass: clean on all five checked dimensions
+  (prior-sampler-vs-template equality, seed/lag indexing verified
+  empirically against build_lw_regressors, SV h timing, log-variance
+  conventions, placeholder-sigma independence); its three suggestions
+  (section ordering, the rejection cap, a seed-literal regression test
+  spying the engine call) are all incorporated. This commit also adds the
+  family-capability groundwork the next features consume:
+  `prior_scalar_sds` + `headline_series` (the sweep's contraction/overlay
+  inputs) and `SBC_STATIONARITY_PRIOR_CONFIG` (item 6's documented,
+  reusable SBC prior config -- G3's recorded override promoted to family
+  level, consumed by G4).
+
 - **2026-09-02 — S4.5 item 4 landed (S5-decisions): the FamilyEntry
   contract is complete; no if/elif family dispatch remains.**
   `FAMILY_REGISTRY` (specs/schema) now declares every family capability:

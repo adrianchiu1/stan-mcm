@@ -237,6 +237,28 @@ def _render_fan_section(lw_run: LWRun) -> str:
     return f"<h2>3.3 Fan charts</h2>\n<p class=\"caption\">{_esc(caption)}</p>\n{grid}"
 
 
+def _render_prior_predictive_section(lw_run: LWRun) -> str:
+    from macrotoolkit.plots import plot_prior_predictive
+    from macrotoolkit.results_lw import compute_prior_predictive_draws
+
+    ppd = compute_prior_predictive_draws(lw_run)
+    fig = plot_prior_predictive(ppd)
+    uri = _fig_to_data_uri(fig, dpi=100)
+    block = _figure_block(
+        "Prior-predictive check (spec §4)",
+        uri,
+        f"{ppd.n_draws} full observable paths simulated from the run's own "
+        f"resolved priors (defaults + spec overrides) through the same "
+        f"matrices/engine the run used -- 'what do my priors imply about "
+        f"observable paths', S5-decisions item 7. Needs no posterior draws.",
+    )
+    # Grouped with the diagnostics block (spec §4 lists the prior-
+    # predictive figure among the per-run diagnostics, and §3.5's report
+    # layout numbers only §3.1-3.4 as output sections -- numerics-reviewer
+    # ordering fix, 2026-09-02).
+    return f"<h2>Diagnostics: prior-predictive check (spec §4)</h2>\n{block}"
+
+
 def _render_hd_section(lw_run: LWRun) -> str:
     from macrotoolkit.plots import plot_historical_decomposition
     from macrotoolkit.results_lw import compute_historical_decomposition_draws
@@ -371,6 +393,7 @@ def render_report(run_dir: str | Path) -> str:
     sections = [
         _render_header(lw_run, run_hash),
         _render_diagnostics(diagnostics),
+        _render_prior_predictive_section(lw_run),
         _render_trend_cycle_section(lw_run),
         _render_irf_section(lw_run),
         _render_fan_section(lw_run),

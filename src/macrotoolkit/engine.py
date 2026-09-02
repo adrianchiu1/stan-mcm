@@ -207,6 +207,29 @@ class ConstantExogRule:
         return self.value
 
 
+class DataPathExogRule:
+    """Resolve the series from a KNOWN data path (e.g. the real in-sample
+    r series for a prior-predictive simulation): stateful, returning the
+    next value on each call. Valid because :func:`simulate_forward` calls
+    each rule's ``resolve`` exactly once per step, in step order (part of
+    the engine's contract); construct a fresh instance per simulation."""
+
+    def __init__(self, values) -> None:
+        self._values = np.asarray(values, dtype=np.float64)
+        self._i = 0
+
+    def resolve(self, state_row: np.ndarray) -> float:
+        if self._i >= len(self._values):
+            raise ValueError(
+                f"DataPathExogRule exhausted after {len(self._values)} "
+                f"values -- the simulation horizon exceeds the supplied "
+                f"data path."
+            )
+        v = float(self._values[self._i])
+        self._i += 1
+        return v
+
+
 class StateLinearExogRule:
     """Resolve the series' previous-period value as a linear combination of
     named state slots -- e.g. lw_sv's ``neutral`` rule r := r* with
@@ -297,7 +320,9 @@ def simulate_forward(
     1. draw process noise, step the state: ``xi_s = F @ xi_prev + w``;
     2. resolve each exogenous series' lag-1 value from ``exog_rules`` given
        the fresh state row (deeper lags come from previously resolved
-       values, seeded by ``exog_seeds`` = real data);
+       values, seeded by ``exog_seeds`` = real data) -- each rule's
+       ``resolve`` is called EXACTLY once per step, in step order (a
+       contract stateful rules like :class:`DataPathExogRule` rely on);
     3. draw measurement shocks via ``meas_noise.step``;
     4. build x from the feedback registers, apply the measurement equation,
        push the new observables (and the resolved exogenous values) into
