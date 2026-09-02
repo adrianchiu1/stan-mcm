@@ -3,6 +3,49 @@
 One dated line per judgment call not fixed by the spec, with rationale.
 Newest first.
 
+- **2026-09-02 — S4.5 item 1 landed (S5-decisions): the endogenous-lag
+  feedback map + ONE generic simulate/IRF/HD engine replaces
+  `results_lw.py`'s hand-rolled recursions.** Each family now declares, as
+  data, what every x column IS (`StateSpaceMeta.feedback_map`:
+  ObsLag/ObsLagMean/ExogLag terms; lw_sv's instance pinned column-for-
+  column against `build_lw_regressors` by `tests/test_engine.py`), and the
+  new `macrotoolkit/engine.py` consumes the declaration: per-shock state
+  propagation, a deterministic per-component observation recursion (HD
+  bars, IRF), and the stochastic forward simulation (fan charts) all run
+  the measurement equation AS WRITTEN -- `y_t = A'x_t + Z xi_t + e_t` with
+  x's endogenous lag columns fed back from the component's own simulated
+  past -- instead of three separately hand-derived gap-space regroupings
+  (where both S4 bugs lived). Judgment calls recorded: (1) OBSERVABLE-space
+  formulation chosen over preserving the gap-space grouping -- the
+  regrouping changes float summation order, so outputs match the
+  pre-engine implementation to ~1.8e-14 max abs (independently reproduced
+  by the numerics reviewer: HD 1.8e-14, IRF 3e-16, fan 5e-15 with rstar/
+  rate_gap bit-identical), not bit-for-bit; the ONLY test relaxation this
+  required was two `assert_array_equal(0)` pins on the ystar-shock gap IRF
+  becoming `atol=1e-12` (the a1*y - a1*y* cancellation rounds; every other
+  structural exact-zero -- eps_pc real side, eps_ystar rstar, is-bar
+  pi[0], neutral-rule rate_gap ≡ 0.0 -- survives EXACTLY and stays pinned
+  exactly). (2) Both S4 fan bug fixes became structural: the exogenous
+  forecast rule resolves from the freshly drawn state row inside the loop
+  (timing), and the rate term enters through A/Z's own stamped signs (no
+  hand-applied sign to flip) -- the sign pin re-anchored at engine level.
+  (3) RNG consumption order preserved exactly (state noise, SV h
+  innovations, measurement eps, final post-loop alignment draw), so
+  seeded fan streams are comparable across the refactor. (4)
+  `simulate_fan_draw` keeps its gap-register/rate-gap-seed interface as a
+  seed-translating wrapper (signature change: takes A/Z instead of 5
+  coefficient scalars); the translations add back `xi_last`'s own named
+  slots, which the engine's first step reads back out of exact F-copies,
+  cancelling to ulps -- the zero-noise hand-derived fan tests (abs=1e-10)
+  pass unchanged. (5) The c==1 guard is retained in
+  `gap_pi_shock_decomposition` (the engine itself is c-agnostic, but the
+  surrounding r* = g+z reporting is not) and newly added to
+  `impulse_response_for_shock` (reviewer suggestion -- it was the one
+  unguarded g+z summer). Fast suite 237 passed (231 + 6 engine tests).
+  Fresh numerics-reviewer pass: no must-fix findings; its two suggestions
+  (this entry; the IRF c-guard + a family-agnostic toy-meta
+  simulate_forward test) are incorporated.
+
 - **2026-09-02 — S4.5 item 2 landed (S5-decisions): named state/coefficient
   metadata replaces slot-peeking.** New `macrotoolkit/families/` package
   (numerics-side family declarations, kept separate from `specs/schema/`'s

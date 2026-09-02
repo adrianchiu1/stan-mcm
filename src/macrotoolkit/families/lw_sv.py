@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from macrotoolkit.families.base import StateSpaceMeta
+from macrotoolkit.families.base import ExogLag, ObsLag, ObsLagMean, StateSpaceMeta
 
 #: Named state metadata for lw_sv. The g shock's 0.25 loading into
 #: ("ystar", 0) is the quarterly g/4 increment (g is ANNUALIZED everywhere;
@@ -50,10 +50,32 @@ LW_STATE_META = StateSpaceMeta(
         "z": {("z", -1): 1.0},
     },
     measurement_shocks=("is", "pc"),
+    obs_names=("y", "pi"),
+    exog_names=("r",),
+    # The feedback map (S5-decisions item 1): what each x column IS, in
+    # build_lw_regressors' exact column order -- x_t = [y_{t-1}, y_{t-2},
+    # r_{t-1}, r_{t-2}, pi_{t-1}, (pi_{t-2}+pi_{t-3}+pi_{t-4})/3]. Pinned
+    # column-for-column against build_lw_regressors by
+    # tests/test_engine.py.
+    feedback_map=(
+        ObsLag("y", 1),
+        ObsLag("y", 2),
+        ExogLag("r", 1),
+        ExogLag("r", 2),
+        ObsLag("pi", 1),
+        ObsLagMean("pi", (2, 3, 4)),
+    ),
 )
 
 #: Observation-row order (measurement equation rows of yobs/Z/R).
-OBS_NAMES = ("y", "pi")
+OBS_NAMES = LW_STATE_META.obs_names
+
+#: The "neutral" forecast_r_rule's declaration (spec §3.3: r_{T+h} :=
+#: r*_{T+h}, neutral policy): r's previous-period value resolves as
+#: r* = g + z read off the named offset -1 slots -- valid for c == 1 only
+#: (the same require_c_is_one guard applies at the call site). Consumed by
+#: macrotoolkit.engine.StateLinearExogRule.
+NEUTRAL_R_RULE_TERMS = {("g", -1): 1.0, ("z", -1): 1.0}
 
 
 def structural_coefficients(Z: np.ndarray, A: np.ndarray) -> dict[str, float]:

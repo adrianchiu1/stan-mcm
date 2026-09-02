@@ -36,6 +36,52 @@ import numpy as np
 StateLabel = tuple[str, int]
 
 
+# ---------------------------------------------------------------------------
+# Feedback map (S5-decisions item 1): the family's declaration of what each
+# exogenous-regressor (x) column IS. lw_sv makes itself conditionally linear
+# by hiding lagged endogenous observables (y, pi) in the "exogenous" x
+# matrix -- valid for the likelihood, but it means (F, Q, A, Z, R) alone is
+# not the full generative model. The feedback map closes that gap AS DATA:
+# each x column is declared to be either a lag of a named observable (the
+# endogenous feedback the generic engine must supply from its own simulated
+# path), a mean of several such lags, or a lag of a genuinely exogenous
+# named series (supplied by data or by a forecast rule). The ONE generic
+# simulate/IRF/HD engine (macrotoolkit.engine) consumes this declaration;
+# no downstream code hand-derives the observation recursions again.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ObsLag:
+    """x column = observable ``name`` lagged ``lag`` >= 1 periods."""
+
+    name: str
+    lag: int
+
+
+@dataclass(frozen=True)
+class ObsLagMean:
+    """x column = the plain mean of observable ``name`` at the given lags
+    (each >= 1), summed in declared order then divided once -- e.g. lw_sv's
+    pi-bar column ``(pi_{t-2} + pi_{t-3} + pi_{t-4}) / 3``."""
+
+    name: str
+    lags: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class ExogLag:
+    """x column = genuinely exogenous series ``name`` lagged ``lag`` >= 1
+    periods -- real data in-sample; a declared forecast rule out of
+    sample."""
+
+    name: str
+    lag: int
+
+
+FeedbackTerm = ObsLag | ObsLagMean | ExogLag
+
+
 @dataclass(frozen=True)
 class StateSpaceMeta:
     """Named state metadata for one model family.
@@ -53,14 +99,51 @@ class StateSpaceMeta:
     - ``measurement_shocks``: the named shocks entering the MEASUREMENT
       equation, in observation-row order (lw_sv: ``("is", "pc")`` for
       observation rows ``[y, pi]``).
+    - ``obs_names``: the named observables, in observation-row order
+      (matches ``measurement_shocks`` element-for-element when both are
+      declared).
+    - ``exog_names``: genuinely exogenous input series (lw_sv: ``("r",)``).
+    - ``feedback_map``: one :data:`FeedbackTerm` per x column, in column
+      order (S5-decisions item 1) -- empty for a family whose measurement
+      equation has no exogenous-regressor matrix.
     """
 
     state_labels: tuple[StateLabel, ...]
     state_shocks: tuple[str, ...]
     shock_loadings: Mapping[str, Mapping[StateLabel, float]]
     measurement_shocks: tuple[str, ...]
+    obs_names: tuple[str, ...] = ()
+    exog_names: tuple[str, ...] = ()
+    feedback_map: tuple[FeedbackTerm, ...] = ()
 
     def __post_init__(self) -> None:
+        if self.obs_names and len(self.obs_names) != len(self.measurement_shocks):
+            raise ValueError(
+                f"obs_names {self.obs_names} and measurement_shocks "
+                f"{self.measurement_shocks} must align row-for-row."
+            )
+        for term in self.feedback_map:
+            if isinstance(term, (ObsLag, ObsLagMean)):
+                if term.name not in self.obs_names:
+                    raise ValueError(
+                        f"feedback_map term {term!r} references unknown "
+                        f"observable; obs_names: {self.obs_names}."
+                    )
+            elif isinstance(term, ExogLag):
+                if term.name not in self.exog_names:
+                    raise ValueError(
+                        f"feedback_map term {term!r} references unknown "
+                        f"exogenous series; exog_names: {self.exog_names}."
+                    )
+            else:
+                raise ValueError(f"feedback_map term {term!r} is not a FeedbackTerm.")
+            lags = term.lags if isinstance(term, ObsLagMean) else (term.lag,)
+            if any(l < 1 for l in lags):
+                raise ValueError(
+                    f"feedback_map term {term!r} has a lag < 1; x columns "
+                    f"must be strictly lagged (a contemporaneous endogenous "
+                    f"regressor would not be a valid feedback declaration)."
+                )
         if len(set(self.state_labels)) != len(self.state_labels):
             raise ValueError(
                 f"state_labels must be unique; got {self.state_labels!r}."
@@ -86,6 +169,39 @@ class StateSpaceMeta:
     @property
     def n_state(self) -> int:
         return len(self.state_labels)
+
+    @property
+    def n_obs(self) -> int:
+        return len(self.measurement_shocks)
+
+    def obs_index(self, name: str) -> int:
+        """Observation-row index of the named observable."""
+        try:
+            return self.obs_names.index(name)
+        except ValueError:
+            raise KeyError(
+                f"No observable named {name!r}; obs_names: {list(self.obs_names)}."
+            ) from None
+
+    def obs_lag_depth(self, name: str) -> int:
+        """How many past periods of observable ``name`` the feedback map
+        reaches back (0 if never referenced)."""
+        depth = 0
+        for term in self.feedback_map:
+            if isinstance(term, ObsLag) and term.name == name:
+                depth = max(depth, term.lag)
+            elif isinstance(term, ObsLagMean) and term.name == name:
+                depth = max(depth, max(term.lags))
+        return depth
+
+    def exog_lag_depth(self, name: str) -> int:
+        """How many past periods of exogenous series ``name`` the feedback
+        map reaches back (0 if never referenced)."""
+        depth = 0
+        for term in self.feedback_map:
+            if isinstance(term, ExogLag) and term.name == name:
+                depth = max(depth, term.lag)
+        return depth
 
     def slot(self, name: str, offset: int = 0) -> int:
         """The state-vector index of the slot labeled ``(name, offset)``.

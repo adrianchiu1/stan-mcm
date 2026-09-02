@@ -260,7 +260,7 @@ def test_fan_rstar_is_aligned_to_gap_pi_period_indexing() -> None:
     xi_last = np.array([100.0, 99.9, 99.8, 2.5, 2.4, 0.3, 0.2])
 
     out = simulate_fan_draw(
-        F, Q, params["a1"], params["a2"], params["a_r"], params["b_pi"], params["b_y"],
+        F, Q, A, Z,
         xi_last,
         gap_lag1=0.5, gap_lag2=0.3,
         pi_lag1=2.0, pi_lag2=1.9, pi_lag3=1.8, pi_lag4=1.7,
@@ -292,41 +292,62 @@ def test_fan_rstar_is_aligned_to_gap_pi_period_indexing() -> None:
 
 
 def test_fan_forecast_step_is_curve_term_is_a_plus_not_a_minus() -> None:
-    """Standalone, dependency-free pin on `_fan_forecast_step`'s IS-curve
-    sign convention (numerics-reviewer finding, S4, separate from and
-    found AFTER the rate-gap seeding/ordering bug above): the combined
-    `rate_gap = (r-r*)` term must enter with a PLUS
+    """Standalone pin on the forward-simulation IS-curve sign convention
+    (numerics-reviewer finding, S4, separate from and found AFTER the
+    rate-gap seeding/ordering bug above): the combined `(r-r*)` rate-gap
+    term must enter gap with a PLUS
     (`gap_t = a1*gap_lag1 + a2*gap_lag2 + (a_r/2)*(rate_gap_lag1+
-    rate_gap_lag2) + eps_is_t`), matching spec §1.2's IS curve and
-    `build_lw_matrices`'s own construction -- confirmed independently by
-    symbolic re-derivation from `A`/`Z` and by numerical reconstruction of
-    a real smoothed gap path. A shipped version of this function used a
-    MINUS (carried over from `gap_pi_shock_decomposition`'s per-bar
-    `-(a_r/2)*rstar` term, which is only valid because that function adds
-    a SEPARATE `+(a_r/2)*(r_{t-1}+r_{t-2})` data term to the "init" bar --
-    this function combines r and r* into one number up front, so it needs
-    its own plus applied directly), which produced 100%+ relative
+    rate_gap_lag2) + eps_is_t`), matching spec §1.2's IS curve. A shipped
+    S4 version of the hand-rolled fan step used a MINUS (carried over from
+    the HD's per-bar `-(a_r/2)*rstar` half-term), producing 100%+ relative
     distortion of forecast gap values by late horizons under
-    `forecast_r_rule: last_value`. This test uses hand-picked numbers with
-    no dependency on a sampled run, so it pins the sign with zero ambiguity
-    about anything else going on."""
-    from macrotoolkit.results_lw import _fan_forecast_step
+    `forecast_r_rule: last_value`.
 
-    gap_t, pi_t = _fan_forecast_step(
+    Post-engine (S5-decisions item 1) there is no hand-applied sign left:
+    the term enters through `A`/`Z`'s own stamped entries. This test keeps
+    the pin alive at the same altitude by driving `simulate_fan_draw`
+    zero-noise with hand-picked lag registers -- state chosen so y* == 0
+    and r* == 0 (gap == y, rate_gap == r), r held at `last_value` r_last =
+    3.0 with the lag-2 rate-gap seed -1.0 -- and checking gap_t against
+    the same hand-computed 0.6 the original `_fan_forecast_step` pin used,
+    with the wrong-sign value (0.8) still excluded."""
+    from macrotoolkit.results_lw import simulate_fan_draw
+    from macrotoolkit.smoother import build_lw_matrices
+
+    params = {
+        "a1": 0.6, "a2": 0.2, "a_r": -0.1, "b_pi": 0.7, "b_y": 0.05,
+        "sigma_ystar": 0.5, "sigma_g": 0.03, "sigma_z": 0.08,
+        "sigma_is": 0.4, "sigma_pc": 0.8,
+    }
+    F, Q, A, Z, R = build_lw_matrices(params, c=1.0)
+    # All-zero terminal state: y* == 0 at every slot (gap == y) and
+    # g == z == 0 (r* == 0 under zero noise, so rate_gap == r itself).
+    xi_last = np.zeros(7)
+
+    out = simulate_fan_draw(
+        F, Q, A, Z, xi_last,
         gap_lag1=1.0, gap_lag2=0.5,
         pi_lag1=2.0, pi_lag2=1.8, pi_lag3=1.6, pi_lag4=1.4,
-        rate_gap_lag1=3.0, rate_gap_lag2=-1.0,
-        a1=0.6, a2=0.2, a_r=-0.1, b_pi=0.7, b_y=0.05,
-        eps_is_t=0.0, eps_pc_t=0.0,
+        # rate_gap_seed is the LAG-2 rate-gap for the first forecast step;
+        # with r* == 0 it is just r_{T-1} = -1.0.
+        rate_gap_seed=-1.0,
+        y_hist_last4=np.zeros(4),
+        # last_value holds r at 3.0, and r* stays 0 under zero noise, so
+        # the first step's lag-1 rate gap is exactly 3.0.
+        r_last=3.0, forecast_r_rule="last_value",
+        sv_on=False, sigma_is=0.4, sigma_pc=0.8,
+        h_is_last=None, h_pc_last=None, sigma_h_is=None, sigma_h_pc=None,
+        horizon=1, rng=_ZeroNoiseRNG(),
     )
     # gap_t = 0.6*1.0 + 0.2*0.5 + (-0.1/2)*(3.0 + -1.0) + 0.0
     #       = 0.6 + 0.1 + (-0.05)*2.0 = 0.7 - 0.1 = 0.6
-    assert gap_t == pytest.approx(0.6)
+    assert out["gap"][0] == pytest.approx(0.6, abs=1e-12)
+    assert out["rate_gap"][0] == pytest.approx(3.0, abs=1e-12)
     # The WRONG (minus) sign would give 0.6 + 0.1 + 0.05*2.0 = 0.8 --
     # different enough that this test would have caught the original bug.
     wrong_sign_gap_t = 0.6 * 1.0 + 0.2 * 0.5 - (-0.1 / 2.0) * (3.0 + -1.0) + 0.0
     assert wrong_sign_gap_t == pytest.approx(0.8)
-    assert gap_t != pytest.approx(wrong_sign_gap_t)
+    assert out["gap"][0] != pytest.approx(wrong_sign_gap_t)
 
 
 class _ZeroNoiseRNG:
@@ -366,7 +387,7 @@ def test_first_forecast_period_gap_matches_hand_derived_reference(s4_no_sv_lw_ru
     sigma_pc_i = float(flat["sigma_pc"][i])
 
     out_neutral = simulate_fan_draw(
-        F, Q, a1, a2, a_r, b_pi, b_y, xi_draw[-1],
+        F, Q, A, Z, xi_draw[-1],
         gap_lag1, gap_lag2,
         float(r.yobs[-1, 1]), float(r.yobs[-2, 1]), float(r.yobs[-3, 1]), float(r.yobs[-4, 1]),
         rate_gap_seed, r.yobs[-4:, 0], float(r.r_full[-1]), "neutral",
@@ -422,7 +443,7 @@ def test_first_forecast_period_gap_last_value_uses_current_period_rstar(s4_no_sv
     sigma_pc_i = float(flat["sigma_pc"][i])
 
     out = simulate_fan_draw(
-        F, Q, a1, a2, a_r, b_pi, b_y, xi_draw[-1],
+        F, Q, A, Z, xi_draw[-1],
         gap_lag1, gap_lag2,
         float(r.yobs[-1, 1]), float(r.yobs[-2, 1]), float(r.yobs[-3, 1]), float(r.yobs[-4, 1]),
         rate_gap_seed, r.yobs[-4:, 0], r_last, "last_value",
