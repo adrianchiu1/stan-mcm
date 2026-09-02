@@ -3,6 +3,26 @@
 One dated line per judgment call not fixed by the spec, with rationale.
 Newest first.
 
+- **2026-09-02 — Item 16 COMPLETE: both reference SV runs regenerated at
+  the post-migration estimation identity, reproducing their recorded
+  diagnostics exactly; tracked thinned archive created.**
+  `spec_sv.yaml` → run `a00958509083` (was 70ad47166eaf): PASS, 0
+  divergences, 0 treedepth hits, max R-hat 1.0045, min bulk/tail ESS
+  2627/1620, E-BFMI 0.88–1.01 — S3/S4's recorded values to the last
+  digit. `spec_sv_full_vintage.yaml` → run `eb73e644be0b` (was
+  9d10bcf32a40 in S3, then 930459224ca0 after S4's outputs schema): PASS,
+  0 divergences, max R-hat 1.0046, min ESS 1778/917, E-BFMI 0.88–0.99 —
+  again the recorded values. The hash changes are purely the item-3
+  identity migration (numerics demonstrably unchanged). Both runs
+  archived draw-thinned ×10 into the TRACKED `runs-archive/` (4.0/4.5 MB;
+  `scripts/archive_run.py`; per-dir ARCHIVE_NOTE.md labels them
+  development fixtures with regeneration instructions), and the report
+  acceptance test now falls back to a tmp copy of the archive when
+  `runs/` is absent — fresh containers get real output-layer acceptance
+  coverage (including the new prior-predictive figure) without paying
+  40–80 minutes of sampling first. Full reports generated for both runs
+  from the new pipeline.
+
 - **2026-09-02 — S5 item 8 DELIVERED: the G5b informational exhibit
   (docs/exhibits/), on the regenerated reference run a00958509083.** Our
   FILTERED (one-sided, per-posterior-draw KF, G5a-validated reporting
