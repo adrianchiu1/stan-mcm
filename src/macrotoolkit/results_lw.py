@@ -87,7 +87,7 @@ from macrotoolkit.families.lw_sv import (
     require_c_is_one,
     structural_coefficients,
 )
-from specs.schema.base import RunSpec, load_spec
+from specs.schema.base import RunSpec
 
 # Alias kept because the state-side propagation moved verbatim into the
 # generic engine (S5-decisions item 1) -- identical float operations.
@@ -229,7 +229,9 @@ def load_lw_run(run_dir: str | Path) -> LWRun:
             f"completed run directory."
         )
 
-    spec = load_spec(str(spec_path))
+    from macrotoolkit.run import load_run_spec
+
+    spec = load_run_spec(run_dir)
     if spec.model.family != "lw_sv":
         raise ValueError(
             f"results_lw.load_lw_run only supports model.family 'lw_sv'; "

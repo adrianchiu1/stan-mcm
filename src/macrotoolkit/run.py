@@ -1,22 +1,32 @@
 """Run identity hashing, CmdStanPy execution, and the immutable run store.
 
-Run identity = SHA-256 over (canonicalized spec YAML, data file hash,
-rendered Stan source hash, CmdStan version) -- lw-sv-spec.md §2.3.
-"Canonicalized spec" means the spec parsed through the Pydantic `RunSpec`
-model and re-serialized with sorted keys (`RunSpec.to_canonical_yaml`), so
-YAML formatting, comments, or key order never change a run's hash -- only
-the validated *meaning* of the spec does.
+ESTIMATION identity (S5-decisions item 3) = SHA-256 over (canonicalized
+spec YAML MINUS the `outputs:` block, data file hash, rendered Stan source
+hash, CmdStan version) -- lw-sv-spec.md §2.3 as amended 2026-09-02.
+"Canonicalized" means the spec parsed through the Pydantic `RunSpec` model
+and re-serialized with sorted keys (`RunSpec.to_estimation_yaml`), so YAML
+formatting, comments, or key order never change a run's hash -- only the
+validated *estimation-relevant meaning* of the spec does. Report/output
+options (`outputs:`) live in the run dir but OUTSIDE the hash, so reports
+regenerate freely and report-option schema changes never orphan MCMC runs.
 
-Run store layout: `runs/<hash12>/` containing `spec.yaml` (canonical form),
+Run store layout: `runs/<hash12>/` containing `spec.yaml` (the canonical
+ESTIMATION spec -- the immutable identity record), `outputs.yaml` (the
+report/output options -- the one deliberately NON-immutable artifact,
+refreshed by an idempotent re-run whose spec carries different options),
 `data.snapshot.csv` (byte-identical copy of the source CSV that was
 hashed), `draws.nc` (ArviZ InferenceData), `diagnostics.json`, `log.txt`,
 and a `_SUCCESS` marker written last, once every artifact above has been
-written successfully.
+written successfully. `load_run_spec()` reassembles the full RunSpec from
+the split (and still loads pre-split run dirs whose spec.yaml carries an
+inline outputs block).
 
-Immutability: run directories are never mutated once written.
+Immutability: run directories' ESTIMATION artifacts are never mutated once
+written (`outputs.yaml` and `report.html` are the documented exceptions).
   - If `runs/<hash12>/` already exists *with* `_SUCCESS`: this is an
-    idempotent no-op -- the identical spec+data was already run
-    successfully; nothing is rewritten.
+    idempotent no-op for the MCMC -- the identical estimation was already
+    run successfully; only `outputs.yaml` may be refreshed (content-
+    compared first, so a truly identical re-run rewrites nothing).
   - If it exists *without* `_SUCCESS`: a previous run crashed or was
     interrupted partway through. We raise, telling the human to remove the
     directory manually after inspecting `log.txt` -- we never silently
@@ -75,15 +85,50 @@ class RunResult:
 
 
 def compute_run_id(spec: RunSpec, data_hash: str, stan_hash: str, cmdstan_version: str) -> tuple[str, str]:
-    """Returns (full_hex_digest, hash12) for the run identity."""
+    """Returns (full_hex_digest, hash12) for the ESTIMATION identity
+    (S5-decisions item 3): the hash covers (spec minus ``outputs:``, data,
+    rendered Stan source, toolchain version). ``outputs`` is report/output
+    configuration only -- it never reaches the sampler -- so it lives in
+    the run dir (``outputs.yaml``) OUTSIDE the hash, and report-option
+    changes or report-schema evolution never orphan an MCMC run. This was
+    the one final hash migration (the payload key is renamed to
+    ``estimation_spec`` so the migration is self-describing); the
+    estimation identity is stable from here.
+    """
     payload = {
-        "spec": spec.to_canonical_yaml(),
+        "estimation_spec": spec.to_estimation_yaml(),
         "data_sha256": data_hash,
         "stan_source_sha256": stan_hash,
         "cmdstan_version": cmdstan_version,
     }
     full = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
     return full, full[:12]
+
+
+def load_run_spec(run_dir: str | Path) -> RunSpec:
+    """Reassemble a completed run directory's full :class:`RunSpec` from
+    its split artifacts (S5-decisions item 3): ``spec.yaml`` carries the
+    canonical ESTIMATION spec (the immutable identity record) and
+    ``outputs.yaml`` the report/output options (outside the identity hash,
+    refreshable). Pre-split run dirs -- whose ``spec.yaml`` still carries
+    an inline ``outputs:`` block and have no ``outputs.yaml`` -- load
+    unchanged (old run dirs remain valid records)."""
+    import yaml
+
+    run_dir = Path(run_dir)
+    spec_path = run_dir / "spec.yaml"
+    if not spec_path.is_file():
+        raise FileNotFoundError(
+            f"{spec_path} not found -- {run_dir} does not look like a "
+            f"completed run directory."
+        )
+    raw = yaml.safe_load(spec_path.read_text())
+    if not isinstance(raw, dict):
+        raise ValueError(f"{spec_path} must contain a YAML mapping, got {type(raw).__name__}.")
+    outputs_path = run_dir / "outputs.yaml"
+    if outputs_path.is_file():
+        raw["outputs"] = yaml.safe_load(outputs_path.read_text())
+    return RunSpec.model_validate(raw)
 
 
 def lw_mu_h0_anchors(y: np.ndarray, pi: np.ndarray, r: np.ndarray) -> tuple[float, float]:
@@ -367,6 +412,15 @@ def run(spec_path: str | Path, runs_root: str | Path | None = None) -> RunResult
 
     if run_dir.exists():
         if success_marker.exists():
+            # Idempotent estimation no-op -- but outputs.yaml sits OUTSIDE
+            # the identity (S5-decisions item 3), so a re-run whose spec
+            # carries different report options refreshes it (content-
+            # compared first: an identical re-run leaves every artifact
+            # byte- and mtime-untouched).
+            outputs_yaml = spec.outputs_to_canonical_yaml()
+            outputs_path = run_dir / "outputs.yaml"
+            if not outputs_path.is_file() or outputs_path.read_text() != outputs_yaml:
+                outputs_path.write_text(outputs_yaml)
             return RunResult(run_id=run_id, run_dir=run_dir, is_new=False)
         raise RuntimeError(
             f"Run directory {run_dir} already exists but has no _SUCCESS "
@@ -397,7 +451,12 @@ def run(spec_path: str | Path, runs_root: str | Path | None = None) -> RunResult
         logger.info("Rendered Stan source sha256: %s", src_hash)
         logger.info("CmdStan version: %s", cmdstan_version)
 
-        (run_dir / "spec.yaml").write_text(spec.to_canonical_yaml())
+        # spec.yaml = the canonical ESTIMATION spec (the immutable identity
+        # record); outputs.yaml = the report/output options, outside the
+        # hash and refreshable on later idempotent re-runs (S5-decisions
+        # item 3). load_run_spec() reassembles the full RunSpec.
+        (run_dir / "spec.yaml").write_text(spec.to_estimation_yaml())
+        (run_dir / "outputs.yaml").write_text(spec.outputs_to_canonical_yaml())
         shutil.copy2(data_path, run_dir / "data.snapshot.csv")
 
         model, _ = compile_model(source, cmdstan_version)

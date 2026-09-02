@@ -83,10 +83,96 @@ def test_run_id_hash12_is_prefix_of_full_digest() -> None:
     assert full.startswith(h12)
 
 
+# --- estimation-vs-report identity split (S5-decisions item 3) --------------
+
+
+def test_outputs_do_not_enter_the_run_identity() -> None:
+    """Two specs differing ONLY in `outputs:` describe the same estimation
+    and must map to the same run identity -- the whole point of the split
+    (report options live in the run dir, outside the hash)."""
+    spec_a = _base_spec()
+    d_b = {
+        "model": {"family": "local_level", "options": {}},
+        "data": {"file": "data.csv", "date_column": "date", "mapping": {"y": "obs"}},
+        "outputs": {"some_report_option": 42},
+    }
+    spec_b = RunSpec.model_validate(d_b)
+    assert spec_a.to_canonical_yaml() != spec_b.to_canonical_yaml()  # they DO differ as full specs
+    full_a, _ = compute_run_id(spec_a, "data_hash", "stan_hash", "2.36.0")
+    full_b, _ = compute_run_id(spec_b, "data_hash", "stan_hash", "2.36.0")
+    assert full_a == full_b
+
+
+def test_run_dir_spec_yaml_is_estimation_only_and_outputs_split_out(
+    tiny_spec_path: Path, runs_root: Path
+) -> None:
+    import yaml
+
+    from macrotoolkit.run import load_run_spec
+
+    result = run(tiny_spec_path, runs_root=runs_root)
+    stored_spec = yaml.safe_load((result.run_dir / "spec.yaml").read_text())
+    assert "outputs" not in stored_spec
+    assert (result.run_dir / "outputs.yaml").is_file()
+    # load_run_spec reassembles the full spec from the split artifacts.
+    reassembled = load_run_spec(result.run_dir)
+    original = RunSpec.model_validate(yaml.safe_load(tiny_spec_path.read_text()))
+    assert reassembled.to_canonical_yaml() == original.to_canonical_yaml()
+
+
+def test_load_run_spec_accepts_pre_split_run_dirs(tmp_path: Path) -> None:
+    """Old run dirs (spec.yaml with an inline outputs block, no
+    outputs.yaml) remain valid records and must keep loading."""
+    from macrotoolkit.run import load_run_spec
+
+    spec = _base_spec()
+    (tmp_path / "spec.yaml").write_text(spec.to_canonical_yaml())
+    loaded = load_run_spec(tmp_path)
+    assert loaded.to_canonical_yaml() == spec.to_canonical_yaml()
+
+
+def test_rerun_with_different_outputs_is_noop_that_refreshes_outputs_yaml(
+    tiny_spec_path: Path, runs_root: Path, tmp_path: Path
+) -> None:
+    """Same estimation + different report options: the MCMC is an
+    idempotent no-op (same run dir, estimation artifacts byte- and
+    mtime-untouched), but outputs.yaml -- the one deliberately
+    NON-immutable artifact -- is refreshed to the new options."""
+    import yaml
+
+    from macrotoolkit.run import load_run_spec
+
+    result1 = run(tiny_spec_path, runs_root=runs_root)
+    estimation_artifacts = [a for a in REQUIRED_ARTIFACTS if a != "outputs.yaml"]
+    before = {
+        name: ((result1.run_dir / name).stat().st_mtime, (result1.run_dir / name).read_bytes())
+        for name in estimation_artifacts
+    }
+
+    spec_dict = yaml.safe_load(tiny_spec_path.read_text())
+    spec_dict["outputs"] = {"some_report_option": 7}
+    other_spec_path = tmp_path / "spec_new_outputs.yaml"
+    other_spec_path.write_text(yaml.safe_dump(spec_dict, sort_keys=False))
+
+    time.sleep(0.05)
+    result2 = run(other_spec_path, runs_root=runs_root)
+    assert result2.is_new is False
+    assert result2.run_dir == result1.run_dir
+
+    for name in estimation_artifacts:
+        mtime_before, content_before = before[name]
+        path = result1.run_dir / name
+        assert path.stat().st_mtime == mtime_before, f"{name} changed on outputs-only re-run"
+        assert path.read_bytes() == content_before, f"{name} changed on outputs-only re-run"
+
+    refreshed = load_run_spec(result1.run_dir)
+    assert refreshed.outputs == {"some_report_option": 7}
+
+
 # --- immutability contract, via real run() calls ---------------------------
 
 
-REQUIRED_ARTIFACTS = ("spec.yaml", "data.snapshot.csv", "draws.nc", "diagnostics.json", "log.txt", "_SUCCESS")
+REQUIRED_ARTIFACTS = ("spec.yaml", "outputs.yaml", "data.snapshot.csv", "draws.nc", "diagnostics.json", "log.txt", "_SUCCESS")
 
 
 def test_fresh_run_creates_success_and_all_artifacts(tiny_spec_path: Path, runs_root: Path) -> None:

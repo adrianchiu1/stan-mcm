@@ -3,6 +3,28 @@
 One dated line per judgment call not fixed by the spec, with rationale.
 Newest first.
 
+- **2026-09-02 — S4.5 item 3 landed (S5-decisions): run identity split
+  into estimation identity vs report config.** `compute_run_id` now hashes
+  `RunSpec.to_estimation_yaml()` -- the canonical spec MINUS `outputs:` --
+  alongside data/rendered-Stan/CmdStan-version; the payload key is renamed
+  `spec` → `estimation_spec` so the (one final) hash migration is
+  self-describing. Run dirs now store `spec.yaml` (canonical ESTIMATION
+  spec, immutable identity record) plus `outputs.yaml` (report/output
+  options, the one deliberately NON-immutable artifact): an idempotent
+  re-run whose spec carries different report options refreshes
+  `outputs.yaml` in place -- content-compared first, so a truly identical
+  re-run still rewrites nothing (byte- and mtime-level no-op, pinned by
+  tests). `load_run_spec(run_dir)` reassembles the full RunSpec and
+  accepts pre-split run dirs (inline outputs block, no outputs.yaml)
+  unchanged -- old run dirs remain valid records. Effect: every spec's
+  run hash changes ONCE more (third migration, after S3's KF
+  generalization and S4's outputs schema -- both container-local runs are
+  being regenerated this stage anyway, item 16), and report-option/
+  report-schema changes can never orphan an MCMC run again. Judgment
+  call: `outputs.yaml` refresh happens through `mtk run` on the modified
+  spec (estimation no-op + refresh) rather than a new report-side flag --
+  one write path, no report-time spec parameter.
+
 - **2026-09-02 — S4.5 item 1 landed (S5-decisions): the endogenous-lag
   feedback map + ONE generic simulate/IRF/HD engine replaces
   `results_lw.py`'s hand-rolled recursions.** Each family now declares, as

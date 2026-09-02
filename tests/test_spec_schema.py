@@ -280,6 +280,37 @@ def test_canonical_yaml_round_trips_through_yaml_parser() -> None:
     assert reparsed["data"]["mapping"] == {"y": "obs"}
 
 
+# --- to_estimation_yaml / outputs split (S5-decisions item 3) --------------
+
+
+def test_estimation_yaml_excludes_outputs_and_is_otherwise_canonical() -> None:
+    d = _valid_spec_dict()
+    d["outputs"] = {"some_report_option": 42}
+    spec = RunSpec.model_validate(d)
+    est = yaml.safe_load(spec.to_estimation_yaml())
+    assert "outputs" not in est
+    full = yaml.safe_load(spec.to_canonical_yaml())
+    full.pop("outputs")
+    assert est == full
+
+
+def test_estimation_yaml_identical_for_specs_differing_only_in_outputs() -> None:
+    d1 = _valid_spec_dict()
+    d2 = _valid_spec_dict()
+    d2["outputs"] = {"some_report_option": 42}
+    spec1 = RunSpec.model_validate(d1)
+    spec2 = RunSpec.model_validate(d2)
+    assert spec1.to_estimation_yaml() == spec2.to_estimation_yaml()
+    assert spec1.to_canonical_yaml() != spec2.to_canonical_yaml()
+
+
+def test_outputs_canonical_yaml_round_trips() -> None:
+    d = _valid_spec_dict()
+    d["outputs"] = {"b": 2, "a": 1}
+    spec = RunSpec.model_validate(d)
+    assert yaml.safe_load(spec.outputs_to_canonical_yaml()) == {"a": 1, "b": 2}
+
+
 # ---------------------------------------------------------------------------
 # lw_sv options: sv_shocks combinations (S3)
 # ---------------------------------------------------------------------------
