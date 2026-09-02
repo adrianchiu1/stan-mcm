@@ -3,6 +3,28 @@
 One dated line per judgment call not fixed by the spec, with rationale.
 Newest first.
 
+- **2026-09-02 — S5 item 8 DELIVERED: the G5b informational exhibit
+  (docs/exhibits/), on the regenerated reference run a00958509083.** Our
+  FILTERED (one-sided, per-posterior-draw KF, G5a-validated reporting
+  mapping, median ± 90% band) series vs the published one-sided HLW
+  series (real-time workbook, 2019Q2 vintage -- their own header: "All
+  estimates are one-sided"). Measured: r* corr 0.941, mean |diff| 0.65
+  (0.96 over 2000+), final-period diff +1.44; output gap corr 0.829; g
+  corr 0.921 with final diff -0.07. The r* = g + z identity makes the
+  dominant attribution DIRECTLY measurable and the exhibit computes it:
+  the +1.44 final r* gap decomposes into +1.51 from z and -0.07 from g --
+  essentially the entire late-sample gap sits in z, exactly where the
+  deliberate Half-N(0, 0.08²) sigma_z pile-up prior acts; the remaining
+  attributed causes (Bayesian median vs MLE plug-in, SV vs constant
+  variances, data vintage ~0.06pp-scale, initialization) are documented
+  on the exhibit. NO pass/fail, per the item-8 demotion; the sweep's
+  sigma_z_loose cell will provide the direct prior-sensitivity
+  cross-check once run. Note the pre-S5 review's "~90bp of r* at 2019"
+  figure referred to the earlier no-SV configuration's smoothed
+  comparison; this exhibit's own measured one-sided numbers (+1.44,
+  z-attributed) supersede it for the SV reference run and are the ones
+  the README will quote.
+
 - **2026-09-02 — G4 PRE-REGISTRATION (S5-decisions item 10): the full-SV
   SBC design, fixed BEFORE the run starts; and the family-parameterized
   SBC engine (item 11).** The reduced design, recorded here so it cannot

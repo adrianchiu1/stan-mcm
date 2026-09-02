@@ -1,0 +1,26 @@
+data:
+  date_column: date
+  file: data/us_quarterly.csv
+  mapping:
+    pi: core_pce_ann
+    r: real_rate
+    y: lgdp100
+  sample:
+    end: null
+    start: null
+model:
+  family: lw_sv
+  options:
+    estimate_c: false
+    family: lw_sv
+    sv_shocks:
+    - is
+    - pc
+priors: {}
+sampler:
+  adapt_delta: 0.95
+  chains: 4
+  max_treedepth: 12
+  sampling: 1500
+  seed: 20260813
+  warmup: 1500

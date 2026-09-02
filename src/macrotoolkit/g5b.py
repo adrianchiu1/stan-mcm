@@ -276,7 +276,19 @@ def exhibit_notes_markdown(ex: G5bExhibit, run_hash: str) -> str:
             f"| {name} | {s['mean_abs_diff']:.2f} | {s['mean_abs_diff_2000plus']:.2f} "
             f"| {s['max_abs_diff']:.2f} | {s['corr']:.3f} | {s['final_diff']:+.2f} |"
         )
+    # The r* = g + z identity makes the dominant attribution DIRECTLY
+    # measurable: how much of the final-period r* difference sits in z
+    # (the pile-up-prior channel) versus g.
+    rd = ex.stats["rstar"]["final_diff"]
+    zd = ex.stats["z"]["final_diff"]
+    gd = ex.stats["g"]["final_diff"]
     lines += [
+        "",
+        f"Measured attribution via the r* = g + z identity: the final-period r*",
+        f"difference of {rd:+.2f} decomposes into {zd:+.2f} from z and {gd:+.2f} from g --",
+        f"i.e. essentially the entire late-sample r* gap sits in z, exactly where the",
+        f"deliberate sigma_z pile-up prior acts (cause 1 below); trend growth g is",
+        f"close to the published series.",
         "",
         "Attributed causes of the differences (each deliberate or documented, none a",
         "numerics discrepancy -- the KF/smoother core matches HLW's own machinery to",
