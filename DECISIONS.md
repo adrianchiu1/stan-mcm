@@ -3,6 +3,33 @@
 One dated line per judgment call not fixed by the spec, with rationale.
 Newest first.
 
+- **2026-09-02 — S5 item 9 landed: `mtk sweep`, the reusable prior-
+  sensitivity sweep tool; the mandated sigma_g/sigma_z sweep is its first
+  use.** Design decisions: (1) a sweep adds NO storage concept -- every
+  cell is a normal hash-identified immutable run (cell spec = base spec +
+  the cell's prior overrides merged over its `priors:` block, run via
+  `run(spec_override=...)` so no temp spec files land next to the user's
+  own; data still resolves against the base spec's directory), which
+  makes sweeps idempotent cell-by-cell for free and keeps every cell's
+  full per-run report available via `mtk report`. (2) The comparison
+  report (`sweeps/<name>/report.html` + `cells.json`, gitignored like
+  runs/) shows the cell table, per-parameter posterior summaries, the
+  prior→posterior CONTRACTION readout `1 - (posterior sd / prior sd)^2`
+  computed per cell against THAT CELL'S own resolved prior (prior sds
+  Monte-Carlo'd through the family's `prior_sd_table` capability =
+  `sample_prior_params`, so any stampable prior is covered by the same
+  code path the prior-predictive uses), and the family's `headline_series`
+  overlay (lw_sv: posterior-median r* and gap, smoother draws thinned x5
+  report-side). Both are registry capabilities, so the tool is family-
+  generic; a family declaring neither still gets the tables. (3) The
+  mandated sweep (`examples/us_lw_sv/sweep_sigma_g_z.yaml`, spec §1.6's
+  "small sweep" for the priors that do identification work): one-at-a-
+  time halving/doubling of each pile-up Half-Normal scale around the
+  defaults (sigma_g sd 0.015/0.03/0.06; sigma_z sd 0.04/0.08/0.16) on the
+  pre-COVID reference window -- 5 cells, the baseline cell being the
+  reference SV run itself (idempotent against the regenerated store).
+  End-to-end tested with a tiny 2-cell lw_sv sweep in the fast suite.
+
 - **2026-09-02 — S5 item 7 landed: the spec §4 prior-predictive check,
   generically, in every run report.** `compute_prior_predictive_draws`
   (results_lw Part E) simulates `outputs.prior_predictive_draws` (default

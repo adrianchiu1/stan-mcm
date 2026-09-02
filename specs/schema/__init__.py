@@ -58,6 +58,12 @@ class FamilyEntry:
       modules.
     - ``report_writer``: ``(run_dir) -> Path`` -- writes the family's
       self-contained HTML report into the run dir.
+    - ``prior_sd_table``: ``(spec, df) -> {param: prior sd}`` -- the prior
+      side of the sweep report's prior→posterior contraction readout
+      (S5-decisions item 9).
+    - ``headline_series``: ``(run_dir) -> {name: (dates, median_path)}``
+      -- the family's headline smoothed series for cross-run comparison
+      overlays (the sweep report).
     """
 
     options_model: Type[BaseModel]
@@ -69,6 +75,8 @@ class FamilyEntry:
     state_meta: str | None = None
     results_loader: str | None = None
     report_writer: str | None = None
+    prior_sd_table: str | None = None
+    headline_series: str | None = None
 
     def resolve(self, capability: str) -> Any:
         """Resolve one of the dotted-path capability fields to the actual
@@ -81,6 +89,8 @@ class FamilyEntry:
             "state_meta",
             "results_loader",
             "report_writer",
+            "prior_sd_table",
+            "headline_series",
         ):
             raise ValueError(
                 f"Unknown family capability {capability!r} -- see "
@@ -131,6 +141,8 @@ FAMILY_REGISTRY: dict[str, FamilyEntry] = {
         state_meta="macrotoolkit.families.lw_sv:LW_STATE_META",
         results_loader="macrotoolkit.results_lw:load_lw_run",
         report_writer="macrotoolkit.report:write_report",
+        prior_sd_table="macrotoolkit.families.lw_sv:prior_scalar_sds",
+        headline_series="macrotoolkit.families.lw_sv:headline_series",
     ),
 }
 

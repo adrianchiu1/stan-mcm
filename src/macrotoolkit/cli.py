@@ -31,6 +31,27 @@ def run_cmd(spec_path: str) -> None:
         click.echo(f"Run {result.run_id} already exists and is complete (idempotent no-op) -> {result.run_dir}")
 
 
+@main.command("sweep")
+@click.argument("sweep_path", type=click.Path(exists=True, dir_okay=False))
+def sweep_cmd(sweep_path: str) -> None:
+    """Run the prior sweep described by SWEEP_PATH (base spec + prior
+    override grid, S5-decisions item 9): every cell is an ordinary
+    immutable run in runs/ (idempotent cell-by-cell), and one comparison
+    report -- posteriors, prior-to-posterior contraction, headline series
+    across the grid -- is written under sweeps/<name>/."""
+    from macrotoolkit.sweep import run_sweep
+
+    try:
+        result = run_sweep(sweep_path)
+    except Exception as exc:
+        click.echo(f"error: {exc}", err=True)
+        sys.exit(1)
+    for cell in result.cells:
+        state = "new" if cell.run_result.is_new else "existing"
+        click.echo(f"  cell {cell.label}: run {cell.run_result.run_id} ({state}, verdict: {cell.verdict})")
+    click.echo(f"Sweep {result.name} complete -> {result.report_path}")
+
+
 @main.command("report")
 @click.argument("run_hash")
 @click.option(

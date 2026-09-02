@@ -245,13 +245,25 @@ def compute_diagnostics(idata: az.InferenceData, sampler_spec: SamplerSpec) -> d
     }
 
 
-def run(spec_path: str | Path, runs_root: str | Path | None = None) -> RunResult:
+def run(
+    spec_path: str | Path,
+    runs_root: str | Path | None = None,
+    spec_override: RunSpec | None = None,
+) -> RunResult:
     """Execute (or idempotently no-op) the run described by the spec at
-    `spec_path`. Returns a `RunResult`."""
+    `spec_path`. Returns a `RunResult`.
+
+    ``spec_override``: an already-validated RunSpec to use INSTEAD of
+    parsing `spec_path` -- `spec_path` then only anchors relative-path
+    resolution (`data.file` resolves against its directory, exactly as it
+    would for the file itself). Used by the sweep runner (S5-decisions
+    item 9) to run derived variants of a base spec without writing
+    temporary spec files next to the user's own.
+    """
     spec_path = Path(spec_path).resolve()
     runs_root_path = Path(runs_root).resolve() if runs_root is not None else REPO_ROOT / "runs"
 
-    spec = load_spec(str(spec_path))
+    spec = spec_override if spec_override is not None else load_spec(str(spec_path))
     family = get_family(spec.model.family)
 
     df, raw_hash, data_path = load_data(spec, spec_path)

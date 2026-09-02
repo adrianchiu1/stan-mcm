@@ -20,6 +20,8 @@ def test_every_registered_capability_path_resolves() -> None:
             "state_meta",
             "results_loader",
             "report_writer",
+            "prior_sd_table",
+            "headline_series",
         ):
             if getattr(entry, capability) is not None:
                 obj = entry.resolve(capability)
