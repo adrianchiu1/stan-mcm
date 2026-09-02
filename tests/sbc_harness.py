@@ -187,6 +187,33 @@ def chi2_pvalues(design: SbcDesign, ranks: np.ndarray) -> dict[str, float]:
 class SbcRunResult:
     ranks: np.ndarray  # (n_replications, n_params)
     divergences: list[int] = field(default_factory=list)
+    resumed_from: int = 0  # replications loaded from a prior partial run
+
+
+def _load_ranks_csv(path: Path, labels: Sequence[str]) -> tuple[np.ndarray, list[int]]:
+    """Read a (possibly partial) ranks.csv back for crash-resume,
+    validating the header and replication contiguity -- a mismatched file
+    (different design labels, gaps) must fail loudly, never silently seed
+    a resumed run."""
+    with path.open(newline="") as fh:
+        rows = list(csv.reader(fh))
+    expected_header = ["replication", *labels, "divergences"]
+    if not rows or rows[0] != expected_header:
+        raise ValueError(
+            f"{path} does not match this design (header {rows[0] if rows else None!r} "
+            f"!= {expected_header!r}) -- refusing to resume from it."
+        )
+    ranks_rows: list[list[int]] = []
+    divergences: list[int] = []
+    for k, row in enumerate(rows[1:]):
+        if int(row[0]) != k:
+            raise ValueError(
+                f"{path} replication column is not contiguous at row {k} "
+                f"(got {row[0]!r}) -- refusing to resume from it."
+            )
+        ranks_rows.append([int(v) for v in row[1:-1]])
+        divergences.append(int(row[-1]))
+    return np.asarray(ranks_rows, dtype=int).reshape(len(ranks_rows), len(labels)), divergences
 
 
 def run_sbc(
@@ -196,6 +223,7 @@ def run_sbc(
     model=None,
     n_replications: int | None = None,
     progress_every: int = 10,
+    resume: bool = True,
 ) -> SbcRunResult:
     """The replication loop, generically: for i in 0..N-1, seed
     ``default_rng(seed_base + i)``, draw truth from the design's prior
@@ -205,16 +233,35 @@ def run_sbc(
     per-rep divergence counts stream to ``artifact_dir/ranks.csv`` every
     ``progress_every`` reps. ``n_replications`` may override the design's
     count for smoke/timing runs ONLY (a gate run uses the pre-registered
-    count -- passing a smaller value does not change what is registered)."""
+    count -- passing a smaller value does not change what is registered).
+
+    ``resume=True`` (default): an existing, design-consistent
+    ``artifact_dir/ranks.csv`` seeds the completed replications and the
+    loop continues from the first missing one -- CRASH RESUME, not a
+    design change: every replication is fully determined by
+    ``seed_base + i`` alone (its own fresh RNG and sampler seed), so a
+    resumed run produces byte-identical ranks to an uninterrupted one.
+    Needed because this environment's container can restart mid-run
+    (observed twice on 2026-09-02); a multi-hour gate would otherwise
+    never finish."""
     artifact_dir.mkdir(parents=True, exist_ok=True)
-    if model is None:
-        model = render_design_model(design)
     n_rep = design.n_replications if n_replications is None else n_replications
     labels = design.param_labels
     ranks = np.zeros((n_rep, len(labels)), dtype=int)
     divergences: list[int] = []
 
-    for i in range(n_rep):
+    start = 0
+    ranks_path = artifact_dir / "ranks.csv"
+    if resume and ranks_path.is_file():
+        prior_ranks, divergences = _load_ranks_csv(ranks_path, labels)
+        start = min(len(divergences), n_rep)
+        ranks[:start] = prior_ranks[:start]
+        divergences = divergences[:start]
+
+    if model is None and start < n_rep:
+        model = render_design_model(design)
+
+    for i in range(start, n_rep):
         rng = np.random.default_rng(design.seed_base + i)
         truth = design.draw_prior(rng)
         dataset = design.simulate(truth, rng)
@@ -235,7 +282,11 @@ def run_sbc(
         divergences.append(int(np.sum(fit.method_variables()["divergent__"])))
 
         if (i + 1) % progress_every == 0 or i == n_rep - 1:
-            write_ranks_csv(artifact_dir / "ranks.csv", labels, ranks, divergences, i + 1)
+            write_ranks_csv(ranks_path, labels, ranks, divergences, i + 1)
 
+    if start >= n_rep:
+        # Fully resumed -- make sure the CSV is not longer than requested
+        # and the histogram exists for the assertions/records downstream.
+        write_ranks_csv(ranks_path, labels, ranks, divergences, n_rep)
     plot_rank_histograms(artifact_dir / "rank_histograms.png", design, ranks)
-    return SbcRunResult(ranks=ranks, divergences=divergences)
+    return SbcRunResult(ranks=ranks, divergences=divergences, resumed_from=start)

@@ -185,6 +185,59 @@ def test_engine_reproduces_g3s_recorded_generation_path() -> None:
     assert sbc_harness.rank_statistic(700.0, draws) == g3_harness.rank_statistic(700.0, draws)
 
 
+def test_run_sbc_crash_resume_is_byte_identical(tmp_path) -> None:
+    """The engine's crash-resume (added after this environment's container
+    restarts killed multi-hour compute twice on 2026-09-02): a run
+    interrupted after k replications and resumed must produce EXACTLY the
+    ranks of an uninterrupted run -- each rep is fully determined by
+    seed_base + i. Uses a stub model so this stays in the fast suite."""
+    from sbc_harness import _load_ranks_csv, run_sbc
+
+    class _FakeFit:
+        def __init__(self, seed: int) -> None:
+            self._rng = np.random.default_rng(seed + 777)
+
+        def stan_variable(self, name):
+            return self._rng.normal(size=200)
+
+        def method_variables(self):
+            return {"divergent__": np.zeros((10, 2))}
+
+    class _FakeModel:
+        def sample(self, **kwargs):
+            return _FakeFit(kwargs["seed"])
+
+    design = SbcDesign(
+        name="resume pin",
+        family="lw_sv",
+        model_options={},
+        prior_overrides={},
+        draw_prior=lambda rng: {"p": float(rng.normal())},
+        simulate=lambda params, rng: None,
+        stan_data=lambda ds: {},
+        ranked_params=("p",),
+        n_replications=6,
+        rank_draws=99,
+        rank_bins=5,
+        seed_base=424242,
+    )
+
+    full = run_sbc(design, tmp_path / "a", model=_FakeModel(), resume=False, progress_every=1)
+    part = run_sbc(design, tmp_path / "b", model=_FakeModel(), n_replications=3, progress_every=1)
+    assert part.ranks.shape[0] == 3
+    resumed = run_sbc(design, tmp_path / "b", model=_FakeModel(), progress_every=1)
+    assert resumed.resumed_from == 3
+    np.testing.assert_array_equal(resumed.ranks, full.ranks)
+    assert resumed.divergences == full.divergences
+
+    # A ranks.csv from a DIFFERENT design (other labels) must be refused.
+    other = tmp_path / "b" / "ranks.csv"
+    text = other.read_text().replace("p", "q")
+    other.write_text(text)
+    with pytest.raises(ValueError, match="refusing to resume"):
+        _load_ranks_csv(other, design.param_labels)
+
+
 # ---------------------------------------------------------------------------
 # The G4 gate (slow)
 # ---------------------------------------------------------------------------
