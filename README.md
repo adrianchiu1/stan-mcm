@@ -76,7 +76,17 @@ documented by a reusable tool, not a notebook:
 halved/doubled prior scales as ordinary immutable runs and writes one
 comparison report with posterior tables, **prior→posterior contraction**
 readouts, and the headline r*/gap series overlaid across cells.
-*(Sweep results summarized here at stage end.)*
+
+Results (5 cells, all 0 divergences; full record in DECISIONS.md
+2026-09-03): the σ_g/σ_z posteriors scale near-proportionally with their
+prior scales (σ_g median 0.036/0.068/0.109 under prior sd
+0.015/0.03/0.06; σ_z median 0.027/0.054/0.115 under 0.04/0.08/0.16) with
+contraction of only ~0.04–0.14 — the data contribute little information
+about these scales, which is precisely the pile-up problem the priors
+exist to resolve, now measured rather than asserted. And the G5b
+attribution cross-checks monotonically: the filtered final-period r* gap
+to the published series is +1.54 / +1.44 / +1.16 under the tightened /
+default / doubled σ_z prior (final z: +0.02 / −0.07 / −0.35).
 
 ## Quickstart
 

@@ -3,6 +3,59 @@
 One dated line per judgment call not fixed by the spec, with rationale.
 Newest first.
 
+- **2026-09-03 — The mandated sigma_g/sigma_z sweep COMPLETE (item 9's
+  first production use; spec §1.6's required sensitivity documentation).**
+  `mtk sweep examples/us_lw_sv/sweep_sigma_g_z.yaml`, 5 cells on the
+  pre-COVID reference window, report + cells.json under
+  `sweeps/sigma_g_z/`. Cells (all 0 divergences): baseline =
+  `a00958509083` PASS; sigma_g_tight (sd 0.015) = `2d3fd1e51323` WARN
+  (max R-hat 1.016, min bulk ESS 410 -- the tightened prior slows mixing
+  but stays healthy); sigma_g_loose (sd 0.06) = `f1053cde4ce1` PASS;
+  sigma_z_tight (sd 0.04) = `52745be87ed0` PASS; sigma_z_loose (sd 0.16)
+  = `2e6f7f9d2749` WARN (R-hat 1.008). Findings, the numbers the spec
+  wanted on record:
+
+  1. **The pile-up priors do the identification work, measurably.** The
+     posteriors scale near-proportionally with the prior scales --
+     sigma_g median 0.036 / 0.068 / 0.109 under prior sd 0.015 / 0.03 /
+     0.06; sigma_z median 0.027 / 0.054 / 0.115 under 0.04 / 0.08 / 0.16
+     -- and the posterior sds are barely below the prior sds (contraction
+     ~0.04-0.14): the data contribute little information about these
+     scales, which is exactly the pile-up problem the priors exist to
+     resolve. Cross-parameter spillover is minimal (sigma_z's posterior
+     moves <0.01 across the sigma_g cells and vice versa); other
+     structural parameters are stable across cells (headline overlay in
+     the sweep report).
+  2. **The G5b attribution cross-check holds, monotonically.** The
+     filtered final-period (2019Q2) r* gap to the published one-sided
+     series moves with the sigma_z prior exactly as attributed: +1.54
+     (sigma_z_tight, final z +0.02) / +1.44 (baseline, z -0.07) / +1.16
+     (sigma_z_loose, z -0.35). Doubling the prior recovers ~0.3pp of the
+     gap by letting |z| grow; full convergence to HLW's z ~ -1.6 would
+     require an MUE-scale sigma_z far beyond the doubled prior --
+     consistent with cause 1 of the G5b exhibit being the dominant,
+     deliberate channel.
+
+  Wall-time note: cells took ~1-2.5h each on degraded hosts; the sweep
+  survived two container restarts via cell-level idempotency (see the
+  infra entry below).
+
+- **2026-09-03 — Environment: this session's container restarts
+  unpredictably (~2.5h apart observed), killing in-flight sampling;
+  long compute now runs restart-tolerant.** Two restarts on 2026-09-02
+  killed the sweep's first cell at ~72 and ~75 minutes (detached AND
+  harness-tracked processes both die; the run store's partial-dir guard
+  caught both cleanly -- partial dirs removed after inspection, never
+  silently overwritten). Mitigations now standing: sweeps resume
+  cell-by-cell (run-store idempotency, free); the SBC engine gained
+  crash-resume from its incrementally-flushed ranks.csv (validated
+  header/contiguity, byte-identical to an uninterrupted run since every
+  replication is fully determined by seed_base + i -- pinned by a fast
+  stub-model test); a 25-minute self-check chain plus an hourly watchdog
+  trigger detect death and relaunch. Also observed: per-iteration speed
+  varies ~3x across container boots (same chain/seed), so wall-time
+  extrapolations (G4's smoke) must be read with that variance in mind.
+
 - **2026-09-02 — Item 16 COMPLETE: both reference SV runs regenerated at
   the post-migration estimation identity, reproducing their recorded
   diagnostics exactly; tracked thinned archive created.**
