@@ -3,6 +3,69 @@
 One dated line per judgment call not fixed by the spec, with rationale.
 Newest first.
 
+- **2026-09-03 — S5 COMPLETE (stage-end entry).** Everything in the
+  binding scope record (`plans/S5-decisions.md`, all 17 recorded
+  decisions) is delivered and green on `claude/s5-macrotoolkit-sh26bc`:
+  the S4.5 refactor block (items 2, 1, 3, 4 — one behavior-preserving
+  commit each, preservation demonstrated: bit-identical for item 2,
+  ~1.8e-14 max deviation for item 1, reviewer-reproduced), both
+  reference runs regenerated at the final hash with tracked
+  draw-thinned fixtures in `runs-archive/` (item 16), the S5 features
+  (prior-predictive figure in every report, `mtk sweep` + the mandated
+  sigma_g/sigma_z sweep, the generic SBC harness + G4 passed at its
+  pre-registered design, the G5b informational exhibit), and the docs
+  pass (root README with exhibit figures, `docs/kf-capability-matrix.md`
+  scoped against UCSV, HANDOFF.md rewritten as the stage-end handoff).
+  Three numerics-reviewer passes ran clean; no `stan/` file was touched
+  (as the brief anticipated). Closing fast-suite count: 284 passed,
+  0 skipped (up from 219 passed, 2 skipped at stage start; the old
+  skips are gone for good because the tracked `runs-archive/` fixtures
+  make the run-dependent acceptance tests runnable on any checkout).
+
+  **Item 11's harness family-parameterization audit, conclusions on
+  record for the UCSV stage:** the SBC engine is the one harness that
+  was actually generalized this stage (`tests/sbc_harness.py` takes an
+  `SbcDesign`; G4 is its second instantiation, G3 pinned
+  byte-equivalent). The audit of G1/G2 concluded both are liftable the
+  same way but should be lifted only when UCSV needs them, not
+  speculatively: G1's mirror-gate SHAPE (draw N prior parameter points,
+  evaluate the rendered Stan loglik and the Python KF mirror on each,
+  assert agreement at 1e-8 across the filter paths) is
+  family-parameterizable with the family supplying its Stan loglik
+  harness template and its matrix builders; G2's coverage/bias gate
+  ARITHMETIC (pooled interval coverage bands, per-parameter bias tests
+  over simulated datasets) is family-agnostic once a family supplies
+  the same two pieces SBC already demands — a prior sampler and a
+  structural-equation simulator. The necessarily family-authored pieces
+  are therefore exactly two per family: the Stan loglik test harness
+  template and the structural simulator; prior samplers and data/render
+  builders are already registry capabilities. Nothing else in the gate
+  ladder contains lw_sv-specific logic that would need a third
+  mechanism.
+
+- **2026-09-03 — G4 PASSED: SBC, full SV variant, at exactly the
+  pre-registered design (nothing adjusted).** 100 replications, T=80,
+  2 chains x 750+750 per rep, seeds G4_SEED_BASE=20260910+i, fixed mu_h0
+  anchors — the design recorded in this file BEFORE the run, unchanged.
+  Per-parameter chi^2 uniformity (10 bins, 10 expected/bin, floor 0.001),
+  all 12 ranked quantities comfortably clear with healthy spread:
+  a1 0.076, a2 0.956, a_r 0.596, b_pi 0.494, b_y 0.067, sigma_ystar
+  0.699, sigma_g 0.514, sigma_z 0.978, sigma_h_is 0.122, sigma_h_pc
+  0.964, h0_is 0.276, h0_pc 0.137. Sampler health: 8 divergent
+  transitions in 100 x 1,500 = 150,000 post-warmup draws (ceiling 150).
+  The formal gate (`pytest -m slow tests/test_g4_sbc.py`, which reloads
+  the completed ranks.csv without re-fitting and applies the
+  pre-registered accept/reject rule) passes. Execution: ~112s/rep
+  (~3.1h of compute), run via the crash-resume driver in two segments
+  around one container restart (14 reps banked before it, 86 after —
+  byte-identical to an uninterrupted run by the per-rep seeding).
+  Artifacts (rank histograms + per-rep CSV) in tests/artifacts/g4_sbc/
+  (gitignored; regenerable from the fixed seeds). With G4 green, the
+  full prior-to-posterior pipeline — template, time-varying-R KF
+  likelihood, non-centered SV block, priors-as-stamped, NUTS — is
+  calibrated end-to-end for the PRODUCTION SV variant, and every gate in
+  spec §5 (as amended: G5b informational) is green.
+
 - **2026-09-03 — The mandated sigma_g/sigma_z sweep COMPLETE (item 9's
   first production use; spec §1.6's required sensitivity documentation).**
   `mtk sweep examples/us_lw_sv/sweep_sigma_g_z.yaml`, 5 cells on the

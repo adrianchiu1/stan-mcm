@@ -27,7 +27,7 @@ Every family climbs the same ladder (ENGINEERING.md); `lw_sv`'s results:
 | G1 | Stan KF ≡ Python KF mirror, 50 prior points, 3 filter paths | max diff ~5.5e-12 (gate 1e-8) |
 | G2 | Parameter recovery, 20 simulated datasets | pooled 90% coverage in band, no σ_g/σ_z bias |
 | G3 | SBC, no-SV variant, 200 pre-registered replications | χ² p ∈ [0.073, 0.735] on all 10 params |
-| G4 | SBC, full-SV variant, 100 pre-registered replications | *(running — this row is finalized at stage end)* |
+| G4 | SBC, full-SV variant, 100 pre-registered replications | χ² p ∈ [0.067, 0.978] on all 12 ranked quantities; 8/150,000 divergences |
 | G5a | Exact HLW replication at fixed parameters | ~1e-12 vs the HLW (2017) oracle |
 | G6 | Historical-decomposition reconstruction identity | exact to 1e-6 per period per draw |
 | G5b | *(informational exhibit, not a gate)* filtered vs published one-sided HLW | differences measured + attributed (below) |
