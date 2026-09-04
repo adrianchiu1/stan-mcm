@@ -260,6 +260,8 @@ def _ll(**overrides):
         ({"equations": {"measurement": ["y = mu"], "transition": ["mu = mu[-1] + eta + eps"]}}, "exactly one measurement shock"),
         ({"equations": {"measurement": ["y = mu + 2*eps"], "transition": ["mu = mu[-1] + eta"]}}, "unit coefficient"),
         ({"equations": {"measurement": ["y = mu + eps"], "transition": ["mu = mu[-1] + eta[-1]"]}}, "MA term"),
+        ({"equations": {"measurement": ["y = mu + eps"], "transition": ["mu = mu[-1] + eta + eta"]}}, "once per equation"),
+        ({"equations": {"measurement": ["y = mu + eps"], "transition": ["mu = sigma_level*mu[-1] + eta"]}}, "scale a shock AND appear as a coefficient"),
         ({"equations": {"measurement": ["y = mu + eps"], "transition": ["mu = mu[-1] + sigma_obs*eta"]}}, "numeric constants"),
         ({"equations": {"measurement": ["y = mu[+1] + eps"], "transition": ["mu = mu[-1] + eta"]}}, "LEAD"),
         ({"equations": {"measurement": ["y = mu + eps"], "transition": ["mu[-1] = mu[-2] + eta"]}}, "carried lagged"),
@@ -319,3 +321,40 @@ def test_model_helpers_round_trip_through_yaml_and_describe() -> None:
     assert again.model_dump() == m.options.model_dump()
     assert "state vector: ystar, ystar[-1], ystar[-2], g[-1], g[-2], z[-1], z[-2]" in m.describe()
     assert m.compiled() is au.compile_model(again)  # cache hit on the canonical definition
+
+
+def test_coefficient_printer_round_trips_bit_exactly_under_random_nesting() -> None:
+    """The Python/Stan bit-identity invariant: evaluating a coefficient
+    tree equals re-parsing its emitted text and evaluating THAT (Stan
+    re-parses the printed text) -- for random nestings of + - * / ( ) and
+    unary minus (the numerics-reviewer must-fix: a same-precedence right
+    child must be parenthesized, a*(b/c) != (a*b)/c in floating point)."""
+    import random
+
+    from specs.schema.equations import Add, Div, Mul, Name, Neg, Num, Sub, evaluate, parse_equation
+
+    rng = random.Random(20260911)
+    params = {"a": 0.1, "b": 0.7, "c": 0.3, "d": -1.9, "e2": 2.5}
+
+    def tree(depth: int):
+        if depth == 0 or rng.random() < 0.25:
+            return Name(rng.choice(list(params))) if rng.random() < 0.7 else Num(rng.choice([0.25, 2.0, 3.0, 0.1]))
+        op = rng.choice([Add, Sub, Mul, Div, Neg])
+        if op is Neg:
+            return Neg(tree(depth - 1))
+        return op(tree(depth - 1), tree(depth - 1))
+
+    for _ in range(3000):
+        t = tree(4)
+        text = t.emit()
+        # Re-parse as a coefficient of a symbol: '(text)*s' then read the coefficient back.
+        eq = parse_equation(f"y = ({text})*s")
+        from specs.schema.equations import linearize
+
+        lf = linearize(eq.rhs, lambda n: "symbol" if n == "s" else ("param" if n in params else None))
+        coef = next(iter(lf.terms.values()))
+        try:
+            direct = evaluate(t, params)
+        except ZeroDivisionError:
+            continue
+        assert evaluate(coef, params) == direct, (text, coef.emit())

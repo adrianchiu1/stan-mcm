@@ -46,6 +46,7 @@ from specs.schema.equations import (
     _simplify_mul,
     is_numeric,
     linearize,
+    name_occurrences,
     numeric_value,
     parameters_in,
     parse_equation,
@@ -246,6 +247,13 @@ def compile_structure(
                 if t.lag != 0:
                     raise ModelStructureError(f"Equation {text!r}: shock {t.name!r} appears lagged -- shocks are contemporaneous.")
                 in_meas.setdefault(t.name, []).append(i)
+    for text, p in zip(measurement + transition, parsed_meas + parsed_trans):
+        for nm, cnt in name_occurrences(p.rhs).items():
+            if nm in shock_set and cnt > 1:
+                raise ModelStructureError(
+                    f"Equation {text!r} references shock {nm!r} {cnt} times -- a shock appears once per equation "
+                    f"(writing it twice would silently scale its variance; use a distinct shock or a coefficient)."
+                )
     for sh in shocks:
         if sh in in_trans and sh in in_meas:
             raise ModelStructureError(
@@ -475,6 +483,12 @@ def compile_structure(
     for store in (F, A, Z):
         for e in store.values():
             used |= parameters_in(e)
+    doubled = sorted(used & set(scale_param.values()))
+    if doubled:
+        raise ModelStructureError(
+            f"Parameter(s) {doubled} scale a shock AND appear as a coefficient in an equation -- a shock's sd parameter "
+            f"is its own scale (declare a separate parameter for the coefficient)."
+        )
     used |= set(scale_param.values())
     unused = [p for p in parameters if p not in used]
     if unused:

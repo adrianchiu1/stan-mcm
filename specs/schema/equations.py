@@ -106,9 +106,14 @@ class Expr:
         return self.emit()
 
     def _child(self, child: "Expr", *, right: bool = False) -> str:
-        """Emit a child with parentheses when precedence demands them."""
+        """Emit a child with parentheses whenever re-parsing could regroup
+        it: a lower-precedence child always, and a SAME-precedence RIGHT
+        child always (``a*(b/c)`` must not print as ``a*b/c``, which Stan
+        and this parser read as ``(a*b)/c`` -- a different floating-point
+        result; numerics-reviewer must-fix, S7). Parentheses are never
+        wrong, only occasionally verbose."""
         text = child.emit()
-        if child.precedence < self.precedence or (right and child.precedence == self.precedence and isinstance(self, (Sub, Div))):
+        if child.precedence < self.precedence or (right and child.precedence == self.precedence):
             return f"({text})"
         return text
 
@@ -621,6 +626,25 @@ def evaluate(expr: Expr, params: dict) -> float:
     if isinstance(expr, Div):
         return evaluate(expr.left, params) / evaluate(expr.right, params)
     raise TypeError(f"Cannot evaluate {type(expr).__name__} as a coefficient (series references are not coefficients).")
+
+
+def name_occurrences(expr: Expr) -> dict[str, int]:
+    """How many times each bare or lagged NAME occurs in a parsed tree
+    (before linearization merges them) -- used to reject a shock written
+    twice in one equation."""
+    counts: dict[str, int] = {}
+
+    def rec(node: Expr) -> None:
+        if isinstance(node, (Name, LagRef, MeanRef)):
+            counts[node.name] = counts.get(node.name, 0) + 1
+        elif isinstance(node, Neg):
+            rec(node.operand)
+        elif isinstance(node, (Add, Sub, Mul, Div)):
+            rec(node.left)
+            rec(node.right)
+
+    rec(expr)
+    return counts
 
 
 def parameters_in(expr: Expr) -> set[str]:

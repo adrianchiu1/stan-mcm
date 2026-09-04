@@ -1,0 +1,162 @@
+// authored.stan -- the ONE generic template for equation-authored models
+// (S7), rendered from authored.stan.j2 for authored model "{{ name }}".
+// Every family-specific structure below is STAMPED from the compiled
+// equations at render time (macrotoolkit.authoring.stan.render_context);
+// there is no runtime branching. The Python side
+// (macrotoolkit.authoring.compile.CompiledModel) builds the same matrices
+// from the same coefficient expressions in the same operation order, and
+// the fit-time mirror check (S6 WP3) holds the two to G1's 1e-8 gate.
+//
+// Model (canonical equations):
+{% for e in equations_measurement %}
+//   {{ e }}
+{% endfor %}
+{% for e in equations_transition %}
+//   {{ e }}
+{% endfor %}
+//
+// State-space form fed to the shared filter:
+//   state (n={{ n }}): [{{ state_labels | join(', ') }}]
+//   obs   (m={{ m }}): [{{ obs_names | join(', ') }}]
+//   exog  (k={{ k }}): [{{ exog_cols | join(', ') }}]
+//   xi_t = F xi_{t-1} + w_t (w ~ N(0, Q{% if sv_state %}_t{% endif %}));  yobs_t = A' x_t + Z xi_t + e_t (e ~ N(0, R{% if sv_meas %}_t{% endif %}))
+{% if sv %}
+// SV shocks ({{ sv_shocks | join(', ') }}): non-centered log-variance random
+// walks; h is log-VARIANCE (sd = exp(h/2)). A measurement shock's SV enters
+// through R_t, a state shock's through Q_t (the S6 KF generalization).
+{% endif %}
+//
+// kf_loglik is a transformed parameter (S6 WP3): saved with every draw and
+// read by the automatic fit-time Stan-vs-Python mirror check.
+
+functions {
+{% include "functions/kalman_loglik_tv.stan" %}
+{% if sv %}
+{% include "functions/sv_rw_noncentered.stan" %}
+{% endif %}
+}
+
+data {
+  int<lower=1> T;
+  matrix[T, {{ m }}] yobs;
+{% if k > 0 %}
+  matrix[T, {{ k }}] x;
+{% endif %}
+  vector[{{ n }}] xi00;              // initial state mean xi_{0|0} (explicit)
+  matrix[{{ n }}, {{ n }}] P00;       // initial state covariance P_{0|0}
+{% for s in sv_shocks %}
+  real mu_h0_{{ s }};                 // h_0 prior mean for shock {{ s }} (anchor)
+{% endfor %}
+}
+
+transformed data {
+{% if k == 0 %}
+  matrix[T, 0] x = rep_matrix(0, T, 0);   // no exogenous regressors
+  matrix[0, {{ m }}] A = rep_matrix(0, 0, {{ m }});
+{% elif A.numeric %}
+  matrix[{{ k }}, {{ m }}] A = rep_matrix(0, {{ k }}, {{ m }});
+{% for i, j, e in A.entries %}
+  A[{{ i }}, {{ j }}] = {{ e }};
+{% endfor %}
+{% endif %}
+{% if F.numeric %}
+  matrix[{{ n }}, {{ n }}] F = rep_matrix(0, {{ n }}, {{ n }});
+{% for i, j, e in F.entries %}
+  F[{{ i }}, {{ j }}] = {{ e }};
+{% endfor %}
+{% endif %}
+{% if Z.numeric %}
+  matrix[{{ m }}, {{ n }}] Z = rep_matrix(0, {{ m }}, {{ n }});
+{% for i, j, e in Z.entries %}
+  Z[{{ i }}, {{ j }}] = {{ e }};
+{% endfor %}
+{% endif %}
+}
+
+parameters {
+{% for p in params %}
+  {{ p.decl }}
+{% endfor %}
+{% for b in sv_blocks %}
+  real<lower=0> sigma_h_{{ b.shock }};   // log-variance RW scale, shock {{ b.shock }}
+  real h0_{{ b.shock }}_raw;             // non-centered: h_0 = mu_h0 + sd * raw
+  vector[T] nu_{{ b.shock }};            // non-centered SV innovations
+{% endfor %}
+}
+
+transformed parameters {
+{% for b in sv_blocks %}
+  vector[T] h_{{ b.shock }} = sv_rw_noncentered(
+      mu_h0_{{ b.shock }} + {{ b.h0_sd }} * h0_{{ b.shock }}_raw, sigma_h_{{ b.shock }}, nu_{{ b.shock }});
+{% endfor %}
+{% if not F.numeric %}
+  matrix[{{ n }}, {{ n }}] F = rep_matrix(0, {{ n }}, {{ n }});
+{% for i, j, e in F.entries %}
+  F[{{ i }}, {{ j }}] = {{ e }};
+{% endfor %}
+{% endif %}
+{% if k > 0 and not A.numeric %}
+  matrix[{{ k }}, {{ m }}] A = rep_matrix(0, {{ k }}, {{ m }});
+{% for i, j, e in A.entries %}
+  A[{{ i }}, {{ j }}] = {{ e }};
+{% endfor %}
+{% endif %}
+{% if not Z.numeric %}
+  matrix[{{ m }}, {{ n }}] Z = rep_matrix(0, {{ m }}, {{ n }});
+{% for i, j, e in Z.entries %}
+  Z[{{ i }}, {{ j }}] = {{ e }};
+{% endfor %}
+{% endif %}
+{% if sv_state %}
+  array[T] matrix[{{ n }}, {{ n }}] Qt;   // Q_t = sum_s var_s(t) b_s b_s'
+  for (t in 1:T) {
+    Qt[t] = rep_matrix(0, {{ n }}, {{ n }});
+{% for i, j, e in Q_entries %}
+    Qt[t][{{ i }}, {{ j }}] = {{ e }};
+{% if i != j %}
+    Qt[t][{{ j }}, {{ i }}] = Qt[t][{{ i }}, {{ j }}];
+{% endif %}
+{% endfor %}
+  }
+{% else %}
+  matrix[{{ n }}, {{ n }}] Q = rep_matrix(0, {{ n }}, {{ n }});   // Q = sum_s var_s b_s b_s'
+{% for i, j, e in Q_entries %}
+  Q[{{ i }}, {{ j }}] = {{ e }};
+{% if i != j %}
+  Q[{{ j }}, {{ i }}] = Q[{{ i }}, {{ j }}];
+{% endif %}
+{% endfor %}
+{% endif %}
+{% if sv_meas %}
+  array[T] matrix[{{ m }}, {{ m }}] Rt;   // R_t = diag(var_j(t))
+  for (t in 1:T) {
+    Rt[t] = rep_matrix(0, {{ m }}, {{ m }});
+{% for i, e in R_entries %}
+    Rt[t][{{ i }}, {{ i }}] = {{ e }};
+{% endfor %}
+  }
+{% else %}
+  matrix[{{ m }}, {{ m }}] R = rep_matrix(0, {{ m }}, {{ m }});   // R = diag(var_j)
+{% for i, e in R_entries %}
+  R[{{ i }}, {{ i }}] = {{ e }};
+{% endfor %}
+{% endif %}
+  // The Kalman-filter marginal log-likelihood (the shared filter; states
+  // marginalized, Rao-Blackwellized likelihood).
+  real kf_loglik = kalman_loglik(yobs, x, F, {% if sv_state %}Qt{% else %}Q{% endif %}, A, Z, {% if sv_meas %}Rt{% else %}R{% endif %}, xi00, P00);
+}
+
+model {
+  // Priors (stamped from the authored prior table + per-run overrides).
+{% for p in params %}
+  {{ p.prior }}
+{% endfor %}
+{% for b in sv_blocks %}
+  {{ b.sigma_h_prior }}
+  h0_{{ b.shock }}_raw ~ std_normal();   // h_0 ~ N(mu_h0, sd^2), non-centered
+  nu_{{ b.shock }} ~ std_normal();       // non-centered SV innovations
+{% endfor %}
+
+  // Marginal likelihood via the Kalman filter (the transformed parameter).
+  target += kf_loglik;
+}
