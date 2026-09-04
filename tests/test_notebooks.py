@@ -17,6 +17,9 @@ NOTEBOOK_DIR = REPO_ROOT / "examples" / "notebook_api"
 #: Notebooks that run WITHOUT sampling (fast-suite members). Notebooks that
 #: sample (the UCSV worked example) are executed under the slow marker.
 FAST_NOTEBOOKS = ["lw_sv_from_archive.ipynb"]
+#: Notebooks that sample (the UCSV worked example: ~15 minutes on a fresh
+#: checkout; an idempotent no-op fit when runs/f2b48ebc98a4 exists).
+SLOW_NOTEBOOKS = ["ucsv_us_inflation.ipynb"]
 
 
 def _execute(path: Path, tmp_path: Path):
@@ -33,7 +36,7 @@ def _execute(path: Path, tmp_path: Path):
     return nb
 
 
-@pytest.mark.parametrize("name", FAST_NOTEBOOKS)
+@pytest.mark.parametrize("name", FAST_NOTEBOOKS + SLOW_NOTEBOOKS)
 def test_committed_notebook_carries_outputs_and_figures(name: str) -> None:
     nb = json.loads((NOTEBOOK_DIR / name).read_text())
     code_cells = [c for c in nb["cells"] if c["cell_type"] == "code"]
@@ -60,3 +63,14 @@ def test_notebook_executes_from_a_fresh_kernel(name: str, tmp_path: Path) -> Non
                 assert out.get("output_type") != "error", out
     # Nothing was written into the tracked archive.
     assert not (REPO_ROOT / "runs-archive" / "a00958509083" / "report.html").exists()
+
+
+@pytest.mark.slow
+@pytest.mark.ucsv
+@pytest.mark.parametrize("name", SLOW_NOTEBOOKS)
+def test_sampling_notebook_executes_from_a_fresh_kernel(name: str, tmp_path: Path) -> None:
+    nb = _execute(NOTEBOOK_DIR / name, tmp_path)
+    for cell in nb.cells:
+        if cell.cell_type == "code":
+            for out in cell.get("outputs", []):
+                assert out.get("output_type") != "error", out

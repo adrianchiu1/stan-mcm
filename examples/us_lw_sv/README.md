@@ -164,3 +164,32 @@ report lands under `sweeps/sigma_g_z/` with prior→posterior contraction
 readouts, and the repo-level exhibits built from these runs (G5b
 filtered-vs-published with its measured z-attribution; the COVID SV
 volatility figure) are in `docs/exhibits/`.
+
+## S6: the Q_t generalization re-identifies every lw_sv spec once more
+
+S6 generalized the shared Kalman filter to a time-varying state-innovation
+covariance (family #2, UCSV, needs it) and moved the filter value into a
+`kf_loglik` transformed parameter for the automatic fit-time mirror check
+(DECISIONS.md 2026-09-04). The run hash covers the rendered Stan source,
+which inlines the filter, so every lw_sv spec now identifies differently
+— **numerics unchanged**: the Stan constant-Q log-likelihoods at G1's 50
+points reproduce the pre-change program's values exactly (difference
+0.0), and G1/G5a/G6 are green. Identity lineage (the archived runs stay
+valid immutable records under their old names; the new identities are
+what `mtk run` produces now, computed without sampling):
+
+| Spec | S5 identity (archived) | S6 identity |
+|---|---|---|
+| `spec_sv.yaml` | `a00958509083` (runs-archive/) | `8ba1420a4145` |
+| `spec_sv_full_vintage.yaml` | `eb73e644be0b` (runs-archive/) | `ec87f45d0a43` |
+| `spec.yaml` (no SV) | `24b6288dddad` (S2 record) | `915189548222` |
+| `spec_full_vintage.yaml` (no SV) | `18f32ac9793f` (S2 record) | `7e45c3e6524c` |
+
+The reference runs were NOT regenerated in S6 (the archived S5 fixtures
+carry the full diagnostics record and the output layer is exercised on
+them by the fast suite and the notebook example); regenerate with
+`mtk run examples/us_lw_sv/spec_sv.yaml` when publication numbers are
+needed — the diagnostics will reproduce the S5 table above, as every
+previous identity migration did. Every S6 fit additionally records the
+automatic Stan-vs-Python KF mirror check in `diagnostics.json` and the
+report header.

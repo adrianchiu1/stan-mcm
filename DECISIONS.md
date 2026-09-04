@@ -3,6 +3,243 @@
 One dated line per judgment call not fixed by the spec, with rationale.
 Newest first.
 
+- **2026-09-04 — UCSV SBC and recovery designs PRE-REGISTERED (S6 WP2c;
+  ENGINEERING.md ladder rung 3; the G4 precedent). Fixed and recorded
+  here BEFORE any replication runs; never adjusted afterward to pass.
+  Pinned literally by `tests/test_ucsv_gates.py::test_sbc_design_
+  constants_are_the_preregistered_ones`; the declaration itself is
+  `macrotoolkit/families/ucsv_validation.py` (`UCSV_SBC_DESIGN`,
+  `UCSV_G2_DESIGN`), which `mtk validate ucsv --tier sbc|recovery` runs.**
+
+  SBC (the family proper, `sv_shocks: [eps, eta]`):
+  - **N_REPLICATIONS = 100**, **SIM_T = 100**;
+  - sampler per replication: **2 chains x 750 warmup + 750 sampling**,
+    adapt_delta 0.95, max_treedepth 12 (G4's per-rep settings);
+  - ranks from **99** evenly thinned pooled draws, **10** chi^2 bins,
+    p-value floor **0.001** per ranked quantity; total-divergence ceiling
+    **150** (0.1% of 100 x 1,500 post-warmup draws);
+  - **4 ranked quantities**: sigma_h_eps, sigma_h_eta (the two static
+    scales) and the initial log-variances h0_eps / h0_eta, recovered from
+    the posterior's non-centered h0_*_raw via h0 = mu_h0 + sd*raw (the
+    template's own line) -- the family's entire static parameter set;
+  - seeds: SBC_SEED_BASE = 20260920 (rep i fully reproducible from
+    seed_base + i: its prior draw, its simulated dataset, its sampler
+    seed); crash-resume from ranks.csv is byte-identical by construction;
+  - prior config: production defaults, NO override (UCSV has no AR block;
+    `SBC_PRIOR_CONFIG` is declared empty so both families go through one
+    mechanism), with the render-time assertion that the stamped prior
+    equals the sampled prior;
+  - **fixed anchors** (the G3 Y_ANCHOR / G4 mu_h0 pattern): production
+    derives mu_h0 from the data and xi00 from pi_1, but the simulator
+    draws h_0 and tau_0 before any data exists, so simulator and fit both
+    use mu_h0_eps = mu_h0_eta = 2*ln(0.5) (log-variance of a 0.5pp shock)
+    and tau_0 ~ N(2.0, 5^2) / xi00 = 2.0, P00 = 25. The Stan program takes
+    both as plain data, so the production program is validated at fixed
+    rather than data-chosen anchors.
+
+  Recovery (G2's shape, `UCSV_G2_DESIGN`): 20 datasets, T = 100, seed
+  base 20260921, same sampler settings, truths from the exact production
+  prior at the fixed anchors (no filtering needed), the same 4 scored
+  quantities, G2's accept rule (pooled 90%-CI coverage in [0.80, 0.97],
+  per-quantity floor 0.6, bias |t| < 3 on sigma_h_eps / sigma_h_eta).
+
+  Execution rule (as G4's): a <=3-replication smoke may run first solely
+  to measure per-replication wall cost; its reps are the design's own
+  first reps. The design does not shrink silently; if the measured cost
+  extrapolates beyond what the stage can afford, the partial record is
+  stated honestly in HANDOFF rather than a reduced design being passed
+  off as the registered one.
+
+- **2026-09-04 — S6 WP3 landed: automatic per-model QC.** (1) **Auto-G1
+  at fit time.** Every `fit()` / `mtk run` now cross-checks the EXACT
+  rendered program's Kalman-filter log-likelihood against the Python
+  mirror at `qc.mirror_points` (default 5) prior draws BEFORE sampling
+  (`macrotoolkit/qc.py`): the family's `mirror` capability turns each
+  draw into Stan inits and evaluates `macrotoolkit.smoother` on the same
+  Stan data; one `fixed_param` CmdStan invocation with one single-
+  iteration chain per point reads the program's `kf_loglik`. Mechanism
+  choice: `kf_loglik` is a TRANSFORMED PARAMETER in every KF family
+  template (`target += kf_loglik` in the model block) -- no duplicate
+  filter pass, no Jacobian subtlety (a transformed parameter is a
+  deterministic function of the parameters; the posterior is unchanged),
+  the value is saved with every draw, and it is the quantity a
+  fixed_param evaluation exposes. Rejected: mirroring the priors and
+  constraint Jacobians in Python to compare `lp__` (a second thing to
+  keep in sync); a generated-quantities block (duplicates the filter
+  call text). Gate 1e-8 (G1's); past it the run raises
+  `MirrorCheckError` and the run directory is REMOVED (a QC rejection is
+  not a crash; the store's no-`_SUCCESS` guard is for crashes). The
+  record (`n_points`, `max_abs_diff`, per-point values) lives in
+  `diagnostics.json["mirror_check"]`, the report header shows it, and
+  `Run.mirror_check` exposes it. The toggle is the new top-level `qc:`
+  block (`mirror_check: true` by default, `mirror_points`,
+  `mirror_tolerance`, `mirror_seed`), EXCLUDED from the estimation
+  identity exactly like `outputs:` (a QC setting never changes the
+  estimation) and stored as `qc.yaml`. A family without a KF likelihood
+  (local_level) records `applicable: false` rather than passing
+  silently. Measured on the fast suite's fits: lw_sv ~3e-11, ucsv
+  ~2e-12; cost well under a second per fit. (2) **`mtk validate <family>
+  --tier fast|recovery|sbc|all` / `api.validate`**
+  (`macrotoolkit/validation/suite.py`): a family registers a
+  `ValidationSuite` of `Gate`s via `FamilyEntry.validation_suite`
+  (`families/<family>_validation.py`); generic gate builders instantiate
+  the ladder -- `mirror_gate` (G1's shape at 25 prior draws of the
+  production render on the family's example data), `hd_identity_gate`
+  (G6's shape over simulation-smoother draws), `recovery_gate` (G2's
+  arithmetic, lifted into `validation/recovery.py` with the same accept
+  rule as the recorded G2), `sbc_gate` (the family's PRE-REGISTERED
+  design through the SBC engine, which moved into the package as
+  `validation/sbc.py`; `tests/sbc_harness.py` is a re-export shim so
+  G3/G4 are untouched). One validation report per invocation
+  (`validation/<family>/report.html` + `summary.json`, the run report's
+  verdict boxes reused) with PASS/WARN/FAIL per gate; a gate that raises
+  is a FAIL, never a skip. lw_sv's G4 design moved VERBATIM into
+  `families/lw_sv_validation.py` (`tests/g4_harness.py` re-exports it;
+  the 2026-09-02 constants are unchanged) and its G2 simulator likewise;
+  the lw_sv identity gate draws stationary (a1, a2) only, as G6's own
+  fixture points do (an explosive draw measures float64 cancellation
+  over 230 quarters, not the identity -- the fact G3 documented; found
+  and fixed on the gate's first run). Both families wired; measured
+  fast tiers: ucsv mirror 1.8e-12 / identity 2e-16, lw_sv mirror
+  3.1e-11 / identity 5.7e-12. (3) `scripts/gate-check.sh` is the one-line
+  CI-style entry (`fast | family <fam> | validate <fam> [tier] | slow
+  <fam>`), with pytest markers `lw_sv`, `ucsv`, `validation`.
+
+- **2026-09-04 — S6 WP2b landed: family #2 (UCSV) as declarations, and
+  the lw_sv residue that had to be generalized to make that true.** The
+  capability matrix's claim ("the UCSV results module reduces to a thin
+  metadata + reporting-mapping declaration over the generic engine") was
+  treated as a test of the framework. What UCSV contributed:
+  `stan/templates/ucsv.stan.j2` (+ the ucsv-only helper
+  `stan/functions/sv_scalar_variance_path.stan`, a separate file so
+  lw_sv's renders do not carry a helper they never call),
+  `specs/schema/ucsv.py` (options `sv_shocks` = canonical `[eps, eta]`
+  (default) or `[]`, lw_sv's discipline; outputs; DEFAULT_PRIORS),
+  `families/ucsv.py` (`UCSV_STATE_META` = `(("tau", 0),)`, shock `eta`
+  loading 1.0, measurement shock `eps`, EMPTY feedback map; matrices;
+  data/render builders; the `ln(Var(Delta pi)/2)` mu_h0 anchors -- the
+  agnostic equal split of the first-difference variance between trend
+  and noise, sd 1 in log-variance; prior sampler; prior sds; headline
+  series; mirror declaration), one registry entry, and
+  `results_ucsv.py` / `plots_ucsv.py` / `outputs_ucsv.py` (~330 + 150 +
+  110 lines, of which the results module is loading + the named
+  reporting mapping tau / transitory = pi - tau / exp(h/2) paths + IRF
+  shock sizes + the two forward-noise models; no recursion). Judgment
+  calls: `x` is the genuinely EMPTY `matrix[T, 0]` in Stan (zero-size
+  matrices are legal; built in `transformed data`, so the shared filter's
+  `A' x_t` term is exactly zero with no template branch) and numba
+  handles the `(0, m) @ (0,)` product natively (checked before design);
+  `tau_0 ~ N(pi_1, 5^2)` is the explicit initial state (the established
+  pattern, no exact-diffuse recursion, per the capability matrix's
+  doctrine). **Generic-layer fixes -- every place lw_sv-specific residue
+  was generalized (the brief's required record):** (a) the simulation
+  smoother's structural-shock recovery was hard-coded to lw_sv's slots
+  0/3/5 and the g/4 loading (`_recover_structural_shocks`); now
+  `smoother.recover_shocks` inverts `w = B eps` EXACTLY through the
+  family's declared loadings (`StateSpaceMeta.recovery_order`: a
+  triangular resolution order, each shock read off a slot whose other
+  loaders are already resolved; non-triangular loadings fail loudly) --
+  bit-identical for lw_sv (0.25x == x/4 in IEEE double), pinned;
+  `simulate_smoother_draw(meta=...)` fills named `state_shocks` /
+  `meas_shocks` dicts for every family and keeps lw_sv's five attributes;
+  (b) the engine's forward simulation drew constant-Q process noise
+  inline; now a `StateNoise` protocol (`ConstantStateNoise` = the exact
+  pre-S6 draw and RNG order, pinned; `RandomWalkLogVarianceStateNoise`
+  for SV on a state shock, built shock by shock from the declared
+  loadings) mirrors the S5 `MeasurementNoise` protocol; (c) the report
+  assembler, header, parameter table and figure plumbing were lw_sv-
+  typed (`LWRun`, `load_lw_run`, hand-listed sections) -- WP1's generic
+  `output_modules` declaration + registry `display_name` made them
+  family-generic; (d) the run loader (`_load_run_dataframe`), the draw
+  selection, and the per-draw smoother loop / state components /
+  observable bars / impulse response were only ever written inside
+  `results_lw.py`; the family-agnostic versions now live in
+  `results_core.py` and UCSV's module is a declaration over them.
+  Deliberately NOT done: rewriting `results_lw.py` onto the core -- it
+  is the validated lw_sv instantiation (G6-pinned bars, the c==1
+  guards, the fan-chart seed translation) and would need a full
+  behavior-preservation pass for no UCSV benefit; it delegates where
+  the delegation is trivially identical and stays otherwise (recorded
+  as S7 backlog). Fast-suite coverage: schema/registry/metadata pins
+  (Q == B diag(sigma^2) B'), a tiny real SV fit through the API with the
+  mirror check, results/outputs/report (6 embedded figures), the G6
+  identity (~1e-13 measured against the 1e-6 bar), the no-SV variant.
+
+- **2026-09-04 — S6 WP2a landed: the ONE real KF extension, time-varying
+  Q_t, by the S3 R_t playbook -- and the run-hash consequence taken
+  deliberately (plans/S6-plan.md, conflict item 1).** The brief asked
+  that existing lw_sv run-identity hashes NOT change; the repo's own
+  record (the 2026-08-31 user decision below, HANDOFF's "expect the
+  render/hash consequences of the S3 precedent", the capability matrix)
+  anticipates the opposite, because the hash covers the rendered source
+  and the rendered source INLINES `kalman_loglik_tv.stan`. Per the
+  brief's own rule, the repo docs win: ONE generalized filter
+  (`array[] matrix Q` core; overloads for constant Q with array R,
+  array Q with constant R, and constant/constant, all delegating via
+  `rep_array` -- wrappers, not second implementations; Python mirror
+  `_as_Q_path` / `_kf_core` with `Q[t]` / `kalman_smoother` /
+  `simulate_smoother_draw` with per-period `sqrt(Q_t)` in the DK plus
+  path, the constant case keeping its single factorization), every
+  lw_sv spec re-identifies once more, the no-SV render pin fixture was
+  regenerated ONCE (this entry is the recorded decision the fixture's
+  docstring requires), and the brief's INTENT -- constant-Q numerics
+  unchanged -- is proven three ways: the Stan constant-Q log-likelihoods
+  at G1's 50 points reproduce a fixture captured from the UNTOUCHED S5
+  program before any `stan/` edit (`tests/fixtures/g1/pre_qt_stan_
+  loglik.csv`) with difference EXACTLY 0.0 on all three pre-S6 paths;
+  a (T, n, n) path of identical Q gives a bit-identical Python loglik to
+  the constant call; G5a/G6 unchanged. G1 extended to FIVE paths (the
+  three S3 paths + `loglik_tvq`, Q_t through the family's own `lw_Q` per
+  period, + `loglik_svq`, the production composition `sv_rw_noncentered
+  -> sv_scalar_variance_path` on Q's z slot): max |Stan - Python| =
+  5.5e-12 / 5.5e-12 / 1.8e-12 / 7.3e-12 / 7.3e-12 (gate 1e-8). The
+  archived reference runs (`a00958509083`, `eb73e644be0b`) remain valid
+  immutable records under their old identities; the example README
+  records the lineage and each example spec's new identity (computed
+  without sampling). The same identity move carries the WP3 `kf_loglik`
+  transformed parameter, so lw_sv re-identifies exactly once in S6.
+  A numerics-reviewer pass ran over the WP2a+WP2b change set before
+  commit: NO must-fix findings (it hand-traced the Q_t core and its
+  overloads, the five G1 paths' Stan-vs-Python quantities, the
+  kf_loglik transformed-parameter refactor, the UCSV template's
+  Q_t/R_t wiring, the state-noise models' exp(h/2) convention, and the
+  lw_sv recovery order); ONE should-fix -- the UCSV mu_h0 anchor
+  formula disagreed with its own documented "equal split" derivation
+  (Var(Delta pi) = sigma_eta^2 + 2 sigma_eps^2 gives mu_h0_eps =
+  ln(v/4), not ln(v/2)) -- applied in WP2b; one wording note on the
+  engine's state-noise docstring, applied. Its reminder that the
+  placeholder-sigma pattern (build_ucsv_matrices called with unit sds
+  just for F/A/Z) would silently break if F/A/Z ever depended on the
+  sigmas is noted here as a standing convention.
+
+- **2026-09-04 — S6 WP1 landed: the notebook-first Python API; the CLI
+  is a thin shell; the report is family-generic.** Design decisions:
+  (1) no parallel spec -- the Pydantic models ARE the API (`mtk.spec`
+  returns a validated `RunSpec`; hash parity with the YAML pinned
+  against `spec_sv.yaml`); (2) a DataFrame is staged to a CANONICAL CSV
+  (only the spec's columns, date first then the mapping's order, ISO
+  dates, pandas' shortest round-trip floats, `\n`) under the fixed name
+  `dataframe.csv`, so the run identity is a deterministic function of the
+  frame's CONTENT and the run dir's snapshot is self-contained; a CSV
+  FILE keeps being hashed byte-for-byte as given (extra columns in a
+  file change its identity; extra columns in a frame do not -- both
+  documented and pinned); (3) `run()` became a wrapper over the
+  spec-taking core `run_spec(spec, base_dir=...)`, `load_data` gained a
+  `base_dir` anchor; (4) the report/notebook figures come from ONE
+  family declaration, `FamilyEntry.output_modules` (an ordered tuple of
+  `OutputModule(name, heading, figure_title, compute, plot, caption)`),
+  consumed by the generic `report.py` and by `Run.outputs()`; lw_sv's
+  declaration reproduces the S4/S5 report exactly (12 embedded figures,
+  same captions, test-pinned); (5) the canonical notebook import is
+  `from macrotoolkit import api as mtk` because `sweep`/`report` are
+  also submodule names on the package (`macrotoolkit.sweep` must stay
+  the module); (6) `sweep()` from Python returns a `SweepComparison`
+  (long-form table + headline series) alongside the HTML. Environment
+  gotcha recorded for HANDOFF: `TQDM_DISABLE=1` breaks cmdstanpy's
+  sampling (its progress handling raises inside `model.sample`, chains
+  report retcode -1) -- never set it around a fit; two full-suite runs
+  were lost to it before the cause was isolated.
+
 - **2026-09-03 — S5 COMPLETE (stage-end entry).** Everything in the
   binding scope record (`plans/S5-decisions.md`, all 17 recorded
   decisions) is delivered and green on `claude/s5-macrotoolkit-sh26bc`:
