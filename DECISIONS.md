@@ -3,6 +3,38 @@
 One dated line per judgment call not fixed by the spec, with rationale.
 Newest first.
 
+- **2026-09-04 — S7 COMPLETE (stage-end entry).** Everything in
+  `plans/S7-plan.md` is delivered and green on
+  `claude/s7-equation-dsl-og1xvc` (pushed; not merged, no PR opened, per
+  the brief): M1 the equation IR + compiler, M2 the generic template with
+  the exact kf_loglik gate, M3/M4 pipeline integration + generic outputs +
+  auto-validation + sweep, M5 the notebook, M6 docs. Two numerics-reviewer
+  passes (M1+M2; M3/M4) — findings and disposition in the two entries
+  below and in the M3/M4 commit message; every MUST-FIX and SHOULD-FIX
+  applied before the corresponding commit. **The M5 notebook's run
+  record** (`examples/notebook_api/authored_uc_gap.ipynb`, run
+  `ca3f85a00336`, US data 1961Q1–2019Q4, T = 236, 4 chains × 500/500,
+  adapt_delta 0.95): fit-time mirror check 3.4e-12; diagnostics **WARN**
+  — max R-hat 1.013 on one element of the T-length SV path and min tail
+  ESS 392 against the 400 line (every scalar parameter has R-hat ≤ 1.008
+  and bulk ESS ≥ 680); the record is stated as measured rather than the
+  draw count raised to pass — an economist's next step is a longer run,
+  not a framework change. Posterior medians: a1 1.40, a2 −0.43, b_pi
+  0.70, b_y 0.05, sigma_ystar 0.20, sigma_g 0.063, sigma_y 0.12,
+  sigma_pi 0.81, sigma_h_eta_gap 0.29. The sigma_g sweep (tight /
+  baseline / loose prior sd 0.015 / 0.03 / 0.06) gives posterior medians
+  0.024 / 0.063 / 0.106 with contraction ≈ 0 — the pile-up prior does
+  the identification work here exactly as lw_sv's documented sweep
+  showed. HD identity 3.4e-13 (y) / 1.9e-13 (pi); fast validation tier
+  PASS (mirror 7.3e-11 at 25 prior draws; HD identity 2.3e-13 at
+  stationary prior points). The three fits took ~80 minutes on four
+  cores (~1.3 s/iteration post-warmup). Fast suite at stage end:
+  **382 passed, 0 skipped** (from 325 at stage start; marker
+  `authored`). Not done, deliberately: registering/running an SBC design
+  for the notebook model (the constructors exist; pre-registration is
+  per-model S8 work); the `results_lw.py` migration (still backlog).
+  HANDOFF.md rewritten for S8.
+
 - **2026-09-04 — S7 M1–M4 landed: equation-level model authoring compiles
   to the EXISTING declaration surface; the oracles gate is exact.** The
   design and the four brief-vs-repo conflicts are in `plans/S7-plan.md`
