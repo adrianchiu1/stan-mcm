@@ -41,16 +41,21 @@ def file_sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def resolve_data_path(spec: RunSpec, spec_path: Path) -> Path:
+def resolve_data_path(spec: RunSpec, spec_path: Path | None = None, *, base_dir: Path | None = None) -> Path:
     """Resolve `spec.data.file`, relative to the directory containing the
-    spec YAML file (not the process's current working directory)."""
-    spec_dir = spec_path.resolve().parent
+    spec YAML file (not the process's current working directory) -- or,
+    for a spec built in Python with no file (S6 WP1's API), relative to an
+    explicit ``base_dir``. Exactly one of the two anchors is given."""
+    if (spec_path is None) == (base_dir is None):
+        raise ValueError("resolve_data_path needs exactly one of spec_path or base_dir.")
+    spec_dir = Path(base_dir).resolve() if base_dir is not None else Path(spec_path).resolve().parent
     data_path = (spec_dir / spec.data.file).resolve()
     if not data_path.is_file():
+        where = f"in {spec_path}" if spec_path is not None else "in the RunSpec"
         raise FileNotFoundError(
             f"data.file {spec.data.file!r} (resolved to {data_path}) does "
-            f"not exist. Fix data.file in {spec_path} to point at a CSV "
-            f"file, relative to the spec's own directory ({spec_dir})."
+            f"not exist. Fix data.file {where} to point at a CSV file, "
+            f"relative to the base directory ({spec_dir})."
         )
     return data_path
 
@@ -72,15 +77,17 @@ def _parse_sample_bound(value: str, field_name: str, end: bool = False) -> pd.Ti
         ) from exc
 
 
-def load_data(spec: RunSpec, spec_path: Path) -> tuple[pd.DataFrame, str, Path]:
+def load_data(spec: RunSpec, spec_path: Path | None = None, *, base_dir: Path | None = None) -> tuple[pd.DataFrame, str, Path]:
     """Load, map, and trim the data referenced by `spec`.
 
     Returns `(mapped_df, raw_file_hash, resolved_data_path)`. `mapped_df`
     has a `date` column (parsed datetime) plus one numeric column per
     `spec.data.mapping` key (e.g. `y`), sorted by date, trimmed to
-    `spec.data.sample`.
+    `spec.data.sample`. ``data.file`` resolves against the spec file's
+    directory (``spec_path``) or an explicit ``base_dir`` (see
+    :func:`resolve_data_path`).
     """
-    data_path = resolve_data_path(spec, spec_path)
+    data_path = resolve_data_path(spec, spec_path, base_dir=base_dir)
     raw_hash = file_sha256(data_path)
 
     try:

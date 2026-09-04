@@ -34,13 +34,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import yaml
 
 from specs.schema import get_family
 from specs.schema.base import RunSpec
 from specs.schema.sweep import SweepSpec, load_sweep_spec
 
-from macrotoolkit.run import REPO_ROOT, RunResult, run
+from macrotoolkit.run import REPO_ROOT, RunResult, run_spec
 
 _CI_LO, _CI_HI = 5.0, 95.0
 
@@ -54,11 +55,66 @@ class SweepCellResult:
 
 
 @dataclass
+class SweepComparison:
+    """The sweep's comparison data, programmatically (S6 WP1) -- exactly
+    what the HTML report renders:
+
+    - ``labels``: cell labels in sweep order; ``swept_params``: the prior
+      names any cell overrides (listed first in tables);
+    - ``posterior[label][param]``: ``{median, lo, hi, sd}`` (5/95
+      percentiles) per scalar parameter per cell;
+    - ``prior_sds[label][param]``: Monte-Carlo prior sds under THAT CELL's
+      own resolved priors (the family's ``prior_sd_table`` capability;
+      empty when the family declares none);
+    - ``headline[label][name] = (dates, median_path)``: the family's
+      headline smoothed series per cell (``headline_series`` capability;
+      ``None`` when the family declares none).
+    """
+
+    labels: list[str]
+    swept_params: list[str]
+    posterior: dict[str, dict[str, dict[str, float]]]
+    prior_sds: dict[str, dict[str, float]]
+    headline: dict[str, dict[str, tuple]] | None
+
+    @property
+    def param_names(self) -> list[str]:
+        names = sorted({p for stats in self.posterior.values() for p in stats})
+        return [p for p in self.swept_params if p in names] + [p for p in names if p not in self.swept_params]
+
+    def table(self) -> pd.DataFrame:
+        """Long-form DataFrame: one row per (parameter, cell) with median,
+        lo, hi, posterior sd, prior sd, contraction, and a ``swept`` flag."""
+        rows = []
+        for p in self.param_names:
+            for label in self.labels:
+                st = self.posterior[label].get(p)
+                if st is None:
+                    continue
+                prior_sd = self.prior_sds.get(label, {}).get(p)
+                rows.append(
+                    {
+                        "parameter": p,
+                        "cell": label,
+                        "median": st["median"],
+                        "lo": st["lo"],
+                        "hi": st["hi"],
+                        "posterior_sd": st["sd"],
+                        "prior_sd": prior_sd if prior_sd is not None else float("nan"),
+                        "contraction": contraction(prior_sd, st["sd"]) if prior_sd is not None else float("nan"),
+                        "swept": p in self.swept_params,
+                    }
+                )
+        return pd.DataFrame(rows)
+
+
+@dataclass
 class SweepResult:
     name: str
     out_dir: Path
     report_path: Path
     cells: list[SweepCellResult]
+    comparison: SweepComparison | None = None
 
 
 def derive_cell_spec(base_raw: dict, cell_priors: dict) -> RunSpec:
@@ -113,7 +169,7 @@ def run_sweep(
 ) -> SweepResult:
     """Run every cell of the sweep at ``sweep_path`` (idempotently, via the
     ordinary run store) and write the comparison report. Returns a
-    :class:`SweepResult`."""
+    :class:`SweepResult`. Thin file wrapper over :func:`run_sweep_spec`."""
     sweep_path = Path(sweep_path).resolve()
     sweep = load_sweep_spec(str(sweep_path))
     base_path = (sweep_path.parent / sweep.base_spec).resolve()
@@ -125,11 +181,36 @@ def run_sweep(
     base_raw = yaml.safe_load(base_path.read_text())
     if not isinstance(base_raw, dict):
         raise ValueError(f"Base spec {base_path} must contain a YAML mapping.")
+    base = RunSpec.model_validate(base_raw)
+    return run_sweep_spec(
+        sweep, base, base_dir=base_path.parent, base_label=str(base_path),
+        runs_root=runs_root, sweeps_root=sweeps_root,
+    )
+
+
+def run_sweep_spec(
+    sweep: SweepSpec,
+    base: RunSpec,
+    *,
+    base_dir: str | Path,
+    base_label: str = "<RunSpec>",
+    runs_root: str | Path | None = None,
+    sweeps_root: str | Path | None = None,
+) -> SweepResult:
+    """The sweep core (S6 WP1): an in-memory :class:`SweepSpec` over an
+    in-memory base :class:`RunSpec`, ``base_dir`` anchoring the base
+    spec's ``data.file``. Every cell runs through :func:`run_spec` (the
+    same immutable store; idempotent cell by cell); the comparison is
+    computed once (:func:`compare_cells`) and both returned
+    programmatically (``SweepResult.comparison``) and rendered to
+    ``sweeps/<name>/report.html`` + ``cells.json``."""
+    base_dir = Path(base_dir).resolve()
+    base_raw = base.model_dump(mode="json")
 
     cells: list[SweepCellResult] = []
     for cell in sweep.cells:
         spec = derive_cell_spec(base_raw, cell.priors)
-        result = run(base_path, runs_root=runs_root, spec_override=spec)
+        result = run_spec(spec, base_dir=base_dir, runs_root=runs_root)
         diagnostics = json.loads((result.run_dir / "diagnostics.json").read_text())
         cells.append(
             SweepCellResult(
@@ -162,11 +243,50 @@ def run_sweep(
         )
     )
 
-    html = render_sweep_report(sweep, base_path, cells)
+    comparison = compare_cells(sweep, cells, base_dir)
+    html = render_sweep_report(sweep, base_label, cells, comparison)
     report_path = out_dir / "report.html"
     report_path.write_text(html, encoding="utf-8")
 
-    return SweepResult(name=sweep.name, out_dir=out_dir, report_path=report_path, cells=cells)
+    return SweepResult(name=sweep.name, out_dir=out_dir, report_path=report_path, cells=cells, comparison=comparison)
+
+
+def compare_cells(sweep: SweepSpec, cells: list[SweepCellResult], base_dir: Path) -> SweepComparison:
+    """Compute the comparison data for completed cells: per-cell posterior
+    scalar summaries, per-cell prior sds (each against THAT CELL's own
+    resolved priors, since the override changes the prior it is measured
+    against), and the family's headline series per cell."""
+    family_name = cells[0].spec.model.family
+    entry = get_family(family_name)
+    prior_sd_fn = entry.resolve("prior_sd_table")
+    headline_fn = entry.resolve("headline_series")
+
+    swept_params: list[str] = []
+    for cell in sweep.cells:
+        for k in cell.priors:
+            if k not in swept_params:
+                swept_params.append(k)
+
+    post_stats = {c.label: _posterior_scalar_stats(c.run_result.run_dir) for c in cells}
+    prior_sds: dict[str, dict[str, float]] = {}
+    if prior_sd_fn is not None:
+        from macrotoolkit.data import load_data
+
+        for c in cells:
+            df, _, _ = load_data(c.spec, base_dir=Path(base_dir))
+            prior_sds[c.label] = prior_sd_fn(c.spec, df)
+
+    headline = None
+    if headline_fn is not None:
+        headline = {c.label: headline_fn(c.run_result.run_dir) for c in cells}
+
+    return SweepComparison(
+        labels=[c.label for c in cells],
+        swept_params=swept_params,
+        posterior=post_stats,
+        prior_sds=prior_sds,
+        headline=headline,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -204,17 +324,16 @@ def _fig_to_data_uri(fig) -> str:
     return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
 
 
-def _headline_overlay_figure(family_headline, cells: list[SweepCellResult]):
+def _headline_overlay_figure(per_cell: dict[str, dict[str, tuple]] | None):
     """One overlay figure: each headline series as a panel, one line per
-    cell. ``family_headline`` is the registry capability (or None)."""
-    if family_headline is None:
+    cell. ``per_cell`` is ``SweepComparison.headline`` (or None)."""
+    if per_cell is None:
         return None
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    per_cell = {c.label: family_headline(c.run_result.run_dir) for c in cells}
     series_names = list(next(iter(per_cell.values())).keys())
     fig, axes = plt.subplots(
         len(series_names), 1, figsize=(10.0, 3.0 * len(series_names)), sharex=True, squeeze=False
@@ -231,37 +350,17 @@ def _headline_overlay_figure(family_headline, cells: list[SweepCellResult]):
     return fig
 
 
-def render_sweep_report(sweep: SweepSpec, base_path: Path, cells: list[SweepCellResult]) -> str:
+def render_sweep_report(
+    sweep: SweepSpec, base_label: str, cells: list[SweepCellResult], comparison: SweepComparison
+) -> str:
     """Assemble the self-contained comparison HTML (one file, embedded
     figure, zero external references -- same doctrine as the per-run
-    report)."""
+    report) from an already-computed :class:`SweepComparison`."""
     family_name = cells[0].spec.model.family
-    entry = get_family(family_name)
-    prior_sd_fn = entry.resolve("prior_sd_table")
-    headline_fn = entry.resolve("headline_series")
-
-    swept_params: list[str] = []
-    for cell in sweep.cells:
-        for k in cell.priors:
-            if k not in swept_params:
-                swept_params.append(k)
-
-    # Per-cell posterior stats + (per-cell!) prior sds -- each cell's
-    # contraction uses that cell's own resolved priors, since the override
-    # changes the prior it is measured against.
-    post_stats = {c.label: _posterior_scalar_stats(c.run_result.run_dir) for c in cells}
-    prior_sds: dict[str, dict[str, float]] = {}
-    if prior_sd_fn is not None:
-        from macrotoolkit.data import load_data
-
-        for c in cells:
-            df, _, _ = load_data(c.spec, base_path)
-            prior_sds[c.label] = prior_sd_fn(c.spec, df)
-
-    param_names = sorted({p for stats in post_stats.values() for p in stats})
-    ordered = [p for p in swept_params if p in param_names] + [
-        p for p in param_names if p not in swept_params
-    ]
+    swept_params = comparison.swept_params
+    post_stats = comparison.posterior
+    prior_sds = comparison.prior_sds
+    ordered = comparison.param_names
 
     # --- cell table ---
     rows = []
@@ -305,7 +404,7 @@ def render_sweep_report(sweep: SweepSpec, base_path: Path, cells: list[SweepCell
             prows.append(row)
     param_table = f"<table>{header}{''.join(prows)}</table>"
 
-    fig = _headline_overlay_figure(headline_fn, cells)
+    fig = _headline_overlay_figure(comparison.headline)
     overlay_html = (
         f"<img src='{_fig_to_data_uri(fig)}' alt='headline series overlay'>"
         if fig is not None
@@ -324,7 +423,7 @@ def render_sweep_report(sweep: SweepSpec, base_path: Path, cells: list[SweepCell
         "<!DOCTYPE html>\n<html lang='en'>\n<head>\n<meta charset='utf-8'>\n"
         f"<title>Sweep report -- {_esc(sweep.name)}</title>\n<style>{_CSS}</style>\n</head>\n<body>\n"
         f"<h1>Prior sweep: {_esc(sweep.name)}</h1>\n"
-        f"<p class='caption'>Base spec: <code>{_esc(base_path)}</code> "
+        f"<p class='caption'>Base spec: <code>{_esc(base_label)}</code> "
         f"(family <code>{_esc(family_name)}</code>); {len(cells)} cells, each an ordinary "
         f"immutable run -- per-cell full reports via <code>mtk report &lt;hash&gt;</code>.</p>\n"
         f"<h2>Cells</h2>\n{cell_table}\n"

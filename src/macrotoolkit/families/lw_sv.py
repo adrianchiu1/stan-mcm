@@ -468,3 +468,72 @@ def headline_series(run_dir, thin: int = 5, seed: int | None = None) -> dict[str
         "rstar": (tcd.dates, np.median(tcd.rstar, axis=0)),
         "gap": (tcd.dates, np.median(tcd.output_gap, axis=0)),
     }
+
+
+# ---------------------------------------------------------------------------
+# Automatic fit-time mirror check (S6 WP3): prior draw -> Stan inits +
+# the Python KF mirror at the same point on the same Stan data.
+# ---------------------------------------------------------------------------
+
+
+def mirror_points(spec, stan_data: dict, n: int, rng: np.random.Generator):
+    """``n`` prior draws of the rendered lw_sv program's parameters as Stan
+    inits (SV variant: the non-centered ``h0_*_raw`` and fresh ``nu_*``
+    innovation vectors) with the Python KF log-likelihood at each --
+    matrices via ``build_lw_matrices``, the SV variant's R_t through the
+    same ``sv_rw_noncentered`` -> ``sv_diag_variance_path`` composition
+    the template stamps."""
+    from macrotoolkit.qc import MirrorPoint
+    from macrotoolkit.smoother import (
+        build_lw_matrices,
+        kalman_loglik,
+        sv_diag_variance_path,
+        sv_rw_noncentered,
+    )
+
+    priors = build_render_context(spec)["priors"]
+    sv_on = bool(spec.model.options.sv_shocks)
+    T = int(stan_data["T"])
+    yobs, x, xi00, P00 = stan_data["yobs"], stan_data["x"], stan_data["xi00"], stan_data["P00"]
+    points = []
+    for _ in range(n):
+        params = sample_prior_params(
+            priors, sv_on, rng,
+            mu_h0_is=stan_data.get("mu_h0_is"), mu_h0_pc=stan_data.get("mu_h0_pc"),
+        )
+        inits = {k: params[k] for k in ("a1", "a2", "a_r", "b_pi", "b_y", "sigma_ystar", "sigma_g", "sigma_z")}
+        if sv_on:
+            nu_is = rng.standard_normal(T)
+            nu_pc = rng.standard_normal(T)
+            inits.update(
+                sigma_h_is=params["sigma_h_is"],
+                sigma_h_pc=params["sigma_h_pc"],
+                h0_is_raw=(params["h0_is"] - stan_data["mu_h0_is"]) / priors["mu_h0_is"]["sd"],
+                h0_pc_raw=(params["h0_pc"] - stan_data["mu_h0_pc"]) / priors["mu_h0_pc"]["sd"],
+                nu_is=nu_is,
+                nu_pc=nu_pc,
+            )
+            # The Python side rebuilds h_0 exactly as the template does
+            # (mu_h0 + sd * raw) so both sides see the identical point.
+            h0_is = stan_data["mu_h0_is"] + priors["mu_h0_is"]["sd"] * inits["h0_is_raw"]
+            h0_pc = stan_data["mu_h0_pc"] + priors["mu_h0_pc"]["sd"] * inits["h0_pc_raw"]
+            F, Q, A, Z, _ = build_lw_matrices({**params, "sigma_is": 1.0, "sigma_pc": 1.0}, c=1.0)
+            R = sv_diag_variance_path(
+                sv_rw_noncentered(h0_is, params["sigma_h_is"], nu_is),
+                sv_rw_noncentered(h0_pc, params["sigma_h_pc"], nu_pc),
+            )
+        else:
+            inits.update(sigma_is=params["sigma_is"], sigma_pc=params["sigma_pc"])
+            F, Q, A, Z, R = build_lw_matrices(params, c=1.0)
+        points.append(MirrorPoint(inits=inits, loglik_python=kalman_loglik(yobs, x, F, Q, A, Z, R, xi00, P00)))
+    return points
+
+
+def _mirror_decl():
+    from macrotoolkit.qc import MirrorDecl
+
+    return MirrorDecl(draw_points=mirror_points)
+
+
+#: The registry's ``mirror`` capability (resolved lazily; see qc.py).
+MIRROR = _mirror_decl()

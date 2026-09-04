@@ -48,6 +48,8 @@ from macrotoolkit.smoother import (
     sv_diag_variance_path,
 )
 
+pytestmark = pytest.mark.lw_sv
+
 # ---------------------------------------------------------------------------
 # Shared fixtures: g1_harness's fixed synthetic dataset (see its own
 # docstring -- plausible magnitudes only, not an economic fixture; that is

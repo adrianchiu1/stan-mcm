@@ -24,14 +24,20 @@ from g1_harness import (
     N_PARAM_POINTS,
     PARAM_NAMES,
     PARAM_SEED,
+    PRE_QT_FIXTURE,
+    PRE_QT_TOL,
     SYNTHETIC_DATA,
     compare_loglik,
     generate_h_paths,
     generate_parameter_points,
+    generate_q_paths,
+    generate_q_sv_inputs,
     generate_sv_inputs,
     python_kf_loglik,
     python_kf_loglik_sv,
+    python_kf_loglik_svq,
     python_kf_loglik_tv,
+    python_kf_loglik_tvq,
     stan_kf_loglik_batch,
 )
 
@@ -103,32 +109,98 @@ def test_time_varying_R_shape_mismatch_raises() -> None:
         _as_R_path(np.zeros(3), 5)
 
 
-def test_g1_python_kf_matches_stan_kf_loglik() -> None:
-    """The G1 gate proper, covering all THREE filter paths of the
-    generalized KF (S3): the constant-R overload, the time-varying
-    R_t = diag(exp(h)) array form, and the production SV-helper composition
-    (sv_rw_noncentered -> sv_diag_variance_path -> KF), each Python-vs-Stan
-    at all 50 points. The Stan side runs once for all points and paths;
-    each value is then compared against the Python mirror through
-    `compare_loglik`, so a mismatch fails loudly naming the point.
+def test_q_path_normalization_and_constant_q_bit_identity() -> None:
+    """S6 Q_t generalization, Python side: ``_as_Q_path`` tiles a constant
+    Q / validates a path (the ``_as_R_path`` twin), and a (T, n, n) path
+    whose every entry IS the constant Q yields a BIT-IDENTICAL log-
+    likelihood to the constant call -- the arithmetic ``F P F' + Q[t]``
+    is the same operation on the same values."""
+    import pytest
 
-    Seeds are `PARAM_SEED`/`H_PATH_SEED`/`SV_INPUT_SEED` (recorded in
-    `tests/g1_harness.py`); if this ever fails for real, re-run the
-    generators at those seeds to reproduce the exact failing inputs.
+    from macrotoolkit.smoother import (
+        _as_Q_path,
+        build_lw_matrices,
+        build_lw_regressors,
+        default_initial_state,
+        kalman_loglik,
+    )
+
+    assert _as_Q_path(np.eye(7), 5).shape == (5, 7, 7)
+    with pytest.raises(ValueError, match="7 entries but yobs has T=5"):
+        _as_Q_path(np.zeros((7, 7, 7)), 5)
+    with pytest.raises(ValueError, match="must be"):
+        _as_Q_path(np.zeros(3), 5)
+
+    p = generate_parameter_points(3, seed=PARAM_SEED)[0]
+    yobs, x = build_lw_regressors(SYNTHETIC_DATA.y, SYNTHETIC_DATA.pi, SYNTHETIC_DATA.r)
+    F, Q, A, Z, R = build_lw_matrices(p, c=C_FIXED)
+    xi00, P00 = default_initial_state(float(SYNTHETIC_DATA.y[4]))
+    ll_const = kalman_loglik(yobs, x, F, Q, A, Z, R, xi00, P00)
+    ll_path = kalman_loglik(yobs, x, F, np.repeat(Q[None], yobs.shape[0], axis=0), A, Z, R, xi00, P00)
+    assert ll_const == ll_path
+
+
+def test_constant_q_stan_loglik_reproduces_pre_generalization_fixture() -> None:
+    """The constant-Q REGRESSION PIN (plans/S6-plan.md conflict item 1):
+    the generalized Stan filter's constant-Q values -- all three pre-S6
+    paths (constant R, time-varying R, production SV composition) -- must
+    reproduce the log-likelihoods captured from the UNTOUCHED S5 program
+    at the same 50 points (tests/fixtures/g1/pre_qt_stan_loglik.csv,
+    captured 2026-09-04 before any stan/ edit) to CmdStan's 18-sig-fig
+    output resolution. This is what "the Q_t generalization does not change
+    constant-Q numerics" means, on the Stan side, independently of the
+    Python mirror."""
+    import csv
+    from pathlib import Path
+
+    points = generate_parameter_points(N_PARAM_POINTS, seed=PARAM_SEED)
+    stan_ll, stan_ll_tv, stan_ll_sv, _, _ = stan_kf_loglik_batch(points, SYNTHETIC_DATA)
+    rows = list(csv.DictReader((Path(__file__).parent / PRE_QT_FIXTURE).open()))
+    assert len(rows) == N_PARAM_POINTS
+    for i, row in enumerate(rows):
+        assert int(row["point"]) == i
+        for got, key in ((stan_ll[i], "loglik"), (stan_ll_tv[i], "loglik_tv"), (stan_ll_sv[i], "loglik_sv")):
+            want = float(row[key])
+            assert abs(float(got) - want) < PRE_QT_TOL, (
+                f"constant-Q regression pin failed at point {i}, path {key}: "
+                f"got {got!r}, pre-generalization fixture {want!r}"
+            )
+
+
+def test_g1_python_kf_matches_stan_kf_loglik() -> None:
+    """The G1 gate proper, covering all FIVE filter paths of the
+    generalized KF: the constant-Q/constant-R overload, the time-varying
+    R_t = diag(exp(h)) array form, the production R_t SV-helper composition
+    (sv_rw_noncentered -> sv_diag_variance_path -> KF) -- S3 -- and, S6,
+    the time-varying Q_t path (the g shock's scale through lw_Q per
+    period) and the production Q_t SV composition (sv_rw_noncentered ->
+    sv_scalar_variance_path on Q's z slot), each Python-vs-Stan at all 50
+    points. The Stan side runs once for all points and paths; each value is
+    then compared against the Python mirror through `compare_loglik`, so a
+    mismatch fails loudly naming the point.
+
+    Seeds are `PARAM_SEED`/`H_PATH_SEED`/`SV_INPUT_SEED`/`Q_PATH_SEED`/
+    `Q_SV_INPUT_SEED` (recorded in `tests/g1_harness.py`); if this ever
+    fails for real, re-run the generators at those seeds to reproduce the
+    exact failing inputs.
     """
     points = generate_parameter_points(N_PARAM_POINTS, seed=PARAM_SEED)
     h_paths = generate_h_paths(points, SYNTHETIC_DATA.T - 4)
     sv_inputs = generate_sv_inputs(points, SYNTHETIC_DATA.T - 4)
-    stan_ll, stan_ll_tv, stan_ll_sv = stan_kf_loglik_batch(
-        points, SYNTHETIC_DATA, h_paths, sv_inputs
+    q_paths = generate_q_paths(points, SYNTHETIC_DATA.T - 4)
+    q_sv_inputs = generate_q_sv_inputs(points, SYNTHETIC_DATA.T - 4)
+    stan_ll, stan_ll_tv, stan_ll_sv, stan_ll_tvq, stan_ll_svq = stan_kf_loglik_batch(
+        points, SYNTHETIC_DATA, h_paths, sv_inputs, q_paths, q_sv_inputs
     )
-    for arr in (stan_ll, stan_ll_tv, stan_ll_sv):
+    for arr in (stan_ll, stan_ll_tv, stan_ll_sv, stan_ll_tvq, stan_ll_svq):
         assert arr.shape == (N_PARAM_POINTS,)
         assert np.all(np.isfinite(arr))
     # The tv/sv paths must actually differ from the constant path (a wiring
     # bug returning the constant loglik would otherwise pass trivially).
     assert np.max(np.abs(stan_ll - stan_ll_tv)) > 1.0
     assert np.max(np.abs(stan_ll - stan_ll_sv)) > 1.0
+    assert np.max(np.abs(stan_ll - stan_ll_tvq)) > 1e-3
+    assert np.max(np.abs(stan_ll - stan_ll_svq)) > 1e-3
 
     diffs = [
         compare_loglik(
@@ -165,3 +237,27 @@ def test_g1_python_kf_matches_stan_kf_loglik() -> None:
         for i, p in enumerate(points)
     ]
     assert max(diffs_sv) < LOGLIK_TOL
+
+    diffs_tvq = [
+        compare_loglik(
+            p,
+            SYNTHETIC_DATA,
+            lambda _p, _d, i=i: python_kf_loglik_tvq(_p, q_paths[i], _d),
+            lambda _p, _d, i=i: float(stan_ll_tvq[i]),
+            tol=LOGLIK_TOL,
+        )
+        for i, p in enumerate(points)
+    ]
+    assert max(diffs_tvq) < LOGLIK_TOL
+
+    diffs_svq = [
+        compare_loglik(
+            p,
+            SYNTHETIC_DATA,
+            lambda _p, _d, i=i: python_kf_loglik_svq(_p, q_sv_inputs, i, _d),
+            lambda _p, _d, i=i: float(stan_ll_svq[i]),
+            tol=LOGLIK_TOL,
+        )
+        for i, p in enumerate(points)
+    ]
+    assert max(diffs_svq) < LOGLIK_TOL

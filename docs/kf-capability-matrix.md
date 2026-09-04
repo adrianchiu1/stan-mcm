@@ -17,7 +17,7 @@ regressors, both SV flags exercised.
 | Capability | Status today | UCSV needs it? | First family that does | Notes |
 |---|---|---|---|---|
 | Time-varying measurement covariance `R_t` | **Built + validated** (S3 generalization; G1 at ~5.5e-12 on constant, time-varying, and production SV composition paths) | **Yes** (transitory-shock SV) | lw_sv (done) | Array-of-matrices interface; constant case delegates via `rep_array`/`_as_R_path`. |
-| Time-varying state innovation covariance `Q_t` | **Not built** — `Q` constant (S3 deliberately routed lw_sv's SV through `R_t`; the marginalized LW form has SV only on measurement shocks) | **YES — the one real KF extension UCSV requires** (trend-shock SV enters the STATE innovation) | **UCSV** | Same generalization pattern as `R_t` (array-of-`Q_t` core + constant overload); spec §2.2 always named this in the contract. Requires a fresh G1 mirror extension + the no-SV render byte-stability discipline (DECISIONS.md 2026-08-31 precedent for the run-hash consequences). This is also the "deferred SV-on-trend-shocks flag" (spec §0.4). |
+| Time-varying state innovation covariance `Q_t` | **Built + validated (S6)**: `array[] matrix Q` core with three delegating constant overloads, Python mirror `_as_Q_path`; G1 at ≤7.3e-12 over five paths (constant, tv-R, R-SV composition, tv-Q, Q-SV composition); the constant-Q Stan values reproduce the pre-S6 program EXACTLY (fixture pin) | **Yes** (trend-shock SV enters the STATE innovation) | **UCSV** (done) | Done by the `R_t` playbook; the run-hash consequence (every lw_sv spec re-identified once) taken deliberately per the 2026-08-31 precedent — DECISIONS.md 2026-09-04. |
 | Explicit informative initial state `(xi00, P00)` | **Built + validated** (spec §2.2: mean/cov passed explicitly; G5a used HLW's exact values) | Yes (a diffuse-ish explicit prior on tau_0, same pattern as y*_0) | lw_sv (done) | |
 | Exact diffuse initialization (Koopman exact-diffuse recursions) | **Not built** (explicit large-variance priors stand in) | No — an explicit `tau_0 ~ N(pi_1, big)` prior is the established pattern here | DFM, possibly (large cross-sections make init precision matter more) | Build only with a mirror gate; exact-diffuse changes the first-step algebra, not just inputs. |
 | Missing observations | **Not built** (KF assumes complete `yobs`) | No (quarterly headline/core inflation is complete) | **DFM** (mixed frequency = systematically missing rows) | Standard row-selection KF step; touches both Stan and Python mirrors. |
@@ -27,16 +27,20 @@ regressors, both SV flags exercised.
 | Exogenous regressor block `A'x_t` + endogenous-lag feedback map | **Built, generic** (S4.5 items 1–2: declared metadata + one engine) | Trivially (UCSV has NO x — empty feedback map, the degenerate case the engine already supports) | lw_sv (done) | |
 | RTS smoother / DK simulation smoother / generic simulate-IRF-HD engine | **Built + validated** (G5a ~1e-12; G6 1e-6; S4.5 engine) | Yes — all reusable as-is once matrices exist (dimension-agnostic) | lw_sv (done) | UCSV's results module is a thin metadata + reporting-mapping declaration. |
 
-## What adding UCSV actually requires (scoping summary)
+## What adding UCSV actually required (S6 outcome)
 
 1. **`Q_t` generalization** of `kalman_loglik_tv.stan` + the Python mirror
-   (the one real KF change), gated by a G1 extension over all Q-paths, with
-   a regression pin that the constant-Q case reproduces current G1/G5a
-   results — the exact playbook of S3's `R_t` generalization.
-2. Family declarations only, everywhere else: template + schema fragment +
-   `families/ucsv.py` (state metadata `(("tau", 0),)`-style, empty feedback
-   map, prior sampler) + registry entry + validation suite instantiated
-   from the generic harnesses (SBC via `tests/sbc_harness.py`; G1/G2
-   patterns audited for family-parameterization at that point).
-3. No missing-data, diffuse-init, TV-loading, or scaling work — per the
-   item-5 doctrine those wait for the family that needs them.
+   — done exactly as scoped (G1 over five paths; constant-Q fixture pin
+   exact; G5a/G6 unchanged).
+2. Family declarations everywhere else — true, with four places the
+   generic layer had lw_sv residue that had to be generalized first
+   (recorded in DECISIONS.md 2026-09-04 WP2b): the smoother's
+   structural-shock recovery, the engine's state noise, the report/
+   figure plumbing, and the loader/HD/IRF pieces that only existed inside
+   `results_lw.py` (now `results_core.py`). UCSV's own results module is
+   a ~330-line declaration; the family's validation ladder is
+   instantiated from `macrotoolkit/validation/` (SBC engine, recovery
+   arithmetic, mirror/identity gates).
+3. No missing-data, diffuse-init, TV-loading, or scaling work was done —
+   per the item-5 doctrine those wait for the family that needs them
+   (DFM next).

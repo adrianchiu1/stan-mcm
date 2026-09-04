@@ -106,6 +106,28 @@ class SamplerSpec(BaseModel):
     seed: int = Field(default=20260813, description="RNG seed; any integer.")
 
 
+class QcSpec(BaseModel):
+    """Automatic per-run quality control (S6 WP3). OUTSIDE the run-identity
+    hash -- a QC setting never changes the estimation -- and stored in the
+    run dir as ``qc.yaml`` (refreshable, like ``outputs.yaml``).
+
+    ``mirror_check``: before sampling, evaluate the exact rendered Stan
+    program's Kalman-filter log-likelihood at ``mirror_points`` draws from
+    the family's prior and compare each against the Python KF mirror
+    (``macrotoolkit.smoother``); the max abs difference is recorded in the
+    run's ``diagnostics.json`` and the run FAILS LOUDLY (no run directory
+    is left behind) past ``mirror_tolerance`` -- G1's own 1e-8 gate,
+    applied automatically to every fit. ON by default.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    mirror_check: bool = True
+    mirror_points: int = Field(default=5, ge=1, description="Prior draws evaluated on both sides of the mirror.")
+    mirror_tolerance: float = Field(default=1e-8, gt=0, description="Max abs loglik difference tolerated (G1's gate).")
+    mirror_seed: int = Field(default=20260904, description="Seed for the prior draws the mirror check evaluates.")
+
+
 class ModelSpec(BaseModel):
     """``model.family`` selects a registered family (``specs/schema``
     ``FAMILY_REGISTRY``); ``model.options`` is validated against that
@@ -152,6 +174,10 @@ class RunSpec(BaseModel):
     pattern ``ModelSpec._validate_options`` uses for ``model.options``.
     ``local_level`` has no ``outputs_model`` registered, so its ``outputs``
     stays the free-form dict this field declares.
+
+    ``qc`` (S6 WP3) configures the automatic per-run quality control
+    (:class:`QcSpec`); like ``outputs`` it sits OUTSIDE the estimation
+    identity (:meth:`to_estimation_yaml` drops both).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -161,6 +187,7 @@ class RunSpec(BaseModel):
     priors: dict[str, Any] = Field(default_factory=dict)
     sampler: SamplerSpec = Field(default_factory=SamplerSpec)
     outputs: Any = Field(default_factory=dict)
+    qc: QcSpec = Field(default_factory=QcSpec)
 
     @model_validator(mode="after")
     def _validate_required_mapping(self) -> "RunSpec":
@@ -222,6 +249,15 @@ class RunSpec(BaseModel):
         :meth:`to_canonical_yaml` (validated values, sorted keys)."""
         payload = self.model_dump(mode="json")
         payload.pop("outputs", None)
+        # qc (S6 WP3) is likewise QC configuration, not estimation content.
+        payload.pop("qc", None)
+        return yaml.safe_dump(payload, sort_keys=True, default_flow_style=False)
+
+    def qc_to_canonical_yaml(self) -> str:
+        """Canonical serialization of the ``qc:`` block alone (S6 WP3) --
+        written to a run dir's ``qc.yaml``, outside the identity hash like
+        ``outputs.yaml``."""
+        payload = self.model_dump(mode="json")["qc"]
         return yaml.safe_dump(payload, sort_keys=True, default_flow_style=False)
 
     def outputs_to_canonical_yaml(self) -> str:

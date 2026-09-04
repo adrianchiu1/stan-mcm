@@ -1,49 +1,40 @@
-"""Self-contained HTML report assembly for a completed ``lw_sv`` run
+"""Self-contained HTML report assembly for a completed run
 (lw-sv-spec.md §3.5): "One self-contained ``report.html`` per run: header
 (run hash, spec summary, data span), diagnostics verdict, then §3.1-§3.4
 figures, then a parameter table (posterior median, 90% CI, R-hat, ESS)."
 
-This module owns NO model numerics of its own -- it only calls
-``macrotoolkit.results_lw``'s four already-validated ``compute_*_draws``
-entry points and ``macrotoolkit.plots``'s four plotting functions, then
-turns their ``Figure`` outputs into embeddable ``data:image/png;base64,...``
-URIs (``plots.py``'s own module docstring: figures, not encoded strings, are
-its business; embedding is this module's). Nothing here re-derives or
-re-checks the numerical conventions those upstream modules already enforce
-and unit-test:
+FAMILY-GENERIC since S6 WP1: this module owns NO model numerics and no
+family knowledge. It loads the run through the family registry
+(``results_loader``) and renders the family's declared OUTPUT MODULES
+(``output_modules``, :mod:`macrotoolkit.outputs`) in declared order, each
+module supplying its own compute/plot callables, heading, figure title and
+caption. lw_sv's declaration (:mod:`macrotoolkit.outputs_lw`) reproduces
+the S4/S5 report layout exactly; a new family gets a report by declaring
+its modules, never by editing this file.
 
-- ``g`` is ANNUALIZED everywhere (lw-sv-spec.md §1.1); the potential-output
-  transition alone divides by 4.
-- ``h`` is log-VARIANCE; the plotted/labeled volatility path is
-  ``exp(h/2)`` (the standard deviation), never ``exp(h)``.
-- Inflation is ``400 * dlog(P)``.
-
-This module only DISPLAYS values already computed under those conventions
-by ``macrotoolkit.results_lw``/``macrotoolkit.smoother``/``macrotoolkit.plots``
-(each already covered by ``tests/test_units_conventions.py`` and their own
-gate tests) -- so it needs no separate units unit test of its own; see
-``tests/test_report.py`` for this module's own (presentation-level) coverage
-instead.
+Every ``Figure`` is turned into an embeddable ``data:image/png;base64,...``
+URI (``plots.py``'s own docstring: figures, not encoded strings, are its
+business; embedding is this module's). Numerical conventions (g
+annualized, h log-variance, inflation 400*dlog P) are enforced upstream by
+the families' own results/plots modules and their tests; this module only
+displays.
 
 Two public entry points:
 
-- :func:`render_report` -- ``(run_dir) -> str``, pure (no filesystem write):
-  loads the run + diagnostics, computes the four output modules, renders
-  every figure to an embedded PNG, and returns the full HTML document as a
-  string. Kept side-effect-free (besides reading ``run_dir``'s own already-
-  written artifacts) so it is directly testable without needing to inspect
-  a written file.
-- :func:`write_report` -- ``(run_dir) -> Path``, the thin wrapper that calls
-  :func:`render_report` and writes the result to ``run_dir / "report.html"``.
-  ``cli.py``'s ``mtk report <hash>`` command calls this one.
+- :func:`render_report` -- ``(run_dir) -> str``, pure (no filesystem write).
+- :func:`write_report` -- ``(run_dir) -> Path``, writes
+  ``run_dir / "report.html"``. ``mtk report <hash>`` / ``Run.report()``
+  call this one.
 
-Writing ``report.html`` into an already-``_SUCCESS``-marked run directory is
-NOT a violation of ``run.py``'s "immutable once written" doctrine: that
-doctrine covers the *sampling artifacts* (``spec.yaml``/``data.snapshot.csv``/
-``draws.nc``/``diagnostics.json``), which this module only ever READS, never
-writes or mutates. ``report.html`` is a derived, regenerable view, explicitly
-listed as part of the run store's intended contents (lw-sv-spec.md §2.3) and
-written by THIS command, never by ``mtk run``.
+Writing ``report.html`` into an already-``_SUCCESS``-marked run directory
+is NOT a violation of ``run.py``'s "immutable once written" doctrine: that
+doctrine covers the *sampling artifacts*, which this module only ever
+READS. ``report.html`` is a derived, regenerable view.
+
+The results object a family's ``results_loader`` returns must expose
+``spec`` (the run's RunSpec), ``dates`` (the estimation-sample
+DatetimeIndex) and ``idata`` (the ArviZ posterior) -- the three things the
+generic header and parameter table read.
 """
 from __future__ import annotations
 
@@ -52,10 +43,14 @@ import html
 import io
 import json
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
-from macrotoolkit.results_lw import LWRun, load_lw_run
+from specs.schema import get_family
+
+from macrotoolkit.outputs import OutputModule
+from macrotoolkit.run import load_run_spec
 
 #: Verdict -> (background color, border color) -- plain CSS, no framework,
 #: matching this codebase's "no silent fallbacks / scannable" conventions
@@ -96,9 +91,8 @@ def _fig_to_data_uri(fig, *, dpi: int = 100) -> str:
     """Encode a matplotlib ``Figure`` as a self-contained
     ``data:image/png;base64,...`` URI (spec §3.5: "self-contained" means no
     external file references) and close the figure (this module's
-    responsibility per ``plots.py``'s own docstring: "the CALLER ... is
-    responsible for saving/closing them"), so repeated report generation in
-    one process does not accumulate open figures."""
+    responsibility per ``plots.py``'s own docstring), so repeated report
+    generation in one process does not accumulate open figures."""
     import matplotlib.pyplot as plt
 
     buf = io.BytesIO()
@@ -117,27 +111,58 @@ def _figure_block(title: str, uri: str, caption: str | None = None) -> str:
     )
 
 
+def verdict_box_html(verdict: str, reasons: list[str], extra_rows: list[tuple[str, object]] | None = None) -> str:
+    """A PASS/WARN/FAIL verdict box (shared with the validation report,
+    S6 WP3, so gate verdicts read exactly like run diagnostics)."""
+    bg, border = _VERDICT_COLORS.get(verdict, ("#f6f8fa", "#57606a"))
+    reasons_html = "".join(f"<li>{_esc(r)}</li>" for r in reasons)
+    rows_html = ""
+    if extra_rows:
+        rows_html = "<table class=\"meta-table\">" + "\n".join(
+            f"<tr><td>{_esc(k)}</td><td>{_esc(v)}</td></tr>" for k, v in extra_rows
+        ) + "</table>\n"
+    return (
+        f'<div class="verdict-box" style="background:{bg};border-color:{border};">\n'
+        f'<span class="verdict-label" style="color:{border};">Verdict: {_esc(verdict)}</span>\n'
+        f'<div class="reasons"><ul>{reasons_html}</ul></div>\n'
+        f"{rows_html}"
+        "</div>"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Header + diagnostics
 # ---------------------------------------------------------------------------
 
 
-def _render_header(lw_run: LWRun, run_hash: str) -> str:
-    spec = lw_run.spec
+def _family_title(family_name: str) -> str:
+    entry = get_family(family_name)
+    return entry.display_name or family_name
+
+
+def _render_header(results: Any, run_hash: str) -> str:
+    spec = results.spec
     options = spec.model.options
     sampler = spec.sampler
-    start_q = str(lw_run.dates[0].to_period("Q"))
-    end_q = str(lw_run.dates[-1].to_period("Q"))
+    dates = results.dates
+    start_q = str(dates[0].to_period("Q"))
+    end_q = str(dates[-1].to_period("Q"))
     mapping_str = ", ".join(f"{k} = {v}" for k, v in spec.data.mapping.items())
 
-    rows = [
+    rows: list[tuple[str, object]] = [
         ("Run hash", run_hash),
         ("Model family", spec.model.family),
-        ("sv_shocks", options.sv_shocks or "[] (no SV)"),
-        ("estimate_c", options.estimate_c),
+    ]
+    option_items = options.model_dump() if hasattr(options, "model_dump") else dict(options or {})
+    for key, value in option_items.items():
+        if key == "family":
+            continue
+        shown = value if value not in ([], None, {}) else f"{value!r} (default/none)"
+        rows.append((key, shown))
+    rows += [
         ("Data file", spec.data.file),
         ("Data mapping", mapping_str),
-        ("Data span (estimation sample)", f"{start_q} -- {end_q} ({len(lw_run.dates)} quarters)"),
+        ("Data span (estimation sample)", f"{start_q} -- {end_q} ({len(dates)} quarters)"),
         ("Sampler: chains", sampler.chains),
         ("Sampler: warmup", sampler.warmup),
         ("Sampler: sampling", sampler.sampling),
@@ -147,18 +172,30 @@ def _render_header(lw_run: LWRun, run_hash: str) -> str:
     ]
     body = "\n".join(f"<tr><td>{_esc(k)}</td><td>{_esc(v)}</td></tr>" for k, v in rows)
     return (
-        f"<h1>LW-SV report -- run {_esc(run_hash)}</h1>\n"
+        f"<h1>{_esc(_family_title(spec.model.family))} report -- run {_esc(run_hash)}</h1>\n"
         f'<table class="meta-table">{body}</table>'
     )
 
 
-def _render_diagnostics(diagnostics: dict) -> str:
-    verdict = diagnostics["verdict"]
-    bg, border = _VERDICT_COLORS.get(verdict, ("#f6f8fa", "#57606a"))
-    reasons_html = "".join(f"<li>{_esc(r)}</li>" for r in diagnostics["reasons"])
-    ebfmi = ", ".join(f"{x:.3f}" for x in diagnostics["e_bfmi_per_chain"])
+def _mirror_check_rows(diagnostics: dict) -> list[tuple[str, object]]:
+    """The automatic Stan-vs-Python KF mirror check (S6 WP3) as header
+    rows -- shown whenever the run record carries one."""
+    mc = diagnostics.get("mirror_check")
+    if not mc:
+        return [("KF mirror check (Stan vs Python)", "not recorded (pre-S6 run or qc.mirror_check: false)")]
+    status = "PASS" if mc.get("passed") else "FAIL"
+    return [
+        (
+            "KF mirror check (Stan vs Python)",
+            f"{status}: max |diff| = {mc.get('max_abs_diff'):.3e} over {mc.get('n_points')} prior "
+            f"draw(s), gate {mc.get('tolerance'):.1e}",
+        )
+    ]
 
-    rows = [
+
+def _render_diagnostics(diagnostics: dict) -> str:
+    ebfmi = ", ".join(f"{x:.3f}" for x in diagnostics["e_bfmi_per_chain"])
+    rows: list[tuple[str, object]] = [
         ("Divergences", diagnostics["divergences"]),
         (
             "Max-treedepth hits",
@@ -168,110 +205,32 @@ def _render_diagnostics(diagnostics: dict) -> str:
         ("Max R-hat (across parameters)", f"{diagnostics['rhat_max']:.4f}"),
         ("Min bulk ESS (across parameters)", f"{diagnostics['ess_bulk_min']:.0f}"),
         ("Min tail ESS (across parameters)", f"{diagnostics['ess_tail_min']:.0f}"),
+    ] + _mirror_check_rows(diagnostics)
+    return "<h2>Diagnostics</h2>\n" + verdict_box_html(
+        diagnostics["verdict"], diagnostics["reasons"], rows
+    )
+
+
+# ---------------------------------------------------------------------------
+# Output modules
+# ---------------------------------------------------------------------------
+
+
+def _render_module(module: OutputModule, results: Any) -> str:
+    data = module.compute(results)
+    figs = module.figures(data, results)
+    caption = module.caption(data, results) if module.caption is not None else None
+    if list(figs) == [module.name]:
+        uri = _fig_to_data_uri(figs[module.name], dpi=module.dpi)
+        block = _figure_block(module.figure_title, uri, caption)
+        return f"<h2>{_esc(module.heading)}</h2>\n{block}"
+    blocks = [
+        _figure_block(module.figure_label(key), _fig_to_data_uri(fig, dpi=module.dpi))
+        for key, fig in figs.items()
     ]
-    rows_html = "\n".join(f"<tr><td>{_esc(k)}</td><td>{_esc(v)}</td></tr>" for k, v in rows)
-
-    return (
-        "<h2>Diagnostics</h2>\n"
-        f'<div class="verdict-box" style="background:{bg};border-color:{border};">\n'
-        f'<span class="verdict-label" style="color:{border};">Verdict: {_esc(verdict)}</span>\n'
-        f'<div class="reasons"><ul>{reasons_html}</ul></div>\n'
-        f'<table class="meta-table">{rows_html}</table>\n'
-        "</div>"
-    )
-
-
-# ---------------------------------------------------------------------------
-# §3.1-3.4 figures
-# ---------------------------------------------------------------------------
-
-
-def _render_trend_cycle_section(lw_run: LWRun) -> str:
-    from macrotoolkit.plots import plot_trend_cycle
-    from macrotoolkit.results_lw import compute_trend_cycle_draws
-
-    tcd = compute_trend_cycle_draws(lw_run)
-    fig = plot_trend_cycle(tcd, lw_run)
-    uri = _fig_to_data_uri(fig, dpi=100)
-    vol_caption = (
-        "Includes the shock volatility panel (exp(h/2)) -- this is an SV run (sv_shocks: [is, pc])."
-        if lw_run.sv_on
-        else "No volatility panel -- this is a no-SV run (sv_shocks: []); constant IS/PC shock variances."
-    )
-    block = _figure_block("Trend-cycle decomposition (spec §3.1)", uri, vol_caption)
-    return f"<h2>3.1 Trend-cycle plots</h2>\n{block}"
-
-
-def _render_irf_section(lw_run: LWRun) -> str:
-    from macrotoolkit.plots import plot_irf_matrix
-    from macrotoolkit.results_lw import compute_irf_draws
-
-    irf = compute_irf_draws(lw_run)
-    fig = plot_irf_matrix(irf, lw_run.spec.outputs.irf_vol_reference)
-    uri = _fig_to_data_uri(fig, dpi=90)
-    block = _figure_block(
-        "IRF matrix (spec §3.2)",
-        uri,
-        f"5 shocks x 5 responses, horizon={irf.horizon} quarters, "
-        f"irf_vol_reference={lw_run.spec.outputs.irf_vol_reference!r}.",
-    )
-    return f"<h2>3.2 IRF matrix</h2>\n{block}"
-
-
-def _render_fan_section(lw_run: LWRun) -> str:
-    from macrotoolkit.plots import plot_fan_charts
-    from macrotoolkit.results_lw import compute_fan_draws
-
-    fans = compute_fan_draws(lw_run)
-    figs = plot_fan_charts(fans, lw_run.spec.outputs.forecast_r_rule)
-    order = ["y_level", "y_growth_4q", "pi", "gap", "rstar"]
-    blocks = []
-    for key in order:
-        uri = _fig_to_data_uri(figs[key], dpi=100)
-        blocks.append(_figure_block(f"Fan chart: {key}", uri))
     grid = f'<div class="fig-grid">{"".join(blocks)}</div>'
-    caption = (
-        f"Horizon={fans.horizon} quarters, forecast_r_rule={lw_run.spec.outputs.forecast_r_rule!r} "
-        f"(also printed on each chart)."
-    )
-    return f"<h2>3.3 Fan charts</h2>\n<p class=\"caption\">{_esc(caption)}</p>\n{grid}"
-
-
-def _render_prior_predictive_section(lw_run: LWRun) -> str:
-    from macrotoolkit.plots import plot_prior_predictive
-    from macrotoolkit.results_lw import compute_prior_predictive_draws
-
-    ppd = compute_prior_predictive_draws(lw_run)
-    fig = plot_prior_predictive(ppd)
-    uri = _fig_to_data_uri(fig, dpi=100)
-    block = _figure_block(
-        "Prior-predictive check (spec §4)",
-        uri,
-        f"{ppd.n_draws} full observable paths simulated from the run's own "
-        f"resolved priors (defaults + spec overrides) through the same "
-        f"matrices/engine the run used -- 'what do my priors imply about "
-        f"observable paths', S5-decisions item 7. Needs no posterior draws.",
-    )
-    # Grouped with the diagnostics block (spec §4 lists the prior-
-    # predictive figure among the per-run diagnostics, and §3.5's report
-    # layout numbers only §3.1-3.4 as output sections -- numerics-reviewer
-    # ordering fix, 2026-09-02).
-    return f"<h2>Diagnostics: prior-predictive check (spec §4)</h2>\n{block}"
-
-
-def _render_hd_section(lw_run: LWRun) -> str:
-    from macrotoolkit.plots import plot_historical_decomposition
-    from macrotoolkit.results_lw import compute_historical_decomposition_draws
-
-    hdd = compute_historical_decomposition_draws(lw_run)
-    figs = plot_historical_decomposition(hdd)
-    order = ["gap", "pi", "y_growth_4q", "y_level"]
-    blocks = []
-    for key in order:
-        uri = _fig_to_data_uri(figs[key], dpi=100)
-        blocks.append(_figure_block(f"Historical decomposition: {key}", uri))
-    grid = f'<div class="fig-grid">{"".join(blocks)}</div>'
-    return f"<h2>3.4 Historical decomposition</h2>\n{grid}"
+    cap_html = f'<p class="caption">{_esc(caption)}</p>\n' if caption else ""
+    return f"<h2>{_esc(module.heading)}</h2>\n{cap_html}{grid}"
 
 
 # ---------------------------------------------------------------------------
@@ -284,14 +243,11 @@ def _scalar_param_names(posterior) -> list[str]:
     every ``data_vars`` entry whose only dims are ``('chain', 'draw')``,
     i.e. no extra per-index dimension. Determined by inspecting the actual
     posterior's own dims (never guessed/hardcoded): for an SV run this
-    excludes the length-T vector parameters ``h_is``/``h_pc``/``nu_is``/
-    ``nu_pc`` (and includes the scalar non-centered SV parameters
-    ``h0_is_raw``/``h0_pc_raw``/``sigma_h_is``/``sigma_h_pc``); for a no-SV
-    run every parameter (``a1, a2, a_r, b_pi, b_y, sigma_ystar, sigma_g,
-    sigma_z, sigma_is, sigma_pc``) is scalar. A v1 parameter table reports
-    scalars only -- per-element rows for a length-T vector parameter would
-    make the table useless as a "read this at a glance" artifact; that is
-    what the trend-cycle/volatility plot is for.
+    excludes the length-T vector parameters (h paths, nu innovations) and
+    includes the scalar non-centered SV parameters; for a no-SV run every
+    parameter is scalar. A v1 parameter table reports scalars only --
+    per-element rows for a length-T vector parameter would make the table
+    useless as a "read this at a glance" artifact.
     """
     names = []
     for name in sorted(posterior.data_vars):
@@ -300,25 +256,24 @@ def _scalar_param_names(posterior) -> list[str]:
     return names
 
 
-def _param_table_rows(lw_run: LWRun) -> list[dict]:
+def param_table_rows(idata) -> list[dict]:
     """Posterior median, 90% CI (5th/95th percentile), R-hat, bulk/tail ESS
     for every scalar parameter (:func:`_scalar_param_names`) -- computed
-    directly from ``lw_run.idata.posterior`` (ArviZ) via ``numpy``/``arviz``,
-    not read off ``diagnostics.json`` (which stores a worst-case reduction
-    over any vector dims; scalar-only here, computed fresh)."""
+    directly from the ArviZ posterior via ``numpy``/``arviz``, not read off
+    ``diagnostics.json`` (which stores a worst-case reduction over any
+    vector dims). Shared by the report and ``Run.param_table()``."""
     import arviz as az
 
-    posterior = lw_run.idata.posterior
+    posterior = idata.posterior
     names = _scalar_param_names(posterior)
     if not names:
         raise ValueError(
-            f"Run {lw_run.run_dir} has no scalar (chain,draw)-only posterior "
-            f"variables -- cannot build a parameter table. Available "
-            f"variables: {sorted(posterior.data_vars)}."
+            f"Posterior has no scalar (chain,draw)-only variables -- cannot "
+            f"build a parameter table. Available variables: {sorted(posterior.data_vars)}."
         )
-    rhat_ds = az.rhat(lw_run.idata, var_names=names)
-    ess_bulk_ds = az.ess(lw_run.idata, var_names=names, method="bulk")
-    ess_tail_ds = az.ess(lw_run.idata, var_names=names, method="tail")
+    rhat_ds = az.rhat(idata, var_names=names)
+    ess_bulk_ds = az.ess(idata, var_names=names, method="bulk")
+    ess_tail_ds = az.ess(idata, var_names=names, method="tail")
 
     rows = []
     for name in names:
@@ -339,8 +294,13 @@ def _param_table_rows(lw_run: LWRun) -> list[dict]:
     return rows
 
 
-def _render_param_table(lw_run: LWRun) -> str:
-    rows = _param_table_rows(lw_run)
+def _param_table_rows(results: Any) -> list[dict]:
+    """Backward-compatible alias over the results object."""
+    return param_table_rows(results.idata)
+
+
+def _render_param_table(results: Any) -> str:
+    rows = param_table_rows(results.idata)
     header = (
         "<tr><th>Parameter</th><th>Median</th><th>90% CI low (5%)</th>"
         "<th>90% CI high (95%)</th><th>R-hat</th><th>ESS bulk</th><th>ESS tail</th></tr>"
@@ -352,10 +312,9 @@ def _render_param_table(lw_run: LWRun) -> str:
         for r in rows
     )
     caption = (
-        "Scalar (time-invariant) parameters only -- vector-valued SV path "
-        "parameters (h_is, h_pc, nu_is, nu_pc for an SV run) are omitted "
-        "from this table; see the trend-cycle volatility panel above for "
-        "those."
+        "Scalar (time-invariant) parameters only -- vector-valued path "
+        "parameters (e.g. an SV run's h and nu vectors) are omitted from "
+        "this table; see the trend-cycle volatility panel above for those."
     )
     return (
         "<h2>Parameter table</h2>\n"
@@ -370,13 +329,11 @@ def _render_param_table(lw_run: LWRun) -> str:
 
 
 def render_report(run_dir: str | Path) -> str:
-    """Render a completed ``lw_sv`` run's full ``report.html`` document
-    (spec §3.5) as a string. Pure with respect to ``run_dir``: reads
-    ``run_dir``'s own already-written artifacts (``spec.yaml``,
-    ``data.snapshot.csv``, ``draws.nc`` via :func:`macrotoolkit.results_lw.
-    load_lw_run`, plus ``diagnostics.json`` directly) but never writes
-    anything -- see :func:`write_report` for the filesystem-writing wrapper.
-    """
+    """Render a completed run's full ``report.html`` document (spec §3.5)
+    as a string, for any family declaring ``results_loader`` +
+    ``output_modules``. Pure with respect to ``run_dir``: reads its
+    already-written artifacts but never writes anything -- see
+    :func:`write_report` for the filesystem-writing wrapper."""
     run_dir = Path(run_dir)
     diagnostics_path = run_dir / "diagnostics.json"
     if not diagnostics_path.is_file():
@@ -387,25 +344,32 @@ def render_report(run_dir: str | Path) -> str:
         )
     diagnostics = json.loads(diagnostics_path.read_text())
 
-    lw_run = load_lw_run(run_dir)
+    spec = load_run_spec(run_dir)
+    entry = get_family(spec.model.family)
+    loader = entry.resolve("results_loader")
+    modules = entry.resolve("output_modules")
+    if loader is None or modules is None:
+        raise NotImplementedError(
+            f"Family {spec.model.family!r} declares no results_loader/"
+            f"output_modules capabilities in FAMILY_REGISTRY (specs/schema) "
+            f"-- it has no report support yet."
+        )
+    results = loader(run_dir)
     run_hash = run_dir.name
 
     sections = [
-        _render_header(lw_run, run_hash),
+        _render_header(results, run_hash),
         _render_diagnostics(diagnostics),
-        _render_prior_predictive_section(lw_run),
-        _render_trend_cycle_section(lw_run),
-        _render_irf_section(lw_run),
-        _render_fan_section(lw_run),
-        _render_hd_section(lw_run),
-        _render_param_table(lw_run),
+        *[_render_module(m, results) for m in modules],
+        _render_param_table(results),
     ]
     body = "\n".join(sections)
+    title = f"{_family_title(spec.model.family)} report -- {run_hash}"
 
     return (
         "<!DOCTYPE html>\n"
         '<html lang="en">\n<head>\n<meta charset="utf-8">\n'
-        f"<title>LW-SV report -- {_esc(run_hash)}</title>\n"
+        f"<title>{_esc(title)}</title>\n"
         f"<style>{_CSS}</style>\n</head>\n<body>\n{body}\n</body>\n</html>\n"
     )
 
@@ -413,10 +377,9 @@ def render_report(run_dir: str | Path) -> str:
 def write_report(run_dir: str | Path) -> Path:
     """Render (:func:`render_report`) and write ``run_dir / "report.html"``.
     Returns the written path. Safe to call on an already-``_SUCCESS``-marked
-    run directory (see module docstring: ``report.html`` is a derived,
-    regenerable view, not a sampling artifact covered by ``run.py``'s
-    immutability doctrine) -- overwrites any previous ``report.html`` in
-    place, since a report is not itself part of run identity."""
+    run directory (see module docstring) -- overwrites any previous
+    ``report.html`` in place, since a report is not itself part of run
+    identity."""
     run_dir = Path(run_dir)
     html_text = render_report(run_dir)
     out_path = run_dir / "report.html"

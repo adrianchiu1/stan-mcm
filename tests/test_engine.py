@@ -192,3 +192,39 @@ def test_exog_rules() -> None:
     assert rule_lin.resolve(xi) == pytest.approx(0.75)
     with pytest.raises(KeyError):
         StateLinearExogRule(LW_STATE_META, {("g", 0): 1.0})
+
+
+def test_constant_state_noise_reproduces_the_pre_s6_state_draw() -> None:
+    """S6: ``simulate_forward``'s default state noise is
+    ``ConstantStateNoise(Q)``, whose draw is exactly the pre-S6
+    ``_psd_sqrt(Q) @ rng.standard_normal(n)`` -- same factor, same RNG
+    consumption -- so seeded fan streams are unchanged. And the SV state
+    noise model builds innovations from the declared loadings with the
+    log-variance random walk continued per shock (h is log-VARIANCE)."""
+    from macrotoolkit.engine import ConstantStateNoise, RandomWalkLogVarianceStateNoise
+    from macrotoolkit.smoother import _psd_sqrt
+
+    p = _PARAMS
+    F, Q, A, Z, R = build_lw_matrices(p, c=1.0)
+    rng_a = np.random.default_rng(7)
+    rng_b = np.random.default_rng(7)
+    noise = ConstantStateNoise(Q)
+    sqrt_Q = _psd_sqrt(Q)
+    for _ in range(5):
+        np.testing.assert_array_equal(noise.step(rng_a), sqrt_Q @ rng_b.standard_normal(Q.shape[0]))
+
+    sv = RandomWalkLogVarianceStateNoise(
+        LW_STATE_META, {"z": 2.0 * np.log(0.3)}, {"z": 0.1}, constant_sds={"ystar": 0.5, "g": 0.05}
+    )
+    rng_a = np.random.default_rng(11)
+    rng_b = np.random.default_rng(11)
+    h = 2.0 * np.log(0.3)
+    w = sv.step(rng_a)
+    expected = np.zeros(7)
+    expected += LW_STATE_META.injection_vector("ystar") * rng_b.normal(0.0, 0.5)
+    expected += LW_STATE_META.injection_vector("g") * rng_b.normal(0.0, 0.05)
+    h = h + 0.1 * rng_b.standard_normal()
+    expected += LW_STATE_META.injection_vector("z") * rng_b.normal(0.0, np.exp(h / 2.0))
+    np.testing.assert_array_equal(w, expected)
+    with pytest.raises(ValueError, match="neither an SV path nor a constant sd"):
+        RandomWalkLogVarianceStateNoise(LW_STATE_META, {"z": 0.0}, {"z": 0.1})
