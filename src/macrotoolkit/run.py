@@ -56,6 +56,7 @@ from specs.schema import get_family
 from specs.schema.base import RunSpec, SamplerSpec, load_spec
 
 from macrotoolkit.data import load_data
+from macrotoolkit.qc import MirrorCheckError, run_mirror_check
 # Re-exported from the family module (S5-decisions item 4 moved it there);
 # kept importable from here for existing callers/tests.
 from macrotoolkit.families.lw_sv import lw_mu_h0_anchors  # noqa: F401
@@ -328,6 +329,7 @@ def run_spec(
 
     run_dir.mkdir(parents=True)
     log_path = run_dir / "log.txt"
+    remove_run_dir = False
 
     logger = logging.getLogger(f"macrotoolkit.run.{run_id}")
     logger.setLevel(logging.INFO)
@@ -360,6 +362,13 @@ def run_spec(
         logger.info("Compiled model executable: %s", model.exe_file)
 
         stan_data = build_stan_data(spec.model.family, df)
+
+        # Automatic Stan-vs-Python KF mirror check (S6 WP3) at prior draws
+        # of the EXACT rendered program, before any sampling; fails loudly
+        # past the G1 gate and leaves no partial run directory behind.
+        mirror_record = run_mirror_check(spec, stan_data, model, family.resolve("mirror"))
+        logger.info("Mirror check: %s", mirror_record)
+
         logger.info(
             "Sampling: chains=%d warmup=%d sampling=%d adapt_delta=%s max_treedepth=%d seed=%d",
             spec.sampler.chains,
@@ -387,6 +396,7 @@ def run_spec(
         logger.info("Wrote %s", draws_path)
 
         diagnostics = compute_diagnostics(idata, spec.sampler)
+        diagnostics["mirror_check"] = mirror_record
         (run_dir / "diagnostics.json").write_text(json.dumps(diagnostics, indent=2, sort_keys=True))
         logger.info("Diagnostics verdict: %s (reasons: %s)", diagnostics["verdict"], diagnostics["reasons"])
 
@@ -394,10 +404,17 @@ def run_spec(
         logger.info("Run complete: %s", run_dir)
 
         return RunResult(run_id=run_id, run_dir=run_dir, is_new=True, verdict=diagnostics["verdict"])
-    except Exception:
+    except Exception as exc:
         logger.exception("Run failed")
+        remove_run_dir = isinstance(exc, MirrorCheckError)
         raise
     finally:
         logger.removeHandler(file_handler)
         cmdstanpy_logger.removeHandler(file_handler)
         file_handler.close()
+        if remove_run_dir:
+            # A failed mirror check means the model is not trusted and
+            # nothing was sampled: leave no partial run directory behind
+            # (the run store's "no _SUCCESS" guard is for crashes, not for
+            # a QC rejection).
+            shutil.rmtree(run_dir, ignore_errors=True)

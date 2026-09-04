@@ -28,6 +28,7 @@ from pydantic import BaseModel
 
 from specs.schema.local_level import LocalLevelOptions
 from specs.schema.lw_sv import LwSvOptions, LwSvOutputs
+from specs.schema.ucsv import UcsvOptions, UcsvOutputs
 
 
 @dataclass(frozen=True)
@@ -165,7 +166,29 @@ FAMILY_REGISTRY: dict[str, FamilyEntry] = {
         prior_sd_table="macrotoolkit.families.lw_sv:prior_scalar_sds",
         headline_series="macrotoolkit.families.lw_sv:headline_series",
         output_modules="macrotoolkit.outputs_lw:OUTPUT_MODULES",
+        mirror="macrotoolkit.families.lw_sv:MIRROR",
+        validation_suite="macrotoolkit.families.lw_sv_validation:VALIDATION_SUITE",
         display_name="LW-SV",
+    ),
+    # Family #2 (S6 WP2): Stock-Watson UCSV -- template + schema fragment +
+    # numerics module + this entry; results/plots are thin declarations
+    # over the generic results core and engine.
+    "ucsv": FamilyEntry(
+        options_model=UcsvOptions,
+        template="ucsv.stan.j2",
+        required_mapping=("pi",),
+        outputs_model=UcsvOutputs,
+        build_stan_data="macrotoolkit.families.ucsv:build_stan_data",
+        build_render_context="macrotoolkit.families.ucsv:build_render_context",
+        state_meta="macrotoolkit.families.ucsv:UCSV_STATE_META",
+        results_loader="macrotoolkit.results_ucsv:load_ucsv_run",
+        report_writer="macrotoolkit.report:write_report",
+        prior_sd_table="macrotoolkit.families.ucsv:prior_scalar_sds",
+        headline_series="macrotoolkit.families.ucsv:headline_series",
+        output_modules="macrotoolkit.outputs_ucsv:OUTPUT_MODULES",
+        mirror="macrotoolkit.families.ucsv:MIRROR",
+        validation_suite="macrotoolkit.families.ucsv_validation:VALIDATION_SUITE",
+        display_name="UCSV",
     ),
 }
 

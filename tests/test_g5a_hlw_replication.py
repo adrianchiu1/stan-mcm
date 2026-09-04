@@ -43,6 +43,8 @@ from macrotoolkit.smoother import (
     kalman_smoother,
 )
 
+pytestmark = pytest.mark.lw_sv
+
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "hlw" / "derived" / "us_2017_reproduction"
 
 LOGLIK_TOL = 1e-8

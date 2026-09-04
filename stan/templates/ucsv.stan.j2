@@ -1,0 +1,108 @@
+// ucsv.stan -- Stock-Watson unobserved-components trend inflation with
+// stochastic volatility, rendered from ucsv.stan.j2 (S6, family #2;
+// specs/schema/ucsv.py, docs/kf-capability-matrix.md).
+//
+//   pi_t  = tau_t + eps_t,        eps_t ~ N(0, exp(h_eps,t))
+//   tau_t = tau_{t-1} + eta_t,    eta_t ~ N(0, exp(h_eta,t))
+//
+// One template, two variants, selected by model.options.sv_shocks:
+// - sv_shocks == [eps, eta] (the family proper, the default): non-centered
+//   log-variance random walks on BOTH shocks (h is log-VARIANCE, sd =
+//   exp(h/2)); the transitory shock's SV enters the KF through R_t, the
+//   TREND shock's SV through Q_t -- the time-varying state-innovation
+//   covariance the S6 KF generalization added (the R_t playbook, S3).
+// - sv_shocks == []: constant scales sigma_eps / sigma_eta.
+//
+// State-space form fed to the shared filter: state n=1 [tau_t], obs m=1
+// [pi_t], NO exogenous block -- x is the empty T x 0 matrix and A the
+// 0 x 1 loading, so A' x_t is identically the zero 1-vector (the same
+// degenerate case the Python engine's empty feedback map declares).
+//
+// Rao-Blackwellized likelihood (spec §2.1): tau is marginalized by the
+// Kalman filter; Stan samples only the SV scales, the non-centered h_0
+// draws, and the SV innovations. kf_loglik is a transformed parameter
+// (S6 WP3): it is the quantity the automatic fit-time Stan-vs-Python
+// mirror check reads, and it is saved with every posterior draw.
+//
+// Priors stamped from specs/schema/ucsv.py DEFAULT_PRIORS + per-run
+// overrides; (xi00, P00) = (pi_1, tau0_sd^2) and the mu_h0 anchors arrive
+// as data (macrotoolkit.families.ucsv.build_stan_data).
+
+functions {
+{% include "functions/kalman_loglik_tv.stan" %}
+{% if sv_shocks %}
+{% include "functions/sv_rw_noncentered.stan" %}
+{% include "functions/sv_scalar_variance_path.stan" %}
+{% endif %}
+}
+
+data {
+  int<lower=2> T;
+  matrix[T, 1] yobs;        // [pi_t]
+  vector[1] xi00;           // initial state mean: tau_0 prior mean (= pi_1)
+  matrix[1, 1] P00;         // initial state covariance: tau0_sd^2
+{% if sv_shocks %}
+  real mu_h0_eps;           // h_eps,0 prior mean (data anchor)
+  real mu_h0_eta;           // h_eta,0 prior mean (data anchor)
+{% endif %}
+}
+
+transformed data {
+  matrix[1, 1] F = [[1]];               // random-walk trend
+  matrix[1, 1] Z = [[1]];               // pi = tau + eps
+  matrix[T, 0] x = rep_matrix(0, T, 0); // no exogenous regressors
+  matrix[0, 1] A = rep_matrix(0, 0, 1);
+}
+
+parameters {
+{% if sv_shocks %}
+  real<lower=0> sigma_h_eps;        // transitory log-variance RW scale
+  real<lower=0> sigma_h_eta;        // trend log-variance RW scale
+  real h0_eps_raw;                  // non-centered: h_0 = mu_h0 + sd * raw
+  real h0_eta_raw;
+  vector[T] nu_eps;                 // non-centered SV innovations
+  vector[T] nu_eta;
+{% else %}
+  real<lower=0> sigma_eps;          // constant transitory shock scale
+  real<lower=0> sigma_eta;          // constant trend shock scale
+{% endif %}
+}
+
+transformed parameters {
+{% if sv_shocks %}
+  // Log-VARIANCE paths (sd = exp(h/2)), the authoritative volatility
+  // paths saved with every draw.
+  vector[T] h_eps = sv_rw_noncentered(
+      mu_h0_eps + {{ priors.mu_h0_eps.sd }} * h0_eps_raw, sigma_h_eps, nu_eps);
+  vector[T] h_eta = sv_rw_noncentered(
+      mu_h0_eta + {{ priors.mu_h0_eta.sd }} * h0_eta_raw, sigma_h_eta, nu_eta);
+  real kf_loglik = kalman_loglik(yobs, x, F,
+                                 sv_scalar_variance_path(h_eta),   // Q_t
+                                 A, Z,
+                                 sv_scalar_variance_path(h_eps),   // R_t
+                                 xi00, P00);
+{% else %}
+  real kf_loglik = kalman_loglik(yobs, x, F,
+                                 [[square(sigma_eta)]],
+                                 A, Z,
+                                 [[square(sigma_eps)]],
+                                 xi00, P00);
+{% endif %}
+}
+
+model {
+{% if sv_shocks %}
+  sigma_h_eps ~ normal(0, {{ priors.sigma_h_eps.sd }});  // Half-N via <lower=0>
+  sigma_h_eta ~ normal(0, {{ priors.sigma_h_eta.sd }});  // Half-N via <lower=0>
+  h0_eps_raw ~ std_normal();         // h_0 ~ N(mu_h0, sd^2), non-centered
+  h0_eta_raw ~ std_normal();
+  nu_eps ~ std_normal();             // non-centered SV innovations
+  nu_eta ~ std_normal();
+{% else %}
+  sigma_eps ~ normal(0, {{ priors.sigma_eps.sd }});      // Half-N via <lower=0>
+  sigma_eta ~ normal(0, {{ priors.sigma_eta.sd }});      // Half-N via <lower=0>
+{% endif %}
+
+  // Marginal likelihood via the Kalman filter.
+  target += kf_loglik;
+}

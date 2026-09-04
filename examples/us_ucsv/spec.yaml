@@ -1,0 +1,24 @@
+# US UCSV example (S6, family #2): Stock-Watson unobserved-components trend
+# inflation with stochastic volatility on BOTH shocks, on US quarterly core
+# PCE inflation (annualized q/q %, 400*dlog P), 1960Q1-2019Q4 -- the
+# pre-COVID reference window. Data derived by make_data.py from the HLW
+# workbook fixture already in the repo (same series examples/us_lw_sv uses
+# as core_pce_ann). No pre-sample lag quarters: every row is estimated.
+model:
+  family: ucsv
+  options:
+    sv_shocks: [eps, eta]
+data:
+  file: data/us_core_pce.csv
+  date_column: date
+  mapping: { pi: core_pce_ann }
+  sample: { start: null, end: "2019Q4" }
+priors: { }              # defaults from specs/schema/ucsv.py
+sampler:
+  chains: 4
+  warmup: 1000
+  sampling: 1000
+  adapt_delta: 0.95
+  max_treedepth: 12
+  seed: 20260813
+outputs: { }

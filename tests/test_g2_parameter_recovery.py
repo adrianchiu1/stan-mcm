@@ -39,6 +39,8 @@ from macrotoolkit.run import build_render_context
 from macrotoolkit.smoother import build_lw_regressors, default_initial_state
 from specs.schema.base import RunSpec
 
+pytestmark = pytest.mark.lw_sv
+
 #: Seed for the 20 true parameter points (distinct from G1's PARAM_SEED so
 #: the two gates don't share draws).
 G2_PARAM_SEED = 20260830

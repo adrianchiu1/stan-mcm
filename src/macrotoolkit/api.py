@@ -61,6 +61,7 @@ __all__ = [
     "report",
     "results",
     "sweep",
+    "validate",
     "stage_dataframe",
     "load_spec",
     "FAMILY_REGISTRY",
@@ -486,3 +487,19 @@ def sweep(
         sw, base, base_dir=base_dir, base_label=base_label,
         runs_root=runs_root, sweeps_root=sweeps_root,
     )
+
+
+# ---------------------------------------------------------------------------
+# validate (S6 WP3)
+# ---------------------------------------------------------------------------
+
+
+def validate(family: str, tier: str = "fast", out_root: str | Path | None = None, *, progress=None):
+    """``mtk validate <family> --tier <tier>``: run the family's registered
+    validation gates (``fast`` | ``recovery`` | ``sbc`` | ``all``) and
+    write ``validation/<family>/report.html``. Returns a
+    :class:`macrotoolkit.validation.suite.ValidationResult` (``verdict``,
+    per-gate ``gates`` with verdict/reasons/metrics, ``report_path``)."""
+    from macrotoolkit.validation.suite import run_validation
+
+    return run_validation(family, tier=tier, out_root=out_root, progress=progress)

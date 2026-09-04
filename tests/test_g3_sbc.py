@@ -83,6 +83,8 @@ from macrotoolkit.run import build_render_context
 from macrotoolkit.smoother import build_lw_regressors
 from specs.schema.base import RunSpec
 
+pytestmark = pytest.mark.lw_sv
+
 CHI2_P_FLOOR = 0.001
 DIVERGENT_TOTAL_LIMIT = 600  # 0.1% of 200 reps x 3000 post-warmup draws
 

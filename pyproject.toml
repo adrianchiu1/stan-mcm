@@ -40,4 +40,7 @@ specs = "specs"
 [tool.pytest.ini_options]
 markers = [
     "slow: slow tests (SBC, HLW replication, etc.) excluded from the fast gate-check suite",
+    "lw_sv: tests specific to the lw_sv family",
+    "ucsv: tests specific to the ucsv family (S6)",
+    "validation: the registered validation-gate tiers driven by mtk validate (S6 WP3)",
 ]

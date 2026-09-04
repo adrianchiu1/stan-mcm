@@ -45,6 +45,8 @@ from g4_harness import (
 )
 from sbc_harness import SbcDesign, run_sbc
 
+pytestmark = pytest.mark.lw_sv
+
 ARTIFACT_DIR = Path(__file__).parent / "artifacts" / "g4_sbc"
 
 
