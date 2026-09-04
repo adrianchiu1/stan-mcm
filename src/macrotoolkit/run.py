@@ -137,18 +137,25 @@ def load_run_spec(run_dir: str | Path) -> RunSpec:
     return RunSpec.model_validate(raw)
 
 
-def build_stan_data(family_name: str, df: pd.DataFrame) -> dict:
+def build_stan_data(family_name: str, df: pd.DataFrame, spec: RunSpec | None = None) -> dict:
     """Map the loaded/mapped DataFrame to the Stan `data` block for a given
     family -- pure registry dispatch (S5-decisions item 4: the former
     if/elif chain moved into each family's own
     `macrotoolkit/families/<family>.py` module, referenced by
-    `FAMILY_REGISTRY`'s dotted paths)."""
+    `FAMILY_REGISTRY`'s dotted paths). A builder whose signature takes a
+    ``spec`` keyword (S7's authored family: the data layout IS the model
+    definition) receives it; the hand families' ``(df)`` builders are
+    called exactly as before."""
+    import inspect
+
     builder = get_family(family_name).resolve("build_stan_data")
     if builder is None:
         raise NotImplementedError(
             f"Family {family_name!r} declares no build_stan_data capability "
             f"in FAMILY_REGISTRY (specs/schema)."
         )
+    if "spec" in inspect.signature(builder).parameters:
+        return builder(df, spec=spec)
     return builder(df)
 
 
@@ -361,7 +368,7 @@ def run_spec(
         model, _ = compile_model(source, cmdstan_version)
         logger.info("Compiled model executable: %s", model.exe_file)
 
-        stan_data = build_stan_data(spec.model.family, df)
+        stan_data = build_stan_data(spec.model.family, df, spec=spec)
 
         # Automatic Stan-vs-Python KF mirror check (S6 WP3) at prior draws
         # of the EXACT rendered program, before any sampling; fails loudly

@@ -98,6 +98,8 @@ def spec(
     conventional value is ``"dataframe.csv"`` so the spec reads the same
     before and after staging.
     """
+    if hasattr(options, "options") and not isinstance(options, Mapping):
+        options = options.options  # an authoring.Model (S7): its validated AuthoredOptions
     raw: dict[str, Any] = {
         "model": {"family": family, "options": dict(options) if isinstance(options, Mapping) else (options if options is not None else {})},
         "data": data if isinstance(data, DataSpec) else dict(data),
@@ -199,10 +201,19 @@ class Outputs:
             )
         return self._modules[name]
 
+    def unavailable_reason(self, name: str) -> str | None:
+        """``None`` when the module applies to this run, else the stated
+        reason it is omitted (S7: e.g. an authored fan chart without
+        forecast rules)."""
+        return self.module(name).unavailable_reason(self._run.results())
+
     def compute(self, name: str) -> Any:
         """The module's data object (per-draw arrays etc.), computed once
         and cached on this handle."""
         if name not in self._data:
+            reason = self.unavailable_reason(name)
+            if reason is not None:
+                raise ValueError(f"Output module {name!r} is not available for this run: {reason}")
             self._data[name] = self.module(name).compute(self._run.results())
         return self._data[name]
 
@@ -220,6 +231,7 @@ class Outputs:
         return {
             name: mod.figures(self.compute(name), self._run.results())
             for name, mod in self._modules.items()
+            if self.unavailable_reason(name) is None
         }
 
 
@@ -494,12 +506,27 @@ def sweep(
 # ---------------------------------------------------------------------------
 
 
-def validate(family: str, tier: str = "fast", out_root: str | Path | None = None, *, progress=None):
-    """``mtk validate <family> --tier <tier>``: run the family's registered
+def validate(family: "str | Path | RunSpec", tier: str = "fast", out_root: str | Path | None = None, *, progress=None, data: pd.DataFrame | None = None):
+    """``mtk validate <family|spec.yaml> --tier <tier>``: run the registered
     validation gates (``fast`` | ``recovery`` | ``sbc`` | ``all``) and
-    write ``validation/<family>/report.html``. Returns a
+    write ``validation/<name>/report.html``. ``family`` is a registered
+    family name, or -- S7 -- an AUTHORED spec (a ``RunSpec`` or a spec
+    YAML path; ``data`` may stand in for its ``data.file``), whose fast
+    tier is auto-instantiated from the model definition. Returns a
     :class:`macrotoolkit.validation.suite.ValidationResult` (``verdict``,
     per-gate ``gates`` with verdict/reasons/metrics, ``report_path``)."""
-    from macrotoolkit.validation.suite import run_validation
+    from macrotoolkit.validation.suite import run_validation, run_validation_suite
 
+    if isinstance(family, RunSpec) or (isinstance(family, (str, Path)) and str(family).endswith((".yaml", ".yml"))):
+        from macrotoolkit.authoring.validation import suite_for
+
+        spec_obj = family if isinstance(family, RunSpec) else load_spec(str(family))
+        if spec_obj.model.family != "authored":
+            raise ValueError(
+                f"validate: the spec's family is {spec_obj.model.family!r} (a registered family); pass the family "
+                f"name instead -- a spec path auto-instantiates gates for AUTHORED models only."
+            )
+        base_dir = None if isinstance(family, RunSpec) else Path(family).resolve().parent
+        suite = suite_for(spec_obj, base_dir=base_dir, data=data)
+        return run_validation_suite(suite, tier=tier, out_root=out_root, progress=progress)
     return run_validation(family, tier=tier, out_root=out_root, progress=progress)

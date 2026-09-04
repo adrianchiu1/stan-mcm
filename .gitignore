@@ -2,6 +2,9 @@ runs/
 # sweep comparison reports (mtk sweep, S5-decisions item 9) -- derived,
 # regenerable views over the (gitignored) run store.
 sweeps/
+# validation reports (mtk validate, S6 WP3 / S7 authored suites) -- derived,
+# regenerable; the durable record is DECISIONS.md.
+validation/
 __pycache__/
 *.py[cod]
 *.egg-info/
