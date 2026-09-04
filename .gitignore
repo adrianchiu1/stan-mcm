@@ -1,4 +1,7 @@
 runs/
+# sweep comparison reports (mtk sweep, S5-decisions item 9) -- derived,
+# regenerable views over the (gitignored) run store.
+sweeps/
 __pycache__/
 *.py[cod]
 *.egg-info/

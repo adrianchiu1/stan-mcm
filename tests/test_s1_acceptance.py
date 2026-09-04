@@ -43,7 +43,7 @@ import pytest
 
 from macrotoolkit.run import run
 
-REQUIRED_ARTIFACTS = ("spec.yaml", "data.snapshot.csv", "draws.nc", "diagnostics.json", "log.txt", "_SUCCESS")
+REQUIRED_ARTIFACTS = ("spec.yaml", "outputs.yaml", "data.snapshot.csv", "draws.nc", "diagnostics.json", "log.txt", "_SUCCESS")
 
 
 @pytest.fixture(scope="module")

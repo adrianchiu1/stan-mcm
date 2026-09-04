@@ -86,7 +86,14 @@ from matplotlib.figure import Figure
 from macrotoolkit.results_lw import GAP_BARS, IRF_RESPONSES, IRF_SHOCKS, PI_BARS
 
 if TYPE_CHECKING:
-    from macrotoolkit.results_lw import FanDraws, HDDrawsAggregated, IRFDraws, LWRun, TrendCycleDraws
+    from macrotoolkit.results_lw import (
+        FanDraws,
+        HDDrawsAggregated,
+        IRFDraws,
+        LWRun,
+        PriorPredictiveDraws,
+        TrendCycleDraws,
+    )
 
 # ---------------------------------------------------------------------------
 # Shared constants
@@ -443,3 +450,64 @@ def plot_historical_decomposition(hdd: "HDDrawsAggregated") -> dict[str, Figure]
     figs["y_level"] = _hd_chart(dates, y_medians, y_order, "Output level (y): historical decomposition (posterior median)")
 
     return figs
+
+
+# ---------------------------------------------------------------------------
+# spec §4 -- Prior-predictive check (S5-decisions item 7)
+# ---------------------------------------------------------------------------
+
+_FIGSIZE_PRIOR_PRED = (10.0, 6.5)
+_N_SPAGHETTI = 8  # individual prior paths drawn faintly over the bands
+
+
+def plot_prior_predictive(ppd: "PriorPredictiveDraws") -> Figure:
+    """Spec §4's prior-predictive check figure: gap and inflation paths
+    simulated from the run's own RESOLVED priors (defaults + overrides --
+    the exact config the template stamped), with the real inflation series
+    overlaid for scale. In a framework whose priors deliberately do
+    identification work (the sigma_g/sigma_z pile-up controls), "what do
+    my priors imply about observable paths" is core functionality, not a
+    nicety (plans/S5-decisions.md item 7).
+
+    Median + 68/90% pointwise bands across the prior draws (house
+    convention), plus a few faint individual paths so the reader sees what
+    single prior draws look like, not just the envelope. The figure states
+    its own conventions (ENGINEERING.md: "figures state their conventions
+    on the figure").
+    """
+    fig, axes = plt.subplots(2, 1, figsize=_FIGSIZE_PRIOR_PRED, sharex=True)
+    dates = ppd.dates
+    n_spag = min(_N_SPAGHETTI, ppd.n_draws)
+
+    ax = axes[0]
+    _plot_band(ax, dates, ppd.gap, "tab:orange", "prior gap")
+    for j in range(n_spag):
+        ax.plot(dates, ppd.gap[j], color="tab:orange", alpha=0.25, linewidth=0.6)
+    ax.axhline(0.0, color=_ZERO_COLOR, linewidth=1.0, linestyle="--")
+    ax.set_title("Output gap paths implied by the prior")
+    ax.legend(loc="upper left", fontsize=8)
+
+    ax = axes[1]
+    _plot_band(ax, dates, ppd.pi, "tab:purple", "prior inflation")
+    for j in range(n_spag):
+        ax.plot(dates, ppd.pi[j], color="tab:purple", alpha=0.25, linewidth=0.6)
+    ax.plot(dates, ppd.pi_actual, color=_DATA_COLOR, linewidth=1.2, label="inflation (data)")
+    ax.set_title("Inflation paths implied by the prior (real data overlaid)")
+    ax.legend(loc="upper left", fontsize=8, ncol=2)
+    ax.set_xlabel("Date")
+
+    fig.suptitle(
+        f"Prior-predictive check (spec §4): {ppd.n_draws} paths from the run's resolved priors",
+        fontsize=13,
+    )
+    fig.text(
+        0.01,
+        0.005,
+        "Convention: parameters ~ the run's own resolved priors (defaults + spec overrides, template "
+        "truncations respected); initial states ~ the run's (xi00, P00) prior; real r series supplied "
+        "as the exogenous input; endogenous y/pi feedback closed through the declared feedback map.",
+        fontsize=6.5,
+        color="0.35",
+    )
+    fig.tight_layout(rect=(0.0, 0.02, 1.0, 0.96))
+    return fig

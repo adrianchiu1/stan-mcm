@@ -102,11 +102,13 @@ PARAM_NAMES = (
 #: 0.112^2)) while putting the stationarity boundary 4 sigma out, so the
 #: exact prior is simulable in float64 with NO rejection filtering. Applied
 #: identically to the fit (via the production `priors:` override path) and
-#: to `draw_exact_prior` below.
-SBC_PRIOR_OVERRIDES: dict[str, dict] = {
-    "a1": {"mu": 0.8, "sd": 0.1},
-    "a2": {"mu": -0.25, "sd": 0.05},
-}
+#: to `draw_exact_prior` below. Since S4.5 this is the family's documented,
+#: reusable SBC prior config (S5-decisions item 6) -- shared with G4 and
+#: any future SBC design -- re-exported here so G3's recorded 2026-08-31
+#: pass keeps its exact historical interface.
+from macrotoolkit.families.lw_sv import SBC_STATIONARITY_PRIOR_CONFIG
+
+SBC_PRIOR_OVERRIDES: dict[str, dict] = SBC_STATIONARITY_PRIOR_CONFIG
 
 #: The full prior G3 samples and fits: production defaults + the override.
 SBC_PRIORS: dict[str, dict] = {

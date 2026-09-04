@@ -20,32 +20,31 @@ Four pieces, kept separable in this file:
   ``gap_pi_shock_decomposition``, ``y_level_decomposition``,
   ``historical_decomposition_draw``): per single simulation-smoother draw,
   propagates each of the 5 structural shocks (eps_ystar, eps_g, eps_z,
-  eps_is, eps_pc) through the model's OWN linear recursions (the state
-  transition for the 3 process shocks; gap's own AR(2) IS-curve feedback and
-  pi's own Phillips-curve feedback for eps_is/eps_pc, spec §3.4) so that
-  every one of the 5 shocks -- including the two measurement shocks -- gets
-  an economically sensible, persistent contribution rather than a same-
-  period-only residual. Aggregation across draws (e.g. posterior-median
+  eps_is, eps_pc) through the model's OWN linear recursions -- since
+  S5-decisions item 1, via the ONE generic engine
+  (``macrotoolkit.engine``): the state transition for the 3 process shocks
+  (``propagate_state_shock`` at the family's declared loadings), and the
+  measurement equation with feedback-map-driven endogenous lags for every
+  bar's observable path (``observable_recursion``) -- so every one of the
+  5 shocks, including the two measurement shocks, gets an economically
+  sensible, persistent contribution rather than a same-period-only
+  residual (spec §3.4). Aggregation across draws (e.g. posterior-median
   contributions for the stacked-bar chart) is the caller's job.
 - **Part C -- IRF matrix** (``impulse_response_for_shock``,
   ``irf_shock_size``, ``compute_irf_draws``, spec §3.2): a theoretical
-  impulse response is a historical decomposition with no real data, no
-  "init" contribution (there is no prior/smoothed belief to carry -- gap/pi
-  start entirely at rest), and a synthetic one-off impulse instead of a
-  recovered shock path -- so this reuses Part B's own machinery (the
-  ``_propagate_shock_through_F`` state-propagation helper for the 3 trend
-  shocks, ``gap_pi_shock_decomposition``'s AR-recursion arithmetic for
-  gap/pi) rather than reimplementing it.
+  impulse response is exactly one Part-B bar with no real data and a
+  synthetic one-off impulse instead of a recovered shock path -- the same
+  two engine calls, from rest.
 - **Part D -- fan charts** (``simulate_fan_draw``, ``compute_fan_draws``,
-  spec §3.3): genuinely new STOCHASTIC forward simulation (fresh process/
-  measurement noise every period, including -- for an SV run -- continuing
-  the SV log-variance random walks forward, spec §3.3's "widening bands are
-  the point"), seeded from a draw's own terminal smoother state and the
-  REAL last few periods' gap/pi/rate-gap lag registers (not zero -- unlike
-  Part C's from-rest IRF). Reuses the same per-period IS-curve/Phillips-
-  curve arithmetic as Part B/C (factored into ``_fan_forecast_step``), just
-  combined into one stochastic realization per draw rather than a
-  shock-by-shock decomposition.
+  spec §3.3): STOCHASTIC forward simulation (fresh process/measurement
+  noise every period, including -- for an SV run -- continuing the SV
+  log-variance random walks forward, spec §3.3's "widening bands are the
+  point"), seeded from a draw's own terminal smoother state and the REAL
+  last few periods' lag registers (not zero -- unlike Part C's from-rest
+  IRF). Since item 1 this is the engine's ``simulate_forward`` (same
+  measurement-equation arithmetic, plus per-period noise and a declared
+  exogenous forecast rule for r), with ``simulate_fan_draw`` reduced to a
+  seed-translating wrapper.
 
 Numerical conventions this module inherits from ``macrotoolkit.smoother``
 (lw-sv-spec.md §1.1/§1.3/§1.5, enforced there by
@@ -73,7 +72,42 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from specs.schema.base import RunSpec, load_spec
+from macrotoolkit.engine import (
+    ConstantExogRule,
+    ConstantMeasurementNoise,
+    DataPathExogRule,
+    RandomWalkLogVarianceNoise,
+    StateLinearExogRule,
+    observable_recursion,
+    propagate_state_shock,
+    simulate_forward,
+)
+from macrotoolkit.families.lw_sv import (
+    LW_STATE_META,
+    NEUTRAL_R_RULE_TERMS,
+    require_c_is_one,
+    structural_coefficients,
+)
+from specs.schema.base import RunSpec
+
+# Alias kept because the state-side propagation moved verbatim into the
+# generic engine (S5-decisions item 1) -- identical float operations.
+_propagate_shock_through_F = propagate_state_shock
+
+# Named state-slot indices (S5-decisions item 2): the ONE source of the
+# lw_sv slot layout is macrotoolkit.families.lw_sv.LW_STATE_META (pinned
+# against build_lw_matrices by tests/test_state_metadata.py); this module
+# only ever addresses the state through these named lookups. The (name,
+# offset) labels carry the state's own timing convention explicitly --
+# e.g. ("g", -1) IS the "slot 3 holds g lagged one period" fact both S4
+# fan-chart bugs tripped over when it lived only in comments.
+_S_YSTAR = LW_STATE_META.slot("ystar", 0)
+_S_YSTAR_M1 = LW_STATE_META.slot("ystar", -1)
+_S_YSTAR_M2 = LW_STATE_META.slot("ystar", -2)
+_S_G_M1 = LW_STATE_META.slot("g", -1)
+_S_G_M2 = LW_STATE_META.slot("g", -2)
+_S_Z_M1 = LW_STATE_META.slot("z", -1)
+_S_Z_M2 = LW_STATE_META.slot("z", -2)
 
 # ---------------------------------------------------------------------------
 # Part A: loading a completed run + trend-cycle series (spec §3.1)
@@ -196,7 +230,9 @@ def load_lw_run(run_dir: str | Path) -> LWRun:
             f"completed run directory."
         )
 
-    spec = load_spec(str(spec_path))
+    from macrotoolkit.run import load_run_spec
+
+    spec = load_run_spec(run_dir)
     if spec.model.family != "lw_sv":
         raise ValueError(
             f"results_lw.load_lw_run only supports model.family 'lw_sv'; "
@@ -375,11 +411,14 @@ def compute_trend_cycle_draws(lw_run: LWRun, *, seed: int | None = None) -> Tren
         F, Q, A, Z, R, h_is, h_pc = _system_matrices_for_draw(flat, int(i), lw_run.sv_on)
         sim = simulate_smoother_draw(lw_run.yobs, lw_run.x, F, Q, A, Z, R, lw_run.xi00, lw_run.P00, rng)
         xi = sim.xi_draw
-        ystar[j] = xi[:, 0]
-        output_gap[j] = lw_run.yobs[:, 0] - xi[:, 0]
-        g_arr[j] = xi[:, 3]
-        z_arr[j] = xi[:, 5]
-        rstar[j] = xi[:, 3] + xi[:, 5]
+        # Reporting convention (verbatim from the G5a oracle mapping, per
+        # this module's docstring): row t reports the (g, -1)/(z, -1) slots
+        # -- HLW's own layout, validated against their output at ~1e-12.
+        ystar[j] = xi[:, _S_YSTAR]
+        output_gap[j] = lw_run.yobs[:, 0] - xi[:, _S_YSTAR]
+        g_arr[j] = xi[:, _S_G_M1]
+        z_arr[j] = xi[:, _S_Z_M1]
+        rstar[j] = xi[:, _S_G_M1] + xi[:, _S_Z_M1]
         if lw_run.sv_on:
             # h is log-VARIANCE (spec §1.5); exp(h/2) is the standard
             # deviation -- exp(h) would be the variance, a units bug.
@@ -409,67 +448,6 @@ def compute_trend_cycle_draws(lw_run: LWRun, *, seed: int | None = None) -> Tren
 # ---------------------------------------------------------------------------
 
 
-def _w_ystar_injection(eps_t: float, n: int) -> np.ndarray:
-    """The y*-shock's own per-period state-innovation vector -- eps_ystar
-    only ever enters state slot 0 (``build_lw_matrices``' exact ``Q``
-    construction). Shared by :func:`state_shock_decomposition` (B1, fed a
-    real recovered shock path) and :func:`impulse_response_for_shock` (Part
-    C, fed a synthetic impulse array) via :func:`_propagate_shock_through_F`."""
-    w = np.zeros(n)
-    w[0] = eps_t
-    return w
-
-
-def _w_g_injection(eps_t: float, n: int) -> np.ndarray:
-    """The g-shock's own per-period state-innovation vector -- the
-    ANNUALIZED g innovation enters both slot 3 (g itself) and, divided by 4,
-    slot 0 (y*'s quarterly increment g/4, lw-sv-spec.md §1.3's g/4
-    convention). See :func:`_w_ystar_injection` for the sharing rationale."""
-    w = np.zeros(n)
-    w[0] = eps_t / 4.0
-    w[3] = eps_t
-    return w
-
-
-def _w_z_injection(eps_t: float, n: int) -> np.ndarray:
-    """The z-shock's own per-period state-innovation vector -- eps_z only
-    ever enters state slot 5. See :func:`_w_ystar_injection` for the
-    sharing rationale."""
-    w = np.zeros(n)
-    w[5] = eps_t
-    return w
-
-
-def _propagate_shock_through_F(F: np.ndarray, n: int, eps: np.ndarray, inject) -> np.ndarray:
-    """Propagate ONE shock stream's own process noise through the state
-    transition matrix ``F``, starting from the zero state vector at t=-1::
-
-        xi[t] = F @ xi[t-1] + inject(eps[t], n)
-
-    ``inject`` maps this period's scalar shock realization (plus the state
-    dimension ``n``) to that period's (n,) state-innovation vector (one of
-    :func:`_w_ystar_injection` / :func:`_w_g_injection` / :func:`_w_z_injection`).
-
-    Factored out of :func:`state_shock_decomposition`'s inner loop, which
-    used to triplicate this exact loop body once per shock (numerics-
-    reviewer finding, S4) -- extracting it lets :func:`impulse_response_for_shock`
-    (Part C, spec §3.2) reuse the IDENTICAL arithmetic on a synthetic impulse
-    array instead of a real recovered shock path, rather than a fourth
-    copy-pasted loop. Behavior-preserving: bit-for-bit identical float
-    operations, in the same order, as the pre-refactor inline loop --
-    confirmed by re-running ``tests/test_g6_hd_identity.py`` /
-    ``tests/test_results_lw.py`` unchanged after this extraction.
-
-    Returns an ``(len(eps), n)`` array.
-    """
-    T = len(eps)
-    xi = np.zeros((T, n))
-    prev = np.zeros(n)
-    for t in range(T):
-        cur = F @ prev + inject(eps[t], n)
-        xi[t] = cur
-        prev = cur
-    return xi
 
 
 def state_shock_decomposition(
@@ -527,10 +505,9 @@ def state_shock_decomposition(
     Returns a dict with keys ``"init"``, ``"ystar"``, ``"g"``, ``"z"``, each
     an array of shape (T, 7) -- the same state-slot layout as ``xi_draw``.
     """
-    T, n = xi_draw.shape
-    xi_ystar = _propagate_shock_through_F(F, n, eps_ystar, _w_ystar_injection)
-    xi_g = _propagate_shock_through_F(F, n, eps_g, _w_g_injection)
-    xi_z = _propagate_shock_through_F(F, n, eps_z, _w_z_injection)
+    xi_ystar = _propagate_shock_through_F(F, LW_STATE_META.injection_vector("ystar"), eps_ystar)
+    xi_g = _propagate_shock_through_F(F, LW_STATE_META.injection_vector("g"), eps_g)
+    xi_z = _propagate_shock_through_F(F, LW_STATE_META.injection_vector("z"), eps_z)
 
     xi_init = xi_draw - xi_ystar - xi_g - xi_z
     return {"init": xi_init, "ystar": xi_ystar, "g": xi_g, "z": xi_z}
@@ -564,52 +541,58 @@ def gap_pi_shock_decomposition(
     eps_pc: np.ndarray,
     state_components: dict[str, np.ndarray],
 ) -> dict[str, dict[str, np.ndarray]]:
-    """B2/B3: propagate each structural shock through gap's OWN AR(2)
-    IS-curve recursion and pi's OWN Phillips-curve recursion (not just the
-    state), so eps_is/eps_pc get an economically sensible, persistent
-    contribution via the model's own AR feedback (a1/a2 for gap, b_pi for
-    pi) rather than a same-period-only measurement residual. See this
+    """B2/B3: each bar's own observable path via the generic engine
+    (:func:`macrotoolkit.engine.observable_recursion`, S5-decisions item 1)
+    -- the measurement equation AS WRITTEN, with x's endogenous lag columns
+    fed back from each bar's OWN simulated past observables per the
+    family's declared feedback map. This replaces the hand-derived
+    gap-space IS-curve/Phillips-curve recursions that used to live here
+    (they were algebraic regroupings of the same equation); eps_is/eps_pc
+    still get an economically sensible, persistent contribution via the
+    model's own AR feedback (through the feedback map's y/pi lag columns)
+    rather than a same-period-only measurement residual -- see this
     module's docstring for why the naive "gap = data - state" split omits
-    this feedback entirely.
+    that feedback entirely.
 
-    Structural coefficients (a1, a2, a_r, b_y, b_pi) are read directly off
-    ``Z``/``A`` (the exact entries ``build_lw_matrices`` stamps: ``Z[0,1] =
-    -a1``, ``Z[0,2] = -a2``, ``Z[0,3] = -c*a_r/2`` with ``c=1`` fixed,
-    ``Z[1,1] = -b_y``, ``A[4,1] = b_pi``) rather than a separate params
-    dict, so this function only needs a draw's system matrices -- the same
-    inputs the caller already has for ``simulate_smoother_draw``.
+    Per bar, the engine inputs are:
 
-    ``state_components`` is B1's output (:func:`state_shock_decomposition`):
-    the "init"/"ystar"/"g"/"z" bars' own r* = g+z contributions feed gap's
-    recursion via ``rstar1 = comp[i,3] + comp[i,5]`` (g_{t-1}+z_{t-1}),
-    ``rstar2 = comp[i,4] + comp[i,6]`` (g_{t-2}+z_{t-2}) -- the "is" and
-    "rdata" bars have no state component (neither eps_is nor the real-rate
-    data ever enters the state), so their rstar terms are 0.
+    - state path: B1's component for "init"/"ystar"/"g"/"z" (the r* = c*g+z
+      feedback enters through ``Z``'s own lag-slot entries); identically
+      zero for "is"/"pc"/"rdata" (neither the measurement shocks nor the
+      real-rate data ever enters the state).
+    - measurement injection: ``eps_is`` into the y row for the "is" bar,
+      ``eps_pc`` into the pi row for "pc"; zero otherwise.
+    - exogenous input: the real ``x`` matrix's ExogLag columns
+      (r_{t-1}/r_{t-2}) for the "rdata" bar ONLY (the 2026-09-02 bar split,
+      DECISIONS.md: the cumulative policy contribution is its own labeled
+      bar, no longer folded into "Initial condition"); zero for every other
+      bar -- which also makes "init" invariant to the r data by
+      construction.
+    - observable seeds: the REAL pre-sample data (``y_full[3]``/
+      ``y_full[2]``, ``pi_full[3..0]``) for the "init" bar; zero ("from
+      rest") for every other bar. In observable space the init seed is just
+      the raw data -- the old gap-space subtlety (seed gap with
+      ``y_full[3] - state_components["init"][0, (ystar,-1)]``, the SMOOTHED
+      y*_0 belief, never the raw prior mean ``xi00[0]``) is now implicit:
+      the engine's Z-term reads the init bar's own state path, whose row 0
+      lag slots carry exactly that smoothed belief. The old form's
+      empirical lesson stands: an ``xi00``-based seed breaks the B2 sum
+      identity for the entire sample (see
+      :func:`state_shock_decomposition`'s docstring).
 
-    ``y_full``/``pi_full`` are the FULL length-(T+4) data series (including
-    the 4 pre-sample lag quarters, same convention as
-    ``build_lw_regressors``' inputs) -- needed to seed the "init" bar's
-    pre-sample registers. Gap's own pre-sample seed (period 0's/period -1's
-    "init"-bar gap) is ``y_full[3] - state_components["init"][0, 1]`` /
-    ``y_full[2] - state_components["init"][0, 2]`` -- the SMOOTHED belief
-    about y*_0/y*_{-1} embedded in row 0's own state slots 1/2 (NOT the raw
-    prior mean ``xi00[0]``/``xi00[1]``; see
-    :func:`state_shock_decomposition`'s docstring for why that distinction
-    matters here). pi's own pre-sample seed needs no such correction --
-    inflation is raw exogenous data at every lag, prior or not -- so it
-    reads directly off ``pi_full``. ``x`` is the (T,6) exogenous-regressor
-    matrix (``build_lw_regressors``' output); columns 2/3 are
-    r_{t-1}/r_{t-2}, used only by the "rdata" bar's data-injection term (the
-    real-rate data enters the gap equation exogenously, so it belongs to
-    its own labeled bar, not to any of the 5 structural shocks -- and, per
-    the 2026-09-02 pre-S5 review decision in DECISIONS.md, no longer to the
-    "init" bar either: folding the entire cumulative policy contribution
-    into a line labeled "Initial condition" was judged misleading).
+    Bar k's gap is then ``obs_y_k - state_path_k[:, (ystar, 0)]`` and its
+    pi is ``obs_pi_k`` directly. By linearity these bars sum to the totals
+    -- the per-period identity gate G6 checks (``sum(gap.values()) ==
+    yobs[:,0] - xi_draw[:,0]`` and ``sum(pi.values()) == yobs[:,1]``, to
+    1e-6, ``tests/test_g6_hd_identity.py``). Float caveat (DECISIONS.md
+    2026-09-02): the engine's grouping is the measurement equation's, not
+    the old gap-space recursion's, so bar values agree with the
+    pre-engine implementation to ~1e-9 (dominated by the smoother's own
+    lag-copy rounding), not bit-for-bit -- far inside every consuming
+    tolerance.
 
-    Returns ``{"gap": {bar: (T,) array for bar in GAP_BARS}, "pi": {bar:
-    (T,) array for bar in PI_BARS}}``. Sum-checked to 1e-6 per period by
-    gate G6 (``tests/test_g6_hd_identity.py``): ``sum(gap.values()) ==
-    yobs[:,0] - xi_draw[:,0]`` and ``sum(pi.values()) == yobs[:,1]``.
+    Returns ``{"gap": {bar: (T,) for bar in GAP_BARS}, "pi": {bar: (T,)
+    for bar in PI_BARS}}``.
     """
     T = x.shape[0]
     if len(y_full) != T + 4 or len(pi_full) != T + 4:
@@ -620,123 +603,43 @@ def gap_pi_shock_decomposition(
             f"{len(y_full)}, {len(pi_full)}."
         )
 
-    a1 = -Z[0, 1]
-    a2 = -Z[0, 2]
-    # a_r read off the z-lag entries (Z[0,5]/Z[0,6] = -a_r/2, no c factor --
-    # build_lw_matrices only multiplies the G-lag entries Z[0,3]/Z[0,4] by
-    # c), so this stays correct regardless of c; the c==1.0 assertion below
-    # is what actually needs c to be 1, not this extraction.
-    a_r = -2.0 * Z[0, 5]
-    b_y = -Z[1, 1]
-    b_pi = A[4, 1]
-    # rstar1/rstar2 below are computed as the UNWEIGHTED sum g+z (c=1's
-    # r*=g+z), matching build_lw_matrices' c=1.0 fixed default everywhere in
-    # current scope (estimate_c is hard-validated False --
-    # specs/schema/lw_sv.py). Numerics-reviewer finding (S4): if
-    # estimate_c ever becomes true, Z[0,3]/Z[0,4] (the g lags) would carry a
-    # c != 1 factor the z lags don't, and a naive unweighted g+z sum would
-    # silently corrupt the historical decomposition (verified numerically:
-    # c=1.5 produces a gap-HD reconstruction error of ~0.36 against G6's
-    # 1e-6 tolerance) -- fail loudly instead of silently.
-    c_check = Z[0, 3] / Z[0, 5] if Z[0, 5] != 0.0 else 1.0
-    if not np.isclose(c_check, 1.0, atol=1e-9):
-        raise NotImplementedError(
-            f"gap_pi_shock_decomposition assumes c == 1.0 (spec §1.3's "
-            f"default; estimate_c is not implemented anywhere in current "
-            f"scope), but the system matrices imply c = {c_check!r}. The "
-            f"rstar1/rstar2 computation below sums g+z unweighted, which is "
-            f"only correct for c == 1.0 -- generalize it (weight the g "
-            f"terms by c) before removing this guard."
-        )
+    # The engine itself is c-agnostic (Z carries c's weighting exactly),
+    # but the guard is kept: the surrounding HD reporting (r* = g + z in
+    # state_shock_decomposition's consumers, plots) still assumes c == 1,
+    # and silently returning bars a c != 1 caller cannot report correctly
+    # would reintroduce the failure mode the guard exists for.
+    coeffs = structural_coefficients(Z, A)
+    require_c_is_one(coeffs["c"], "gap_pi_shock_decomposition")
 
-    gap = {k: np.zeros(T) for k in GAP_BARS}
-    pi = {k: np.zeros(T) for k in PI_BARS}
+    y_row = LW_STATE_META.obs_index("y")
+    pi_row = LW_STATE_META.obs_index("pi")
+    zeros_state = np.zeros((T, LW_STATE_META.n_state))
 
-    gap_lag1 = {k: 0.0 for k in GAP_BARS}
-    gap_lag2 = {k: 0.0 for k in GAP_BARS}
-    # Period 0's / period -1's gap, seeding the "init" bar's own recursion.
-    # Uses state_components["init"]'s row 0, slots 1/2 -- the SMOOTHED
-    # belief about y*_0/y*_{-1} (row 0 = period 1's state; slot 1 = y*_{t-1}
-    # = y*_0, slot 2 = y*_{t-2} = y*_{-1}) -- NOT the raw prior mean
-    # xi00[0]/xi00[1]. This matters: xi00/P00 is only a PRIOR for period 0's
-    # state, and the RTS smoother genuinely revises that prior using the
-    # whole sample (the same reason state_shock_decomposition's "init" bar
-    # is a residual, not an F@xi00 forward path -- see its docstring). Since
-    # eps_ystar/eps_g/eps_z contribute exactly 0 to state_components["init"]
-    # row 0's slots 1/2 (verified: build_lw_matrices' Q only ever injects
-    # into slots 0, 3, 5), state_components["init"][0, 1]/[0, 2] IS the
-    # smoothed y*_0/y*_{-1} belief, entirely attributable to the init bar.
-    # Using xi00 directly here (a first draft's choice, matching a literal
-    # reading of "gap_lag1['init'] = y[3] - xi00[0]") breaks the B2 sum
-    # identity for the ENTIRE sample, not just period 0/1: the resulting
-    # one-period seed error propagates forward through gap's own AR(2)
-    # feedback and does not decay away within a typical sample length
-    # (empirically confirmed while developing this module -- verify by
-    # reverting to xi00 and re-running tests/test_g6_hd_identity.py).
-    gap_lag1["init"] = float(y_full[3] - state_components["init"][0, 1])
-    gap_lag2["init"] = float(y_full[2] - state_components["init"][0, 2])
-
-    pi_lag1 = {k: 0.0 for k in PI_BARS}
-    pi_lag2 = {k: 0.0 for k in PI_BARS}
-    pi_lag3 = {k: 0.0 for k in PI_BARS}
-    pi_lag4 = {k: 0.0 for k in PI_BARS}
-    pi_lag1["init"] = float(pi_full[3])
-    pi_lag2["init"] = float(pi_full[2])
-    pi_lag3["init"] = float(pi_full[1])
-    pi_lag4["init"] = float(pi_full[0])
-
-    for i in range(T):
-        # --- B2: this period's gap, for each of the 6 gap bars ---
-        gap_t: dict[str, float] = {}
-        for k in GAP_BARS:
-            if k in ("is", "rdata"):
-                # Neither eps_is nor the real-rate data ever enters the
-                # STATE, so these two bars have no r* = g+z component.
-                rstar1 = rstar2 = 0.0
-            else:
-                comp = state_components[k]
-                rstar1 = comp[i, 3] + comp[i, 5]
-                rstar2 = comp[i, 4] + comp[i, 6]
-            val = a1 * gap_lag1[k] + a2 * gap_lag2[k] - (a_r / 2.0) * (rstar1 + rstar2)
-            if k == "is":
-                val += eps_is[i]
-            if k == "rdata":
-                # The exogenous real-rate DATA injection (spec §1.2's
-                # +(a_r/2)(r_{t-1}+r_{t-2}) term), formerly folded into the
-                # "init" bar -- split out 2026-09-02 (DECISIONS.md) so the
-                # cumulative policy contribution is its own labeled bar
-                # instead of silently inflating "Initial condition".
-                val += (a_r / 2.0) * (x[i, 2] + x[i, 3])
-            gap_t[k] = val
-
-        # Snapshot gap_lag1 BEFORE this iteration's B2 register shift: pi_t's
-        # equation uses gap_{t-1}, which is exactly what gap_lag1 holds right
-        # now (walking into this iteration), not this iteration's freshly
-        # computed gap_t.
-        gap_lag1_pre = dict(gap_lag1)
-
-        # --- B3: this period's pi, for each of the 7 pi bars ---
-        pi_t: dict[str, float] = {}
-        for k in PI_BARS:
-            pibar = (pi_lag2[k] + pi_lag3[k] + pi_lag4[k]) / 3.0
-            gap_term = gap_lag1_pre[k] if k in gap_lag1_pre else 0.0
-            val = b_pi * pi_lag1[k] + (1.0 - b_pi) * pibar + b_y * gap_term
-            if k == "pc":
-                val += eps_pc[i]
-            pi_t[k] = val
-
-        # --- record + shift registers ---
-        for k in GAP_BARS:
-            gap[k][i] = gap_t[k]
-            gap_lag2[k] = gap_lag1[k]
-            gap_lag1[k] = gap_t[k]
-
-        for k in PI_BARS:
-            pi[k][i] = pi_t[k]
-            pi_lag4[k] = pi_lag3[k]
-            pi_lag3[k] = pi_lag2[k]
-            pi_lag2[k] = pi_lag1[k]
-            pi_lag1[k] = pi_t[k]
+    gap: dict[str, np.ndarray] = {}
+    pi: dict[str, np.ndarray] = {}
+    for k in PI_BARS:
+        state_path = state_components[k] if k in state_components else zeros_state
+        meas = np.zeros((T, LW_STATE_META.n_obs))
+        if k == "is":
+            meas[:, y_row] = eps_is
+        elif k == "pc":
+            meas[:, pi_row] = eps_pc
+        exog = x if k == "rdata" else None
+        seeds = None
+        if k == "init":
+            seeds = {
+                "y": {1: float(y_full[3]), 2: float(y_full[2])},
+                "pi": {
+                    1: float(pi_full[3]),
+                    2: float(pi_full[2]),
+                    3: float(pi_full[1]),
+                    4: float(pi_full[0]),
+                },
+            }
+        obs = observable_recursion(A, Z, LW_STATE_META, state_path, meas, exog, seeds)
+        if k in GAP_BARS:
+            gap[k] = obs[:, y_row] - state_path[:, _S_YSTAR]
+        pi[k] = obs[:, pi_row]
 
     return {"gap": gap, "pi": pi}
 
@@ -758,7 +661,7 @@ def y_level_decomposition(gap: dict[str, np.ndarray], state_components: dict[str
     """
     y: dict[str, np.ndarray] = {}
     for k in ("init", "ystar", "g", "z"):
-        y[k] = gap[k] + state_components[k][:, 0]
+        y[k] = gap[k] + state_components[k][:, _S_YSTAR]
     # "is" and "rdata" have no state (y*) component: their only channel into
     # y is via gap (eps_is by definition; the real-rate data because r never
     # enters the state either -- same reasoning as their zero rstar terms in
@@ -1025,28 +928,20 @@ def impulse_response_for_shock(
     """The theoretical impulse response of ONE structural shock (spec §3.2),
     at ONE posterior draw's system matrices, for ``horizon`` periods.
 
-    Structurally, an impulse response is exactly a historical decomposition
-    with (a) no real data, (b) a single synthetic impulse instead of a real
-    recovered shock path, and (c) no "init" bar at all -- gap/pi start
-    entirely at rest (all lag registers zero) and there is no prior/smoothed
-    belief about a pre-sample state to carry forward (Part B's "init" bar
-    only ever exists because a REAL run has a genuine smoothed initial
-    condition; a synthetic impulse response has none by construction). This
-    function builds exactly that: a zero "init" state-component bar, the 3
-    trend shocks' state contributions built the SAME WAY B1's
-    :func:`state_shock_decomposition` does (via the shared
-    :func:`_propagate_shock_through_F` helper, fed a synthetic impulse array
-    -- all zero except ``shock_size`` at index 0 -- instead of a recovered
-    shock path), and gap/pi's response read directly off
-    :func:`gap_pi_shock_decomposition`'s own AR-recursion arithmetic, called
-    on all-zero real data (``x``, ``y_full``, ``pi_full``) so its "init" and
-    "rdata" bars are identically zero throughout (the SAME B1/B2
-    sum-identity logic gate G6 already validates: with zero real data and a
-    zero "init" state-component, ``gap_lag1["init"] = y_full[3] - 0 = 0``
-    and the "rdata" injection ``(a_r/2)*(x[i,2]+x[i,3])`` is 0, so both
-    stay zero every period) plus a synthetic ``eps_is``/``eps_pc`` impulse array
-    (measurement shocks that never enter the state at all -- their only
-    channel is gap/pi's own AR feedback).
+    Structurally, an impulse response is exactly ONE historical-
+    decomposition bar with no real data: a single synthetic impulse (all
+    zero except ``shock_size`` at index 0) instead of a recovered shock
+    path, everything starting from rest (zero lag registers, no
+    prior/smoothed pre-sample belief to carry -- Part B's "init" bar only
+    ever exists because a REAL run has one). So this runs exactly the same
+    generic engine calls Part B's bars run (S5-decisions item 1): the 3
+    trend shocks' state contribution via
+    :func:`macrotoolkit.engine.propagate_state_shock` at the family's own
+    declared loading, the measurement shocks as an injection into their
+    declared observation row (they never enter the state at all -- their
+    only channel is the observation recursion's own feedback), and the
+    observable path via :func:`macrotoolkit.engine.observable_recursion`
+    with zero exogenous input and zero seeds.
 
     ``shock`` must be one of :data:`IRF_SHOCKS`; ``shock_size`` is the
     one-off impulse applied at period 0 (spec §3.2's "one-standard-deviation
@@ -1054,53 +949,41 @@ def impulse_response_for_shock(
     a caller concern, not this function's).
 
     Returns :data:`IRF_RESPONSES` (``{"gap", "pi", "rstar", "y", "g"}``),
-    each a length-``horizon`` array -- the EXACT SAME reporting formulas
-    used elsewhere in this module (``compute_trend_cycle_draws``):
-    ``rstar = state[:, 3] + state[:, 5]``, ``y = gap + state[:, 0]``,
-    ``g = state[:, 3]``.
+    each a length-``horizon`` array -- the same NAMED reporting mapping
+    used elsewhere in this module: ``rstar = state(g,-1) + state(z,-1)``,
+    ``gap = y - state(ystar,0)``, ``g = state(g,-1)``.
     """
     if shock not in IRF_SHOCKS:
         raise ValueError(
             f"impulse_response_for_shock: shock must be one of {IRF_SHOCKS!r}; got {shock!r}."
         )
-    n = F.shape[0]
+    # The rstar response below sums g+z unweighted (c == 1) -- the same
+    # guard Parts B/D apply (numerics-reviewer suggestion, S4.5: close the
+    # one place the c == 1 assumption was unguarded).
+    require_c_is_one(structural_coefficients(Z, A)["c"], "impulse_response_for_shock")
 
-    eps_ystar = np.zeros(horizon)
-    eps_g = np.zeros(horizon)
-    eps_z = np.zeros(horizon)
-    eps_is = np.zeros(horizon)
-    eps_pc = np.zeros(horizon)
-    {"ystar": eps_ystar, "g": eps_g, "z": eps_z, "is": eps_is, "pc": eps_pc}[shock][0] = shock_size
+    impulse = np.zeros(horizon)
+    impulse[0] = shock_size
 
-    state_components = {
-        "init": np.zeros((horizon, n)),
-        "ystar": _propagate_shock_through_F(F, n, eps_ystar, _w_ystar_injection),
-        "g": _propagate_shock_through_F(F, n, eps_g, _w_g_injection),
-        "z": _propagate_shock_through_F(F, n, eps_z, _w_z_injection),
-    }
+    meas = np.zeros((horizon, LW_STATE_META.n_obs))
+    if shock in LW_STATE_META.state_shocks:
+        comp = propagate_state_shock(F, LW_STATE_META.injection_vector(shock), impulse)
+    else:
+        # A measurement shock never enters the state; its only channel is
+        # the observation recursion's own feedback (spec §1.4).
+        comp = np.zeros((horizon, LW_STATE_META.n_state))
+        meas[:, LW_STATE_META.measurement_shocks.index(shock)] = impulse
 
-    x_zero = np.zeros((horizon, 6))
-    y_full_zero = np.zeros(horizon + 4)
-    pi_full_zero = np.zeros(horizon + 4)
-    gp = gap_pi_shock_decomposition(
-        F, A, Z, x_zero, y_full_zero, pi_full_zero, eps_is, eps_pc, state_components
-    )
+    obs = observable_recursion(A, Z, LW_STATE_META, comp, meas)
 
-    state_total = (
-        state_components["init"] + state_components["ystar"] + state_components["g"] + state_components["z"]
-    )
-    gap_response = gp["gap"][shock] if shock in GAP_BARS else np.zeros(horizon)
-    pi_response = gp["pi"][shock]
-    rstar_response = state_total[:, 3] + state_total[:, 5]
-    g_response = state_total[:, 3]
-    y_response = gap_response + state_total[:, 0]
-
+    y_row = LW_STATE_META.obs_index("y")
+    pi_row = LW_STATE_META.obs_index("pi")
     return {
-        "gap": gap_response,
-        "pi": pi_response,
-        "rstar": rstar_response,
-        "y": y_response,
-        "g": g_response,
+        "gap": obs[:, y_row] - comp[:, _S_YSTAR],
+        "pi": obs[:, pi_row],
+        "rstar": comp[:, _S_G_M1] + comp[:, _S_Z_M1],
+        "y": obs[:, y_row],
+        "g": comp[:, _S_G_M1],
     }
 
 
@@ -1161,102 +1044,21 @@ def compute_irf_draws(lw_run: LWRun) -> IRFDraws:
 
 
 def _extract_gap_pi_coeffs(Z: np.ndarray, A: np.ndarray) -> tuple[float, float, float, float, float]:
-    """The 5 structural coefficients (a1, a2, a_r, b_y, b_pi) read directly
-    off a draw's ``Z``/``A`` system matrices -- the SAME extraction
-    :func:`gap_pi_shock_decomposition` documents and performs internally
-    (``Z[0,1] = -a1``, ``Z[0,2] = -a2``, ``Z[0,5] = -a_r/2`` -- no ``c``
-    factor, since ``a_r`` is read off the z-lag entries, matching that
-    function's own comment -- ``Z[1,1] = -b_y``, ``A[4,1] = b_pi``).
-
-    Deliberately duplicated here rather than imported out of
-    ``gap_pi_shock_decomposition`` (which is not touched by this module's S4
-    fan-chart addition at all, per the task brief's "do not modify
-    gap_pi_shock_decomposition ... behavior" constraint): the fan-chart
-    forward simulation below needs the SAME 5 numbers for its own one-step
-    AR recursion, but is not itself calling that already-G6-validated
-    function's shock-decomposition machinery, so re-deriving the 5 numbers
-    from ``Z``/``A`` directly (rather than threading a private helper
-    through an unrelated, validated function) keeps the two call sites
-    independent.
-    """
-    a1 = -Z[0, 1]
-    a2 = -Z[0, 2]
-    a_r = -2.0 * Z[0, 5]
-    b_y = -Z[1, 1]
-    b_pi = A[4, 1]
-    return a1, a2, a_r, b_y, b_pi
-
-
-def _fan_forecast_step(
-    gap_lag1: float,
-    gap_lag2: float,
-    pi_lag1: float,
-    pi_lag2: float,
-    pi_lag3: float,
-    pi_lag4: float,
-    rate_gap_lag1: float,
-    rate_gap_lag2: float,
-    a1: float,
-    a2: float,
-    a_r: float,
-    b_pi: float,
-    b_y: float,
-    eps_is_t: float,
-    eps_pc_t: float,
-) -> tuple[float, float]:
-    """One forward forecast period's gap/pi AR recursion (spec §3.3) -- the
-    SAME underlying IS-curve/Phillips-curve arithmetic
-    :func:`gap_pi_shock_decomposition` applies per bar (spec §1.2), just
-    COMBINED rather than decomposed bar-by-bar (a fan-chart draw is a single
-    stochastic realization, not a shock-by-shock attribution)::
-
-        gap_t = a1*gap_lag1 + a2*gap_lag2
-                + (a_r/2)*(rate_gap_lag1 + rate_gap_lag2) + eps_is_t
-        pi_t  = b_pi*pi_lag1 + (1-b_pi)*mean(pi_lag2, pi_lag3, pi_lag4)
-                + b_y*gap_lag1 + eps_pc_t
-
-    ``rate_gap_lag1``/``rate_gap_lag2`` are ``(r - r*)`` at the two prior
-    periods (whatever those periods' own convention: real data if still
-    in-sample, or ``forecast_r_rule``'s convention if already a forecast
-    period -- the caller's concern, not this function's).
-
-    **The IS-curve term is a PLUS, not a minus** (numerics-reviewer finding,
-    S4, confirmed independently against ``build_lw_matrices``'s own
-    construction): ``gap_pi_shock_decomposition``'s per-bar recursion uses
-    ``-(a_r/2)*(rstar1+rstar2)`` for EVERY bar plus a SEPARATE
-    ``+(a_r/2)*(r_{t-1}+r_{t-2})`` term added ONLY to the "init" bar (the
-    real-rate DATA injection) -- summed across all bars, those two pieces
-    combine into ``+(a_r/2)*[(r_{t-1}-r*_{t-1})+(r_{t-2}-r*_{t-2})]``, a
-    PLUS overall. This function combines ``r`` and ``r*`` into ONE
-    ``rate_gap`` number up front (no separate data-injection term to
-    provide the offsetting plus), so it needs its OWN plus sign applied
-    directly -- an earlier version of this function kept the minus that
-    was only ever valid for the r*-only HALF of that split, which
-  produced up to a ~100%+ relative distortion of forecast gap values
-    under ``forecast_r_rule: last_value`` by the end of a 12-period
-    horizon (confirmed numerically before this fix).
-
-    ``pi_t`` uses ``gap_lag1`` (gap ONE period before pi_t's own period,
-    spec §1.2's Phillips curve), NOT the just-computed ``gap_t`` -- matching
-    ``gap_pi_shock_decomposition``'s own "snapshot gap_lag1 BEFORE this
-    iteration's register shift" note.
-
-    Returns ``(gap_t, pi_t)``.
-    """
-    gap_t = a1 * gap_lag1 + a2 * gap_lag2 + (a_r / 2.0) * (rate_gap_lag1 + rate_gap_lag2) + eps_is_t
-    pibar_t = (pi_lag2 + pi_lag3 + pi_lag4) / 3.0
-    pi_t = b_pi * pi_lag1 + (1.0 - b_pi) * pibar_t + b_y * gap_lag1 + eps_pc_t
-    return gap_t, pi_t
+    """The 5 structural coefficients (a1, a2, a_r, b_y, b_pi) as a tuple --
+    a thin unpacking of :func:`macrotoolkit.families.lw_sv.
+    structural_coefficients` (the ONE place the matrix positions live,
+    S5-decisions item 2; this replaced an earlier deliberate duplication of
+    the extraction). Kept because the fan-chart tests exercise it directly;
+    new code should consume the named dict instead."""
+    coeffs = structural_coefficients(Z, A)
+    return coeffs["a1"], coeffs["a2"], coeffs["a_r"], coeffs["b_y"], coeffs["b_pi"]
 
 
 def simulate_fan_draw(
     F: np.ndarray,
     Q: np.ndarray,
-    a1: float,
-    a2: float,
-    a_r: float,
-    b_pi: float,
-    b_y: float,
+    A: np.ndarray,
+    Z: np.ndarray,
     xi_last: np.ndarray,
     gap_lag1: float,
     gap_lag2: float,
@@ -1281,79 +1083,56 @@ def simulate_fan_draw(
     """One posterior draw's ONE stochastic fan-chart forward simulation
     (spec §3.3), ``horizon`` periods ahead of that draw's own terminal
     simulation-smoother state ``xi_last`` (= ``sim.xi_draw[-1]``, absolute
-    period T), seeded by that SAME draw's ACTUAL last few periods' real
-    gap/pi lag registers -- ``gap_lag1``/``gap_lag2`` =
-    ``yobs[-1,0]-xi_draw[-1,0]`` / ``yobs[-2,0]-xi_draw[-2,0]``,
-    ``pi_lag1..4`` = ``yobs[-1:-5:-1,1]``.
+    period T) -- now a thin lw_sv-facing wrapper over the generic engine's
+    :func:`macrotoolkit.engine.simulate_forward` (S5-decisions item 1),
+    which runs the measurement equation with the family's declared feedback
+    map instead of the hand-derived gap-space recursion that used to live
+    here.
 
-    ``rate_gap_seed`` is ``(r-r*)_{T-1}`` -- the ONLY ``(r-r*)`` value
-    derivable BEFORE this function's own forward loop starts (numerics-
-    reviewer finding, S4: an earlier draft tried to also seed
-    ``(r-r*)_T`` from ``r_full[-1] - (xi_draw[-1,3]+xi_draw[-1,5])``, but
-    ``xi_draw[-1,3]``/``[-1,5]`` are ``g_{T-1}``/``z_{T-1}`` -- the state's
-    slot-3/5 one-period lag (this module's/``smoother.py``'s own
-    convention) means row T's OWN state slots never show ``g_T``/``z_T``;
-    those only become visible one ``F``-step later, which requires THIS
-    period's own fresh process-noise draw. So ``(r-r*)_T`` cannot be known
-    ahead of time -- it is computed INSIDE the loop below, in the SAME
-    iteration that needs it as ``rate_gap_lag1``, not deferred to the next
-    iteration as an earlier version of this function did (confirmed wrong
-    by direct numerical comparison against a hand-derived reference: up to
-    an ~65% relative distortion of the first forecast period's gap value
-    under the "neutral" rule, where the bug caused a nonzero historical
-    rate-gap value to leak into what should have been a zero term)).
-    ``(r-r*)_{T-1}`` has no such problem: it is read directly off row T's
-    OWN state slots (``xi_draw[-1,3]+xi_draw[-1,5]`` = ``g_{T-1}+z_{T-1}``
-    = ``r*_{T-1}`` exactly, by the same slot convention), paired with the
-    real ``r_full[-2]`` (= ``r_{T-1}``) -- both genuinely in-sample,
-    already-realized quantities, so ``forecast_r_rule`` does not apply to
-    this ONE seed (the rule only governs ``(r-r*)`` from period T onward,
-    computed inside the loop -- see below).
+    The wrapper's job is seed translation, preserving this function's
+    established gap-register interface (all real-data-derived, from the
+    SAME draw's own last periods): the engine wants pre-sample OBSERVABLE
+    values, so ``gap_lag1``/``gap_lag2`` (= ``yobs[-1,0]-xi_draw[-1,
+    (ystar,0)]`` / ``yobs[-2,0]-xi_draw[-2,(ystar,0)]``) are converted back
+    to y levels by adding ``xi_last``'s own ``(ystar,0)``/``(ystar,-1)``
+    slots, and ``rate_gap_seed`` (= ``(r-r*)_{T-1}``, the ONE rate-gap
+    value derivable before the forward loop starts -- the S4 numerics-
+    reviewer lesson, now structural in the engine's timing convention) is
+    converted back to ``r_{T-1}`` by adding ``r*_{T-1}`` read off
+    ``xi_last``'s own ``(g,-1)``/``(z,-1)`` slots. Because the engine's
+    first step reads those exact same values back out of the (exactly
+    F-copied) next state row, the conversions cancel to within a couple of
+    ulps -- verified against the pre-engine implementation by the existing
+    zero-noise hand-derived-reference tests (tests/test_fan_charts.py).
 
-    Per period, FRESH stochastic noise is drawn: this draw's own posterior
-    ``Q`` for the state (``xi_{T+h} = F @ xi_{T+h-1} + w``, ``w ~ N(0, Q)``,
-    via ``macrotoolkit.smoother._psd_sqrt`` -- Q is rank-deficient, see that
-    function's own docstring), and either constant ``sigma_is``/``sigma_pc``
-    (no-SV) or the CONTINUED SV log-variance random walk (SV --
-    ``h_{T+h} = h_{T+h-1} + sigma_h * nu``, ``nu ~ N(0,1)`` fresh every
-    period, starting from this draw's own last saved ``h_is``/``h_pc``) for
-    the measurement shocks. This per-period-fresh-noise draw is what makes
-    an SV run's bands genuinely WIDEN with horizon (spec §3.3: "widening
-    bands are the point") and what makes this a stochastic SIMULATION,
-    unlike :func:`gap_pi_shock_decomposition` / :func:`impulse_response_for_shock`'s
-    deterministic recursions.
+    Both S4 fan-chart bug fixes are now structural engine properties rather
+    than hand-maintained conventions: (1) ``(r-r*)_T`` is resolved by the
+    forecast rule INSIDE the loop from that period's own freshly drawn
+    state and used in the same iteration (the rate-gap seeding/ordering
+    fix); (2) the real-rate term enters through ``A``/``Z``'s own signed
+    entries, so there is no hand-applied sign to get wrong (the IS-curve
+    sign fix -- pinned at the engine level by tests/test_engine.py).
 
-    ``forecast_r_rule`` governs ``(r-r*)`` from absolute period T onward
-    (every value the loop itself computes -- i.e. starting with the FIRST
-    forecast period's own "t-1" input, not just periods strictly after the
-    sample end; only ``(r-r*)_{T-1}``, the ``rate_gap_seed`` above, predates
-    the rule): ``"neutral"`` forces ``(r_t - r*_t) := 0`` for every such t
-    -- r is defined to exactly track r*; ``"last_value"`` holds
-    ``r_t := r_last`` (the run's actual last observed r) while
-    ``r*_t = xi_t[3] + xi_t[5]`` keeps evolving through the state's own
-    random walk, so the deviation genuinely moves. Only these 2 values are
-    implemented -- ``user_path`` is already rejected at the schema level
-    (``specs.schema.lw_sv.LwSvOutputs``).
+    ``forecast_r_rule`` governs ``(r-r*)`` from absolute period T onward:
+    ``"neutral"`` resolves r := r* off the state's own named slots (the
+    family-declared ``NEUTRAL_R_RULE_TERMS``), forcing the rate-gap input
+    to exactly 0.0; ``"last_value"`` holds r at ``r_last`` while r* keeps
+    evolving. ``sv_on`` selects the measurement-noise model: constant
+    ``sigma_is``/``sigma_pc``, or the CONTINUED SV log-variance random
+    walks from ``h_is_last``/``h_pc_last`` at scales ``sigma_h_is``/
+    ``sigma_h_pc`` (spec §3.3's "widening bands are the point"). RNG
+    consumption order is preserved exactly from the pre-engine
+    implementation (state noise, then SV innovations, then measurement
+    shocks, each period; one extra state draw after the loop for the r*
+    alignment).
 
-    ``sv_on=False``: pass ``sigma_is``/``sigma_pc`` (that draw's own
-    constant posterior scales); leave ``h_is_last``/``h_pc_last``/
-    ``sigma_h_is``/``sigma_h_pc`` as ``None`` -- the measurement covariance
-    stays constant every period, so this channel contributes NO growing
-    variance with horizon (the no-SV/SV contrast spec §3.3 calls out).
-    ``sv_on=True``: the reverse (``sigma_is``/``sigma_pc`` ``None``, the 4 SV
-    args real).
-
-    Returns ``{"y_level", "y_growth_4q", "pi", "gap", "rstar", "rate_gap"}``,
-    each length ``horizon``. Index ``t`` of ``y_level``/``pi``/``gap``/
-    ``rstar`` is absolute period T+t+1 for ALL FOUR series -- ``rstar`` is
-    explicitly re-aligned (see the in-loop comment; pre-S5 review fix,
-    2026-09-02): the state's slot-3/5 lag convention would otherwise leave
-    the r* fan one quarter behind its axis label and behind the other
-    panels. ``rate_gap`` (the per-period ``(r-r*)`` INPUT
-    actually used inside the loop -- not a reporting series in its own
-    right, but a useful diagnostic) is exposed mainly so
-    ``outputs.forecast_r_rule``'s convention can be checked directly rather
-    than only indirectly through gap's own downstream path.
+    Returns ``{"y_level", "y_growth_4q", "pi", "gap", "rstar",
+    "rate_gap"}``, each length ``horizon``. Index ``t`` of ``y_level``/
+    ``pi``/``gap``/``rstar`` is absolute period T+t+1 for ALL FOUR series
+    (the 2026-09-02 r* alignment fix: r* at a period only becomes visible
+    in the NEXT period's state row, so the engine's extra post-loop state
+    row supplies the final point). ``rate_gap`` keeps its input-diagnostic
+    timing: index t is the ``(r-r*)`` INPUT used at forecast step t.
     """
     if forecast_r_rule not in ("neutral", "last_value"):
         raise ValueError(
@@ -1368,6 +1147,7 @@ def simulate_fan_draw(
                 "sigma_h_is/sigma_h_pc (that draw's own saved SV state) to "
                 "all be real numbers, not None."
             )
+        meas_noise = RandomWalkLogVarianceNoise((h_is_last, h_pc_last), (sigma_h_is, sigma_h_pc))
     else:
         if sigma_is is None or sigma_pc is None:
             raise ValueError(
@@ -1375,97 +1155,46 @@ def simulate_fan_draw(
                 "(that draw's own constant posterior scales) to be real "
                 "numbers, not None."
             )
+        meas_noise = ConstantMeasurementNoise((sigma_is, sigma_pc))
 
-    from macrotoolkit.smoother import _psd_sqrt
+    xi_last = np.asarray(xi_last, dtype=np.float64)
+    # Seed translation (see docstring): gap registers -> y levels; the
+    # rate-gap seed -> r_{T-1}.
+    rstar_prev = xi_last[_S_G_M1] + xi_last[_S_Z_M1]  # r*_{T-1}
+    obs_seeds = {
+        "y": {
+            1: float(gap_lag1 + xi_last[_S_YSTAR]),
+            2: float(gap_lag2 + xi_last[_S_YSTAR_M1]),
+        },
+        "pi": {1: float(pi_lag1), 2: float(pi_lag2), 3: float(pi_lag3), 4: float(pi_lag4)},
+    }
+    exog_seeds = {"r": {2: float(rate_gap_seed + rstar_prev)}}
 
-    n = F.shape[0]
-    sqrt_Q = _psd_sqrt(Q)
+    if forecast_r_rule == "neutral":
+        r_rule = StateLinearExogRule(LW_STATE_META, NEUTRAL_R_RULE_TERMS)
+    else:
+        r_rule = ConstantExogRule(float(r_last))
 
-    xi_prev = np.asarray(xi_last, dtype=np.float64).copy()
-    h_is_prev = h_is_last
-    h_pc_prev = h_pc_last
-    # (r-r*)_{T-1} -- the one seed value predating forecast_r_rule (see this
-    # function's docstring). Rolled forward into rate_gap_lag1 each
-    # iteration AFTER that iteration's _fan_forecast_step call, exactly
-    # mirroring gap_lag1/pi_lag1's own end-of-iteration shift below.
-    rate_gap_prev = rate_gap_seed
+    out = simulate_forward(
+        F, Q, A, Z, LW_STATE_META,
+        xi_last, obs_seeds, exog_seeds, {"r": r_rule}, meas_noise, horizon, rng,
+    )
+    obs = out["obs"]
+    states = out["states"]
+    r_resolved = out["exog_resolved"]["r"]
 
-    y_level = np.empty(horizon)
-    pi_path = np.empty(horizon)
-    gap_path = np.empty(horizon)
-    rstar_path = np.empty(horizon)
-    rate_gap_path = np.empty(horizon)
-
-    for t in range(horizon):
-        w = sqrt_Q @ rng.standard_normal(n)
-        xi_t = F @ xi_prev + w
-        # xi_t's slots 3/5 hold g/z ONE PERIOD BEHIND xi_t's own period
-        # (this module's/smoother.py's state-slot convention) -- so
-        # rstar_t here is r* at the period BEFORE the one xi_t nominally
-        # represents, i.e. exactly the period this loop iteration is
-        # computing gap/pi FOR (t=0 -> absolute period T, feeding forecast
-        # period T+1's gap equation as its "t-1" term). This is the value
-        # that requires xi_t's fresh process noise to become knowable --
-        # it could not have been seeded before the loop started (numerics-
-        # reviewer finding, S4 -- see rate_gap_seed's docstring above).
-        rstar_t = xi_t[3] + xi_t[5]
-
-        if forecast_r_rule == "neutral":
-            rate_gap_t = 0.0
-        else:  # "last_value"
-            rate_gap_t = r_last - rstar_t
-
-        if sv_on:
-            h_is_prev = h_is_prev + sigma_h_is * rng.standard_normal()
-            h_pc_prev = h_pc_prev + sigma_h_pc * rng.standard_normal()
-            var_is = float(np.exp(h_is_prev))  # h is log-VARIANCE (spec §1.5)
-            var_pc = float(np.exp(h_pc_prev))
-        else:
-            var_is = sigma_is**2
-            var_pc = sigma_pc**2
-
-        eps_is_t = rng.normal(0.0, np.sqrt(var_is))
-        eps_pc_t = rng.normal(0.0, np.sqrt(var_pc))
-
-        # rate_gap_t (just computed above, for THIS iteration's own period)
-        # is used immediately as "lag1" -- not deferred to the next
-        # iteration, which was the confirmed bug this fix corrects.
-        gap_t, pi_t = _fan_forecast_step(
-            gap_lag1, gap_lag2, pi_lag1, pi_lag2, pi_lag3, pi_lag4,
-            rate_gap_t, rate_gap_prev, a1, a2, a_r, b_pi, b_y, eps_is_t, eps_pc_t,
-        )
-
-        y_level[t] = gap_t + xi_t[0]
-        pi_path[t] = pi_t
-        gap_path[t] = gap_t
-        # REPORTING alignment (pre-S5 review fix, 2026-09-02, DECISIONS.md):
-        # rstar_t is r* at absolute period T+t (the slot-3/5 lag convention
-        # again), while iteration t's gap/pi/y values are for period T+t+1.
-        # Recording rstar_t at index t therefore plotted every fan point one
-        # quarter behind its axis label AND behind the other four panels.
-        # Aligned: index t-1 gets r*_{T+t}; the final index is filled after
-        # the loop by one extra F-step (r*_{T+H} only becomes visible in the
-        # period-(T+H+1) state). rate_gap_path is NOT shifted -- it remains
-        # the per-period (r-r*) INPUT used by iteration t (a diagnostic of
-        # forecast_r_rule, documented in this function's docstring), not a
-        # reporting series.
-        if t >= 1:
-            rstar_path[t - 1] = rstar_t
-        rate_gap_path[t] = rate_gap_t
-
-        xi_prev = xi_t
-        gap_lag2, gap_lag1 = gap_lag1, gap_t
-        pi_lag4, pi_lag3, pi_lag2, pi_lag1 = pi_lag3, pi_lag2, pi_lag1, pi_t
-        rate_gap_prev = rate_gap_t
-
-    # r*_{T+H} for the final fan index: one more state step (fresh process
-    # noise, same as every in-loop step) makes the period-(T+H+1) state,
-    # whose slots 3/5 hold g_{T+H}/z_{T+H}. Drawn AFTER the loop so the
-    # in-loop noise sequence (and therefore every gap/pi/y value at a given
-    # seed) is unchanged by this alignment fix.
-    w_final = sqrt_Q @ rng.standard_normal(n)
-    xi_final = F @ xi_prev + w_final
-    rstar_path[horizon - 1] = xi_final[3] + xi_final[5]
+    y_row = LW_STATE_META.obs_index("y")
+    pi_row = LW_STATE_META.obs_index("pi")
+    y_level = obs[:, y_row]
+    pi_path = obs[:, pi_row]
+    # Named reporting mapping: gap_t = y_t - y*_t; r* aligned to the same
+    # period indexing via the NEXT state row's (g,-1)/(z,-1) slots (the
+    # engine's post-loop extra row supplies the final point); rate_gap is
+    # the per-step (r-r*) INPUT -- exactly 0.0 under "neutral" because the
+    # rule and this diagnostic read the same slots the same way.
+    gap_path = y_level - states[:horizon, _S_YSTAR]
+    rstar_path = states[1:, _S_G_M1] + states[1:, _S_Z_M1]
+    rate_gap_path = r_resolved - (states[:horizon, _S_G_M1] + states[:horizon, _S_Z_M1])
 
     y_hist_last4 = np.asarray(y_hist_last4, dtype=np.float64)
     y_growth_4q = np.empty(horizon)
@@ -1564,26 +1293,16 @@ def compute_fan_draws(lw_run: LWRun, *, seed: int | None = None) -> FanDraws:
     for j, i in enumerate(idx):
         i = int(i)
         F, Q, A, Z, R, h_is, h_pc = _system_matrices_for_draw(flat, i, lw_run.sv_on)
-        a1, a2, a_r, b_y, b_pi = _extract_gap_pi_coeffs(Z, A)
-        # rstar_t below (both here and inside simulate_fan_draw's loop) sums
-        # g+z unweighted, correct only for c==1.0 -- same guard
-        # gap_pi_shock_decomposition applies to itself (numerics-reviewer,
-        # S4); dormant today (estimate_c is hard-validated False everywhere,
-        # specs/schema/lw_sv.py) but fails loudly instead of silently
-        # corrupting the fan chart if that ever changes.
-        c_check = Z[0, 3] / Z[0, 5] if Z[0, 5] != 0.0 else 1.0
-        if not np.isclose(c_check, 1.0, atol=1e-9):
-            raise NotImplementedError(
-                f"compute_fan_draws assumes c == 1.0 (spec §1.3's default; "
-                f"estimate_c is not implemented anywhere in current scope), "
-                f"but the system matrices imply c = {c_check!r}. rstar_t "
-                f"sums g+z unweighted, which is only correct for c == 1.0."
-            )
+        # The c == 1 guard: the fan's r* reporting (and the neutral rule's
+        # r := g + z resolution) sums g+z unweighted -- numerics-reviewer,
+        # S4; dormant today but fails loudly instead of silently
+        # corrupting the fan chart.
+        require_c_is_one(structural_coefficients(Z, A)["c"], "compute_fan_draws")
         sim = simulate_smoother_draw(lw_run.yobs, lw_run.x, F, Q, A, Z, R, lw_run.xi00, lw_run.P00, rng)
         xi_draw = sim.xi_draw
 
-        gap_lag1 = float(lw_run.yobs[-1, 0] - xi_draw[-1, 0])
-        gap_lag2 = float(lw_run.yobs[-2, 0] - xi_draw[-2, 0])
+        gap_lag1 = float(lw_run.yobs[-1, 0] - xi_draw[-1, _S_YSTAR])
+        gap_lag2 = float(lw_run.yobs[-2, 0] - xi_draw[-2, _S_YSTAR])
         pi_lag1 = float(lw_run.yobs[-1, 1])
         pi_lag2 = float(lw_run.yobs[-2, 1])
         pi_lag3 = float(lw_run.yobs[-3, 1])
@@ -1591,7 +1310,7 @@ def compute_fan_draws(lw_run: LWRun, *, seed: int | None = None) -> FanDraws:
         # (r-r*)_{T-1} ONLY -- the sole rate-gap value derivable before
         # simulate_fan_draw's own loop starts; see that function's
         # rate_gap_seed docstring for why (r-r*)_T cannot be seeded here.
-        rate_gap_seed = float(lw_run.r_full[-2] - (xi_draw[-1, 3] + xi_draw[-1, 5]))
+        rate_gap_seed = float(lw_run.r_full[-2] - (xi_draw[-1, _S_G_M1] + xi_draw[-1, _S_Z_M1]))
         y_hist_last4 = lw_run.yobs[-4:, 0]
         r_last = float(lw_run.r_full[-1])
 
@@ -1608,7 +1327,7 @@ def compute_fan_draws(lw_run: LWRun, *, seed: int | None = None) -> FanDraws:
             h_is_last = h_pc_last = sigma_h_is_i = sigma_h_pc_i = None
 
         out = simulate_fan_draw(
-            F, Q, a1, a2, a_r, b_pi, b_y,
+            F, Q, A, Z,
             xi_draw[-1], gap_lag1, gap_lag2, pi_lag1, pi_lag2, pi_lag3, pi_lag4,
             rate_gap_seed, y_hist_last4, r_last, rule,
             lw_run.sv_on, sigma_is_i, sigma_pc_i, h_is_last, h_pc_last,
@@ -1631,4 +1350,136 @@ def compute_fan_draws(lw_run: LWRun, *, seed: int | None = None) -> FanDraws:
         gap=gap_arr,
         rstar=rstar_arr,
         rate_gap=rate_gap_arr,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Part E: prior-predictive check (spec §4, S5-decisions item 7)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class PriorPredictiveDraws:
+    """Prior-predictive observable paths (spec §4's "what do my priors
+    imply about observable paths" check, S5-decisions item 7): ``n_draws``
+    full generative simulations over the estimation sample, each at a
+    FRESH parameter point drawn from the run's own RESOLVED priors (the
+    defaults plus the spec's overrides -- the exact config the template
+    stamped, so priors doing deliberate identification work, like the
+    sigma_g/sigma_z pile-up controls, show up exactly as the sampler sees
+    them).
+
+    ``gap``/``pi``/``y`` are ``(n_draws, T)`` simulated paths;
+    ``pi_actual``/``y_actual`` the real data for overlay. Aggregation to
+    percentile bands is ``plots.py``'s job, as everywhere else.
+    """
+
+    n_draws: int
+    dates: pd.DatetimeIndex  # (T,)
+    gap: np.ndarray  # (n_draws, T)
+    pi: np.ndarray  # (n_draws, T)
+    y: np.ndarray  # (n_draws, T)
+    pi_actual: np.ndarray  # (T,)
+    y_actual: np.ndarray  # (T,)
+
+
+def compute_prior_predictive_draws(lw_run: LWRun, *, seed: int | None = None) -> PriorPredictiveDraws:
+    """Simulate ``lw_run.spec.outputs.prior_predictive_draws`` full
+    observable paths from the prior, through the SAME machinery the run
+    itself used (S5-decisions item 7): parameters from the run's resolved
+    priors (:func:`macrotoolkit.families.lw_sv.sample_prior_params` --
+    including the template's own truncation constraints and, for an SV
+    run, the data-anchored mu_h0 initial log-variances), matrices from
+    ``build_lw_matrices``, and paths from the generic engine's
+    :func:`macrotoolkit.engine.simulate_forward` -- initial state drawn
+    from the run's own (xi00, P00) prior, endogenous y/pi feedback closed
+    through the family's declared feedback map, the REAL r series supplied
+    as the exogenous input (:class:`macrotoolkit.engine.DataPathExogRule`),
+    and the real 4 pre-sample lag quarters seeding the observable
+    registers. Needs no posterior draws at all -- only the run's spec and
+    data snapshot.
+
+    ``seed`` defaults to ``lw_run.spec.sampler.seed`` (documented,
+    reproducible default, same convention as the other compute_* entry
+    points).
+    """
+    from macrotoolkit.families.lw_sv import lw_mu_h0_anchors, sample_prior_params
+    from macrotoolkit.run import build_render_context
+    from macrotoolkit.smoother import _psd_sqrt, build_lw_matrices
+
+    T = lw_run.yobs.shape[0]
+    n_draws = lw_run.spec.outputs.prior_predictive_draws
+    priors = build_render_context(lw_run.spec)["priors"]
+    sv_on = lw_run.sv_on
+
+    mu_h0_is = mu_h0_pc = None
+    if sv_on:
+        mu_h0_is, mu_h0_pc = lw_mu_h0_anchors(lw_run.y_full, lw_run.pi_full, lw_run.r_full)
+
+    y_row = LW_STATE_META.obs_index("y")
+    pi_row = LW_STATE_META.obs_index("pi")
+    # Observable seeds: the real 4 pre-sample lag quarters (full-array
+    # indices 0..3; estimation row 0 = full index 4).
+    obs_seeds = {
+        "y": {1: float(lw_run.y_full[3]), 2: float(lw_run.y_full[2])},
+        "pi": {
+            1: float(lw_run.pi_full[3]),
+            2: float(lw_run.pi_full[2]),
+            3: float(lw_run.pi_full[1]),
+            4: float(lw_run.pi_full[0]),
+        },
+    }
+    # Real r as the exogenous input: step t (estimation row t, period t+1)
+    # needs r_{t} = full index t+3 as its lag-1 value; the lag-2 seed is
+    # r at full index 2.
+    r_lag1_path = lw_run.r_full[3 : 3 + T]
+    exog_seeds = {"r": {2: float(lw_run.r_full[2])}}
+
+    sqrt_P00 = _psd_sqrt(lw_run.P00)
+
+    gap = np.empty((n_draws, T))
+    pi = np.empty((n_draws, T))
+    y = np.empty((n_draws, T))
+
+    rng = np.random.default_rng(seed if seed is not None else lw_run.spec.sampler.seed)
+
+    for j in range(n_draws):
+        params = sample_prior_params(priors, sv_on, rng, mu_h0_is=mu_h0_is, mu_h0_pc=mu_h0_pc)
+        if sv_on:
+            # build_lw_matrices needs SOME sigma_is/sigma_pc to shape R,
+            # which the engine's SV noise model then replaces entirely --
+            # same placeholder convention as _system_matrices_for_draw.
+            mat_params = {**params, "sigma_is": 1.0, "sigma_pc": 1.0}
+            meas_noise = RandomWalkLogVarianceNoise(
+                (params["h0_is"], params["h0_pc"]),
+                (params["sigma_h_is"], params["sigma_h_pc"]),
+            )
+        else:
+            mat_params = params
+            meas_noise = ConstantMeasurementNoise((params["sigma_is"], params["sigma_pc"]))
+        F, Q, A, Z, _ = build_lw_matrices(mat_params, c=1.0)
+
+        # Initial state from the run's own explicit prior (spec §2.2: no
+        # ad-hoc diffuse hacks) -- one fresh draw per parameter point.
+        xi_init = lw_run.xi00 + sqrt_P00 @ rng.standard_normal(len(lw_run.xi00))
+
+        out = simulate_forward(
+            F, Q, A, Z, LW_STATE_META,
+            xi_init, obs_seeds, exog_seeds,
+            {"r": DataPathExogRule(r_lag1_path)}, meas_noise, T, rng,
+        )
+        obs = out["obs"]
+        states = out["states"]
+        y[j] = obs[:, y_row]
+        pi[j] = obs[:, pi_row]
+        gap[j] = obs[:, y_row] - states[:T, _S_YSTAR]
+
+    return PriorPredictiveDraws(
+        n_draws=n_draws,
+        dates=lw_run.dates,
+        gap=gap,
+        pi=pi,
+        y=y,
+        pi_actual=lw_run.yobs[:, 1].copy(),
+        y_actual=lw_run.yobs[:, 0].copy(),
     )

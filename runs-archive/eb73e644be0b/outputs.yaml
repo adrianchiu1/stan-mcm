@@ -1,0 +1,6 @@
+forecast_r_rule: neutral
+horizon: 12
+irf_horizon: 20
+irf_vol_reference: end_of_sample
+prior_predictive_draws: 200
+smoother_draws: all

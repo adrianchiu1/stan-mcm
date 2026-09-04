@@ -1,0 +1,109 @@
+{
+  "divergences": 0,
+  "e_bfmi_per_chain": [
+    0.8774660113711901,
+    0.9897892593707596,
+    0.8895246091558525,
+    0.8824614056793347
+  ],
+  "ess_bulk_min": 1778.9569424443298,
+  "ess_tail_min": 917.0248627919635,
+  "max_treedepth_config": 12,
+  "max_treedepth_hits": 0,
+  "params": {
+    "a1": {
+      "ess_bulk_min": 3347.553964430911,
+      "ess_tail_min": 3757.3175611621355,
+      "rhat_max": 1.0006705704072891
+    },
+    "a2": {
+      "ess_bulk_min": 3272.829709519335,
+      "ess_tail_min": 3575.2774052036057,
+      "rhat_max": 1.0006409385527735
+    },
+    "a_r": {
+      "ess_bulk_min": 4023.486341998767,
+      "ess_tail_min": 2192.8147752447744,
+      "rhat_max": 1.0003253752122045
+    },
+    "b_pi": {
+      "ess_bulk_min": 6821.69456942905,
+      "ess_tail_min": 4215.6828258613805,
+      "rhat_max": 1.000034888999235
+    },
+    "b_y": {
+      "ess_bulk_min": 4246.431152026309,
+      "ess_tail_min": 2143.806593926675,
+      "rhat_max": 1.0009457037214335
+    },
+    "h0_is_raw": {
+      "ess_bulk_min": 8368.829624938337,
+      "ess_tail_min": 4714.64478820967,
+      "rhat_max": 1.0015724870355782
+    },
+    "h0_pc_raw": {
+      "ess_bulk_min": 6314.455881423147,
+      "ess_tail_min": 4756.784607061011,
+      "rhat_max": 1.0007835509800171
+    },
+    "h_is": {
+      "ess_bulk_min": 3659.7992585971087,
+      "ess_tail_min": 3952.912706919289,
+      "rhat_max": 1.0020880924883993
+    },
+    "h_pc": {
+      "ess_bulk_min": 6021.2141450949,
+      "ess_tail_min": 4418.646757878518,
+      "rhat_max": 1.0018560879241472
+    },
+    "nu_is": {
+      "ess_bulk_min": 7983.112165621866,
+      "ess_tail_min": 3382.501637774947,
+      "rhat_max": 1.0046093971158212
+    },
+    "nu_pc": {
+      "ess_bulk_min": 7820.507108897122,
+      "ess_tail_min": 3405.7701487614595,
+      "rhat_max": 1.0034042126095528
+    },
+    "sigma_g": {
+      "ess_bulk_min": 8089.621608816168,
+      "ess_tail_min": 3706.8989284145896,
+      "rhat_max": 1.00047597266649
+    },
+    "sigma_h_is": {
+      "ess_bulk_min": 3185.1344595442,
+      "ess_tail_min": 3337.50961092263,
+      "rhat_max": 1.0009760412711104
+    },
+    "sigma_h_pc": {
+      "ess_bulk_min": 2502.28675700755,
+      "ess_tail_min": 4309.282212641566,
+      "rhat_max": 1.0010639857624397
+    },
+    "sigma_ystar": {
+      "ess_bulk_min": 1778.9569424443298,
+      "ess_tail_min": 917.0248627919635,
+      "rhat_max": 1.000899924748674
+    },
+    "sigma_z": {
+      "ess_bulk_min": 5615.8931739295695,
+      "ess_tail_min": 3077.399422025749,
+      "rhat_max": 1.0008730622087703
+    }
+  },
+  "reasons": [
+    "no divergences, treedepth hits, low E-BFMI, high R-hat, or low ESS detected"
+  ],
+  "rhat_max": 1.0046093971158212,
+  "thresholds": {
+    "ebfmi_fail": 0.2,
+    "ebfmi_warn": 0.3,
+    "ess_fail": 100,
+    "ess_warn": 400,
+    "note": "S1 placeholder thresholds (Vehtari et al. 2021 rank-normalized R-hat/ESS conventions; Stan's own 0.3 E-BFMI warning heuristic). S4 formalizes diagnostics per lw-sv-spec.md \u00a74.",
+    "rhat_fail": 1.05,
+    "rhat_warn": 1.01
+  },
+  "verdict": "PASS"
+}

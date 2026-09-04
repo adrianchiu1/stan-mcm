@@ -198,13 +198,37 @@ class RunSpec(BaseModel):
         return self
 
     def to_canonical_yaml(self) -> str:
-        """Serialize this spec deterministically: parsed-and-revalidated
-        field values, dumped with sorted keys. Used as one input to the run
-        identity hash (``macrotoolkit.run``) so YAML formatting, comments,
-        or key order in the source file never change a run's hash -- only
-        the *validated meaning* of the spec does.
+        """Serialize the FULL spec deterministically: parsed-and-revalidated
+        field values, dumped with sorted keys, so YAML formatting, comments,
+        or key order in the source file never change the serialization --
+        only the *validated meaning* of the spec does.
+
+        NOTE: since the S4.5 run-identity split (S5-decisions item 3), the
+        run-identity hash consumes :meth:`to_estimation_yaml` (which
+        EXCLUDES ``outputs``), not this full form.
         """
         payload = self.model_dump(mode="json")
+        return yaml.safe_dump(payload, sort_keys=True, default_flow_style=False)
+
+    def to_estimation_yaml(self) -> str:
+        """The ESTIMATION identity serialization (S5-decisions item 3):
+        the canonical spec WITHOUT the ``outputs:`` block. ``outputs``
+        configures report/output modules only -- it never reaches the
+        sampler, the rendered Stan program, or the data pipeline -- so two
+        specs differing only in ``outputs`` describe the SAME estimation
+        and must map to the same run identity (report options live in the
+        run dir, outside the hash; changing the report-option schema no
+        longer orphans MCMC runs). Same canonicalization discipline as
+        :meth:`to_canonical_yaml` (validated values, sorted keys)."""
+        payload = self.model_dump(mode="json")
+        payload.pop("outputs", None)
+        return yaml.safe_dump(payload, sort_keys=True, default_flow_style=False)
+
+    def outputs_to_canonical_yaml(self) -> str:
+        """Canonical serialization of the ``outputs:`` block alone -- the
+        report/output-module config written to a run dir's ``outputs.yaml``
+        (outside the run-identity hash; see :meth:`to_estimation_yaml`)."""
+        payload = self.model_dump(mode="json")["outputs"]
         return yaml.safe_dump(payload, sort_keys=True, default_flow_style=False)
 
 

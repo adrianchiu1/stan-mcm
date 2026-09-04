@@ -62,11 +62,16 @@ def _sv_h_paths(params: dict, T: int, seed_offset: int = 0) -> tuple[np.ndarray,
 def test_eps_ystar_gap_and_rstar_identically_zero() -> None:
     """A pure potential-level shock never enters g/z's state slots or the
     IS curve's rate-gap term -- checkable structural fact, not a
-    tautology."""
+    tautology. rstar stays EXACTLY zero (a zero state path is zero with no
+    arithmetic); gap is zero up to float cancellation only, since the
+    engine (S5-decisions item 1) computes y via the measurement equation
+    and subtracts y* -- the a1*y_{t-1} term and Z's -a1*y*_{t-1} entry
+    cancel algebraically but round independently (~1 ulp of the response
+    scale; DECISIONS.md 2026-09-02)."""
     params = _no_sv_point()
     F, Q, A, Z, R = _matrices_for(params)
     resp = impulse_response_for_shock(F, A, Z, "ystar", 0.42, _HORIZON)
-    np.testing.assert_array_equal(resp["gap"], np.zeros(_HORIZON))
+    np.testing.assert_allclose(resp["gap"], np.zeros(_HORIZON), atol=1e-12)
     np.testing.assert_array_equal(resp["rstar"], np.zeros(_HORIZON))
 
 
@@ -285,10 +290,12 @@ def test_compute_irf_draws_sv_shapes_and_finite(s4_sv_lw_run) -> None:
         for name, arr in irf.responses[shock].items():
             assert arr.shape == (n_draws, irf.horizon), (shock, name)
             assert np.all(np.isfinite(arr)), (shock, name)
-    # eps_ystar's gap/rstar columns are identically zero at EVERY draw too
-    # (not just the hand-built structural test above) -- a real-run
-    # end-to-end regression guard.
-    np.testing.assert_array_equal(irf.responses["ystar"]["gap"], np.zeros_like(irf.responses["ystar"]["gap"]))
+    # eps_ystar's gap/rstar columns are zero at EVERY draw too (not just
+    # the hand-built structural test above) -- a real-run end-to-end
+    # regression guard. gap to float cancellation only (the engine's
+    # measurement-equation grouping -- see
+    # test_eps_ystar_gap_and_rstar_identically_zero); rstar exactly.
+    np.testing.assert_allclose(irf.responses["ystar"]["gap"], np.zeros_like(irf.responses["ystar"]["gap"]), atol=1e-12)
     np.testing.assert_array_equal(irf.responses["ystar"]["rstar"], np.zeros_like(irf.responses["ystar"]["rstar"]))
 
 

@@ -1,0 +1,25 @@
+# The MANDATED sigma_g/sigma_z prior-sensitivity sweep (lw-sv-spec.md §1.6:
+# "Prior-sensitivity of sigma_g and sigma_z must be documented with a small
+# sweep -- these priors do identification work"; shipped as the first use of
+# the reusable `mtk sweep` tool per plans/S5-decisions.md item 9).
+#
+# Design (recorded in DECISIONS.md, 2026-09-02): one-at-a-time halving/
+# doubling of each pile-up prior's Half-Normal scale around the spec §1.6
+# defaults (sigma_g sd 0.03, sigma_z sd 0.08) on the pre-COVID reference
+# window (spec_sv.yaml, 1961Q1-2019Q2) -- 5 cells including the shared
+# baseline, each an ordinary immutable run (~40-80 min); the baseline cell
+# IS the reference SV run, so an existing run store satisfies it
+# idempotently. Run: `mtk sweep examples/us_lw_sv/sweep_sigma_g_z.yaml`.
+name: sigma_g_z
+base_spec: spec_sv.yaml
+cells:
+  - label: baseline
+    priors: {}
+  - label: sigma_g_tight        # Half-N(0, 0.015^2): half the default scale
+    priors: { sigma_g: { sd: 0.015 } }
+  - label: sigma_g_loose        # Half-N(0, 0.06^2): double
+    priors: { sigma_g: { sd: 0.06 } }
+  - label: sigma_z_tight        # Half-N(0, 0.04^2): half
+    priors: { sigma_z: { sd: 0.04 } }
+  - label: sigma_z_loose        # Half-N(0, 0.16^2): double
+    priors: { sigma_z: { sd: 0.16 } }

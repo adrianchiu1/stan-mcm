@@ -6,7 +6,6 @@ from pathlib import Path
 
 import click
 
-from macrotoolkit import report as report_module
 from macrotoolkit.run import REPO_ROOT
 from macrotoolkit.run import run as execute_run
 
@@ -30,6 +29,27 @@ def run_cmd(spec_path: str) -> None:
         click.echo(f"Run {result.run_id} complete (verdict: {result.verdict}) -> {result.run_dir}")
     else:
         click.echo(f"Run {result.run_id} already exists and is complete (idempotent no-op) -> {result.run_dir}")
+
+
+@main.command("sweep")
+@click.argument("sweep_path", type=click.Path(exists=True, dir_okay=False))
+def sweep_cmd(sweep_path: str) -> None:
+    """Run the prior sweep described by SWEEP_PATH (base spec + prior
+    override grid, S5-decisions item 9): every cell is an ordinary
+    immutable run in runs/ (idempotent cell-by-cell), and one comparison
+    report -- posteriors, prior-to-posterior contraction, headline series
+    across the grid -- is written under sweeps/<name>/."""
+    from macrotoolkit.sweep import run_sweep
+
+    try:
+        result = run_sweep(sweep_path)
+    except Exception as exc:
+        click.echo(f"error: {exc}", err=True)
+        sys.exit(1)
+    for cell in result.cells:
+        state = "new" if cell.run_result.is_new else "existing"
+        click.echo(f"  cell {cell.label}: run {cell.run_result.run_id} ({state}, verdict: {cell.verdict})")
+    click.echo(f"Sweep {result.name} complete -> {result.report_path}")
 
 
 @main.command("report")
@@ -65,7 +85,23 @@ def report_cmd(run_hash: str, runs_root: str | None) -> None:
         sys.exit(1)
 
     try:
-        out_path = report_module.write_report(run_dir)
+        # Registry dispatch (S5-decisions item 4): each family declares its
+        # own report assembler; a family without one is a clear error, not
+        # a guessed-at default.
+        from macrotoolkit.run import load_run_spec
+        from specs.schema import get_family
+
+        spec = load_run_spec(run_dir)
+        writer = get_family(spec.model.family).resolve("report_writer")
+        if writer is None:
+            click.echo(
+                f"error: model.family {spec.model.family!r} declares no "
+                f"report assembler in FAMILY_REGISTRY (specs/schema) -- "
+                f"this family has no report support yet.",
+                err=True,
+            )
+            sys.exit(1)
+        out_path = writer(run_dir)
     except Exception as exc:
         click.echo(f"error: {exc}", err=True)
         sys.exit(1)

@@ -15,7 +15,7 @@ Current scope (spec §7, S3):
 
 Priors: the §1.6 defaults live here as ``DEFAULT_PRIORS`` -- a single
 source of truth consumed by the Stan template's render context
-(``macrotoolkit.run.build_render_context``), the G1/G2 parameter-point
+(``macrotoolkit.families.lw_sv.build_render_context``), the G1/G2 parameter-point
 generators (``tests/g1_harness.py``), and the Python KF mirror's tests.
 ``RunSpec.priors`` keys override these per run.
 
@@ -132,6 +132,18 @@ class LwSvOutputs(BaseModel):
     forecast_r_rule: Literal["neutral", "last_value", "user_path"] = Field(
         default="neutral",
         description="Real-rate-gap convention for fan-chart forecasting (spec §3.3).",
+    )
+    # Since the run-identity split (S5-decisions item 3) outputs sits
+    # OUTSIDE the hash, so adding report options like this one no longer
+    # orphans existing MCMC runs.
+    prior_predictive_draws: int = Field(
+        default=200,
+        ge=1,
+        description=(
+            "Number of full observable paths simulated from the run's own "
+            "resolved priors for the prior-predictive check figure "
+            "(spec §4, S5-decisions item 7)."
+        ),
     )
 
     @field_validator("forecast_r_rule")

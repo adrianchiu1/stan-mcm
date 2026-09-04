@@ -3,6 +3,391 @@
 One dated line per judgment call not fixed by the spec, with rationale.
 Newest first.
 
+- **2026-09-03 — S5 COMPLETE (stage-end entry).** Everything in the
+  binding scope record (`plans/S5-decisions.md`, all 17 recorded
+  decisions) is delivered and green on `claude/s5-macrotoolkit-sh26bc`:
+  the S4.5 refactor block (items 2, 1, 3, 4 — one behavior-preserving
+  commit each, preservation demonstrated: bit-identical for item 2,
+  ~1.8e-14 max deviation for item 1, reviewer-reproduced), both
+  reference runs regenerated at the final hash with tracked
+  draw-thinned fixtures in `runs-archive/` (item 16), the S5 features
+  (prior-predictive figure in every report, `mtk sweep` + the mandated
+  sigma_g/sigma_z sweep, the generic SBC harness + G4 passed at its
+  pre-registered design, the G5b informational exhibit), and the docs
+  pass (root README with exhibit figures, `docs/kf-capability-matrix.md`
+  scoped against UCSV, HANDOFF.md rewritten as the stage-end handoff).
+  Three numerics-reviewer passes ran clean; no `stan/` file was touched
+  (as the brief anticipated). Closing fast-suite count: 284 passed,
+  0 skipped (up from 219 passed, 2 skipped at stage start; the old
+  skips are gone for good because the tracked `runs-archive/` fixtures
+  make the run-dependent acceptance tests runnable on any checkout).
+
+  **Item 11's harness family-parameterization audit, conclusions on
+  record for the UCSV stage:** the SBC engine is the one harness that
+  was actually generalized this stage (`tests/sbc_harness.py` takes an
+  `SbcDesign`; G4 is its second instantiation, G3 pinned
+  byte-equivalent). The audit of G1/G2 concluded both are liftable the
+  same way but should be lifted only when UCSV needs them, not
+  speculatively: G1's mirror-gate SHAPE (draw N prior parameter points,
+  evaluate the rendered Stan loglik and the Python KF mirror on each,
+  assert agreement at 1e-8 across the filter paths) is
+  family-parameterizable with the family supplying its Stan loglik
+  harness template and its matrix builders; G2's coverage/bias gate
+  ARITHMETIC (pooled interval coverage bands, per-parameter bias tests
+  over simulated datasets) is family-agnostic once a family supplies
+  the same two pieces SBC already demands — a prior sampler and a
+  structural-equation simulator. The necessarily family-authored pieces
+  are therefore exactly two per family: the Stan loglik test harness
+  template and the structural simulator; prior samplers and data/render
+  builders are already registry capabilities. Nothing else in the gate
+  ladder contains lw_sv-specific logic that would need a third
+  mechanism.
+
+- **2026-09-03 — G4 PASSED: SBC, full SV variant, at exactly the
+  pre-registered design (nothing adjusted).** 100 replications, T=80,
+  2 chains x 750+750 per rep, seeds G4_SEED_BASE=20260910+i, fixed mu_h0
+  anchors — the design recorded in this file BEFORE the run, unchanged.
+  Per-parameter chi^2 uniformity (10 bins, 10 expected/bin, floor 0.001),
+  all 12 ranked quantities comfortably clear with healthy spread:
+  a1 0.076, a2 0.956, a_r 0.596, b_pi 0.494, b_y 0.067, sigma_ystar
+  0.699, sigma_g 0.514, sigma_z 0.978, sigma_h_is 0.122, sigma_h_pc
+  0.964, h0_is 0.276, h0_pc 0.137. Sampler health: 8 divergent
+  transitions in 100 x 1,500 = 150,000 post-warmup draws (ceiling 150).
+  The formal gate (`pytest -m slow tests/test_g4_sbc.py`, which reloads
+  the completed ranks.csv without re-fitting and applies the
+  pre-registered accept/reject rule) passes. Execution: ~112s/rep
+  (~3.1h of compute), run via the crash-resume driver in two segments
+  around one container restart (14 reps banked before it, 86 after —
+  byte-identical to an uninterrupted run by the per-rep seeding).
+  Artifacts (rank histograms + per-rep CSV) in tests/artifacts/g4_sbc/
+  (gitignored; regenerable from the fixed seeds). With G4 green, the
+  full prior-to-posterior pipeline — template, time-varying-R KF
+  likelihood, non-centered SV block, priors-as-stamped, NUTS — is
+  calibrated end-to-end for the PRODUCTION SV variant, and every gate in
+  spec §5 (as amended: G5b informational) is green.
+
+- **2026-09-03 — The mandated sigma_g/sigma_z sweep COMPLETE (item 9's
+  first production use; spec §1.6's required sensitivity documentation).**
+  `mtk sweep examples/us_lw_sv/sweep_sigma_g_z.yaml`, 5 cells on the
+  pre-COVID reference window, report + cells.json under
+  `sweeps/sigma_g_z/`. Cells (all 0 divergences): baseline =
+  `a00958509083` PASS; sigma_g_tight (sd 0.015) = `2d3fd1e51323` WARN
+  (max R-hat 1.016, min bulk ESS 410 -- the tightened prior slows mixing
+  but stays healthy); sigma_g_loose (sd 0.06) = `f1053cde4ce1` PASS;
+  sigma_z_tight (sd 0.04) = `52745be87ed0` PASS; sigma_z_loose (sd 0.16)
+  = `2e6f7f9d2749` WARN (R-hat 1.008). Findings, the numbers the spec
+  wanted on record:
+
+  1. **The pile-up priors do the identification work, measurably.** The
+     posteriors scale near-proportionally with the prior scales --
+     sigma_g median 0.036 / 0.068 / 0.109 under prior sd 0.015 / 0.03 /
+     0.06; sigma_z median 0.027 / 0.054 / 0.115 under 0.04 / 0.08 / 0.16
+     -- and the posterior sds are barely below the prior sds (contraction
+     ~0.04-0.14): the data contribute little information about these
+     scales, which is exactly the pile-up problem the priors exist to
+     resolve. Cross-parameter spillover is minimal (sigma_z's posterior
+     moves <0.01 across the sigma_g cells and vice versa); other
+     structural parameters are stable across cells (headline overlay in
+     the sweep report).
+  2. **The G5b attribution cross-check holds, monotonically.** The
+     filtered final-period (2019Q2) r* gap to the published one-sided
+     series moves with the sigma_z prior exactly as attributed: +1.54
+     (sigma_z_tight, final z +0.02) / +1.44 (baseline, z -0.07) / +1.16
+     (sigma_z_loose, z -0.35). Doubling the prior recovers ~0.3pp of the
+     gap by letting |z| grow; full convergence to HLW's z ~ -1.6 would
+     require an MUE-scale sigma_z far beyond the doubled prior --
+     consistent with cause 1 of the G5b exhibit being the dominant,
+     deliberate channel.
+
+  Wall-time note: cells took ~1-2.5h each on degraded hosts; the sweep
+  survived two container restarts via cell-level idempotency (see the
+  infra entry below).
+
+- **2026-09-03 — Environment: this session's container restarts
+  unpredictably (~2.5h apart observed), killing in-flight sampling;
+  long compute now runs restart-tolerant.** Two restarts on 2026-09-02
+  killed the sweep's first cell at ~72 and ~75 minutes (detached AND
+  harness-tracked processes both die; the run store's partial-dir guard
+  caught both cleanly -- partial dirs removed after inspection, never
+  silently overwritten). Mitigations now standing: sweeps resume
+  cell-by-cell (run-store idempotency, free); the SBC engine gained
+  crash-resume from its incrementally-flushed ranks.csv (validated
+  header/contiguity, byte-identical to an uninterrupted run since every
+  replication is fully determined by seed_base + i -- pinned by a fast
+  stub-model test); a 25-minute self-check chain plus an hourly watchdog
+  trigger detect death and relaunch. Also observed: per-iteration speed
+  varies ~3x across container boots (same chain/seed), so wall-time
+  extrapolations (G4's smoke) must be read with that variance in mind.
+
+- **2026-09-02 — Item 16 COMPLETE: both reference SV runs regenerated at
+  the post-migration estimation identity, reproducing their recorded
+  diagnostics exactly; tracked thinned archive created.**
+  `spec_sv.yaml` → run `a00958509083` (was 70ad47166eaf): PASS, 0
+  divergences, 0 treedepth hits, max R-hat 1.0045, min bulk/tail ESS
+  2627/1620, E-BFMI 0.88–1.01 — S3/S4's recorded values to the last
+  digit. `spec_sv_full_vintage.yaml` → run `eb73e644be0b` (was
+  9d10bcf32a40 in S3, then 930459224ca0 after S4's outputs schema): PASS,
+  0 divergences, max R-hat 1.0046, min ESS 1778/917, E-BFMI 0.88–0.99 —
+  again the recorded values. The hash changes are purely the item-3
+  identity migration (numerics demonstrably unchanged). Both runs
+  archived draw-thinned ×10 into the TRACKED `runs-archive/` (4.0/4.5 MB;
+  `scripts/archive_run.py`; per-dir ARCHIVE_NOTE.md labels them
+  development fixtures with regeneration instructions), and the report
+  acceptance test now falls back to a tmp copy of the archive when
+  `runs/` is absent — fresh containers get real output-layer acceptance
+  coverage (including the new prior-predictive figure) without paying
+  40–80 minutes of sampling first. Full reports generated for both runs
+  from the new pipeline.
+
+- **2026-09-02 — S5 item 8 DELIVERED: the G5b informational exhibit
+  (docs/exhibits/), on the regenerated reference run a00958509083.** Our
+  FILTERED (one-sided, per-posterior-draw KF, G5a-validated reporting
+  mapping, median ± 90% band) series vs the published one-sided HLW
+  series (real-time workbook, 2019Q2 vintage -- their own header: "All
+  estimates are one-sided"). Measured: r* corr 0.941, mean |diff| 0.65
+  (0.96 over 2000+), final-period diff +1.44; output gap corr 0.829; g
+  corr 0.921 with final diff -0.07. The r* = g + z identity makes the
+  dominant attribution DIRECTLY measurable and the exhibit computes it:
+  the +1.44 final r* gap decomposes into +1.51 from z and -0.07 from g --
+  essentially the entire late-sample gap sits in z, exactly where the
+  deliberate Half-N(0, 0.08²) sigma_z pile-up prior acts; the remaining
+  attributed causes (Bayesian median vs MLE plug-in, SV vs constant
+  variances, data vintage ~0.06pp-scale, initialization) are documented
+  on the exhibit. NO pass/fail, per the item-8 demotion; the sweep's
+  sigma_z_loose cell will provide the direct prior-sensitivity
+  cross-check once run. Note the pre-S5 review's "~90bp of r* at 2019"
+  figure referred to the earlier no-SV configuration's smoothed
+  comparison; this exhibit's own measured one-sided numbers (+1.44,
+  z-attributed) supersede it for the SV reference run and are the ones
+  the README will quote.
+
+- **2026-09-02 — G4 PRE-REGISTRATION (S5-decisions item 10): the full-SV
+  SBC design, fixed BEFORE the run starts; and the family-parameterized
+  SBC engine (item 11).** The reduced design, recorded here so it cannot
+  quietly shrink (or grow) to pass -- pinned literally by
+  `tests/test_g4_sbc.py::test_g4_design_constants_are_the_preregistered_ones`:
+
+  - **N_REPLICATIONS = 100**, **SIM_T = 80** (vs G3's 200 x 120 -- the
+    item-10 reduction sized toward ~1 day of compute);
+  - sampler per replication: **2 chains x 750 warmup + 750 sampling**,
+    adapt_delta 0.95, max_treedepth 12 (G3's exact per-rep settings, so
+    the only reductions are reps and T);
+  - ranks from **99** evenly thinned pooled draws, **10** chi^2 bins (10
+    expected/bin at 100 reps, G3's per-bin resolution), p-value floor
+    **0.001** per parameter; total-divergence ceiling **150** (0.1% of
+    pooled post-warmup draws, G3's fraction);
+  - **12 ranked quantities**: the 10 scalar statics (a1, a2, a_r, b_pi,
+    b_y, sigma_ystar, sigma_g, sigma_z, sigma_h_is, sigma_h_pc) plus the
+    initial log-variances h0_is/h0_pc recovered from the posterior's
+    non-centered h0_*_raw via h0 = mu_h0 + sd*raw (the template's own
+    line);
+  - seeds: G4_SEED_BASE = 20260910 (rep i fully reproducible from
+    seed_base + i), conditioning data from CONDITIONING_SEED = 20260909
+    (G3's fixed-conditioning pattern at G4's own seed and T);
+  - prior config: production defaults + the documented
+    SBC_STATIONARITY_PRIOR_CONFIG (item 6 -- the exact a1/a2 override G3
+    ran and passed with), through the production override path, with
+    render-time assertion that the stamped prior equals the sampled prior;
+  - **fixed mu_h0 anchors** (the SV analogue of G3's fixed Y_ANCHOR):
+    production derives mu_h0 from the run's own data, but an SBC
+    simulator draws h_0 before any data exists, so both the simulator's
+    h_0 draw and the fit's data use the constants 2*ln(0.75) (IS) /
+    2*ln(0.80) (PC) -- the magnitudes the real US window produces. The
+    Stan program takes mu_h0 as plain data, so this validates the same
+    program the runtime runs, at a fixed rather than data-chosen anchor.
+
+  Execution rule: a <=3-replication smoke may run first SOLELY to measure
+  per-replication wall cost (its reps use the same seeds and are part of
+  the design, re-run identically in the full pass); if the measured cost
+  extrapolates materially beyond ~1 day for the 100 reps, STOP AND ASK
+  before changing anything (per the session's standing instruction) --
+  the design above does not shrink silently.
+
+  Item 11 alongside: `tests/sbc_harness.py` is the generic engine
+  (design in -- family, options, prior config, prior sampler, simulator,
+  data builder, ranked quantities, constants -- rank statistics out),
+  built by generalizing G3's loop verbatim. G3's gate file is retained
+  UNCHANGED (its recorded 2026-08-31 pass corresponds to that exact
+  code); a fast equivalence pin proves the engine reproduces G3's
+  recorded per-replication generation path byte-for-byte from the same
+  seeds, so future gates (G4 now, UCSV later) are instantiations, not
+  reconstructions. G1/G2 harness family-parameterization audit deferred
+  to the stage-end docs pass, per plan.
+
+- **2026-09-02 — S5 item 9 landed: `mtk sweep`, the reusable prior-
+  sensitivity sweep tool; the mandated sigma_g/sigma_z sweep is its first
+  use.** Design decisions: (1) a sweep adds NO storage concept -- every
+  cell is a normal hash-identified immutable run (cell spec = base spec +
+  the cell's prior overrides merged over its `priors:` block, run via
+  `run(spec_override=...)` so no temp spec files land next to the user's
+  own; data still resolves against the base spec's directory), which
+  makes sweeps idempotent cell-by-cell for free and keeps every cell's
+  full per-run report available via `mtk report`. (2) The comparison
+  report (`sweeps/<name>/report.html` + `cells.json`, gitignored like
+  runs/) shows the cell table, per-parameter posterior summaries, the
+  prior→posterior CONTRACTION readout `1 - (posterior sd / prior sd)^2`
+  computed per cell against THAT CELL'S own resolved prior (prior sds
+  Monte-Carlo'd through the family's `prior_sd_table` capability =
+  `sample_prior_params`, so any stampable prior is covered by the same
+  code path the prior-predictive uses), and the family's `headline_series`
+  overlay (lw_sv: posterior-median r* and gap, smoother draws thinned x5
+  report-side). Both are registry capabilities, so the tool is family-
+  generic; a family declaring neither still gets the tables. (3) The
+  mandated sweep (`examples/us_lw_sv/sweep_sigma_g_z.yaml`, spec §1.6's
+  "small sweep" for the priors that do identification work): one-at-a-
+  time halving/doubling of each pile-up Half-Normal scale around the
+  defaults (sigma_g sd 0.015/0.03/0.06; sigma_z sd 0.04/0.08/0.16) on the
+  pre-COVID reference window -- 5 cells, the baseline cell being the
+  reference SV run itself (idempotent against the regenerated store).
+  End-to-end tested with a tiny 2-cell lw_sv sweep in the fast suite.
+
+- **2026-09-02 — S5 item 7 landed: the spec §4 prior-predictive check,
+  generically, in every run report.** `compute_prior_predictive_draws`
+  (results_lw Part E) simulates `outputs.prior_predictive_draws` (default
+  200; a new outputs field, addable without orphaning runs thanks to item
+  3's split) full observable paths from the run's OWN RESOLVED priors --
+  `build_render_context(spec)["priors"]`, defaults + overrides, exactly
+  what the template stamped -- through the same machinery the run used:
+  parameters via the new `families.lw_sv.sample_prior_params` (template
+  distributions and truncation constraints mirrored; rejection sampling
+  for the constrained normals, which equals Stan's renormalized truncated
+  prior; capped at 10k attempts so a pathological override fails loudly),
+  matrices via `build_lw_matrices`, paths via the generic engine's
+  `simulate_forward` with xi_0 ~ N(xi00, P00), real pre-sample seeds, the
+  real r series as exogenous input (new stateful `DataPathExogRule`;
+  engine contract: rules resolve exactly once per step in order), and --
+  SV variant -- the data-anchored h_0 draw feeding
+  `RandomWalkLogVarianceNoise`. One figure per report (gap + inflation
+  paths, spec §4's wording; real inflation overlaid), grouped under the
+  DIAGNOSTICS block per the reviewer's ordering finding (spec §3.5
+  numbers only §3.1-3.4 as output sections). Needs no posterior draws.
+  Fresh numerics-reviewer pass: clean on all five checked dimensions
+  (prior-sampler-vs-template equality, seed/lag indexing verified
+  empirically against build_lw_regressors, SV h timing, log-variance
+  conventions, placeholder-sigma independence); its three suggestions
+  (section ordering, the rejection cap, a seed-literal regression test
+  spying the engine call) are all incorporated. This commit also adds the
+  family-capability groundwork the next features consume:
+  `prior_scalar_sds` + `headline_series` (the sweep's contraction/overlay
+  inputs) and `SBC_STATIONARITY_PRIOR_CONFIG` (item 6's documented,
+  reusable SBC prior config -- G3's recorded override promoted to family
+  level, consumed by G4).
+
+- **2026-09-02 — S4.5 item 4 landed (S5-decisions): the FamilyEntry
+  contract is complete; no if/elif family dispatch remains.**
+  `FAMILY_REGISTRY` (specs/schema) now declares every family capability:
+  the existing spec-side fields (options model, template, required
+  mapping, outputs model) plus numerics-side capabilities as LAZY
+  `"module:attr"` dotted paths -- `build_stan_data`,
+  `build_render_context`, `state_meta` (items 1-2's declarations),
+  `results_loader`, `report_writer` -- resolved on first use via
+  `FamilyEntry.resolve`. Dotted paths rather than direct references
+  because `specs.schema` must stay importable without numpy/pandas
+  (`macrotoolkit` imports it at module scope; eager references would
+  create an import cycle); a registry typo still fails loudly, and
+  `tests/test_family_registry.py` resolves EVERY declared path at test
+  time so typos cannot survive the suite. `run.py`'s
+  `build_stan_data`/`build_render_context` if/elif chains moved into
+  `macrotoolkit/families/{local_level,lw_sv}.py` (bodies unchanged;
+  `lw_mu_h0_anchors` moved with them, re-exported from `run.py` for
+  existing importers) and the run.py names remain as thin registry
+  dispatchers; `mtk report` now dispatches through the registry's
+  `report_writer` (a family without one gets a clear "no report support"
+  error instead of an lw-specific crash). VISION's "adding a family =
+  template + schema fragment + numerics module + registry entry" is now
+  mechanically true, pinned by a test asserting run.py contains no
+  family-name string branching. Fast suite 251 passed (245 + 6 registry
+  tests). S4.5 block complete.
+
+- **2026-09-02 — S4.5 item 3 landed (S5-decisions): run identity split
+  into estimation identity vs report config.** `compute_run_id` now hashes
+  `RunSpec.to_estimation_yaml()` -- the canonical spec MINUS `outputs:` --
+  alongside data/rendered-Stan/CmdStan-version; the payload key is renamed
+  `spec` → `estimation_spec` so the (one final) hash migration is
+  self-describing. Run dirs now store `spec.yaml` (canonical ESTIMATION
+  spec, immutable identity record) plus `outputs.yaml` (report/output
+  options, the one deliberately NON-immutable artifact): an idempotent
+  re-run whose spec carries different report options refreshes
+  `outputs.yaml` in place -- content-compared first, so a truly identical
+  re-run still rewrites nothing (byte- and mtime-level no-op, pinned by
+  tests). `load_run_spec(run_dir)` reassembles the full RunSpec and
+  accepts pre-split run dirs (inline outputs block, no outputs.yaml)
+  unchanged -- old run dirs remain valid records. Effect: every spec's
+  run hash changes ONCE more (third migration, after S3's KF
+  generalization and S4's outputs schema -- both container-local runs are
+  being regenerated this stage anyway, item 16), and report-option/
+  report-schema changes can never orphan an MCMC run again. Judgment
+  call: `outputs.yaml` refresh happens through `mtk run` on the modified
+  spec (estimation no-op + refresh) rather than a new report-side flag --
+  one write path, no report-time spec parameter.
+
+- **2026-09-02 — S4.5 item 1 landed (S5-decisions): the endogenous-lag
+  feedback map + ONE generic simulate/IRF/HD engine replaces
+  `results_lw.py`'s hand-rolled recursions.** Each family now declares, as
+  data, what every x column IS (`StateSpaceMeta.feedback_map`:
+  ObsLag/ObsLagMean/ExogLag terms; lw_sv's instance pinned column-for-
+  column against `build_lw_regressors` by `tests/test_engine.py`), and the
+  new `macrotoolkit/engine.py` consumes the declaration: per-shock state
+  propagation, a deterministic per-component observation recursion (HD
+  bars, IRF), and the stochastic forward simulation (fan charts) all run
+  the measurement equation AS WRITTEN -- `y_t = A'x_t + Z xi_t + e_t` with
+  x's endogenous lag columns fed back from the component's own simulated
+  past -- instead of three separately hand-derived gap-space regroupings
+  (where both S4 bugs lived). Judgment calls recorded: (1) OBSERVABLE-space
+  formulation chosen over preserving the gap-space grouping -- the
+  regrouping changes float summation order, so outputs match the
+  pre-engine implementation to ~1.8e-14 max abs (independently reproduced
+  by the numerics reviewer: HD 1.8e-14, IRF 3e-16, fan 5e-15 with rstar/
+  rate_gap bit-identical), not bit-for-bit; the ONLY test relaxation this
+  required was two `assert_array_equal(0)` pins on the ystar-shock gap IRF
+  becoming `atol=1e-12` (the a1*y - a1*y* cancellation rounds; every other
+  structural exact-zero -- eps_pc real side, eps_ystar rstar, is-bar
+  pi[0], neutral-rule rate_gap ≡ 0.0 -- survives EXACTLY and stays pinned
+  exactly). (2) Both S4 fan bug fixes became structural: the exogenous
+  forecast rule resolves from the freshly drawn state row inside the loop
+  (timing), and the rate term enters through A/Z's own stamped signs (no
+  hand-applied sign to flip) -- the sign pin re-anchored at engine level.
+  (3) RNG consumption order preserved exactly (state noise, SV h
+  innovations, measurement eps, final post-loop alignment draw), so
+  seeded fan streams are comparable across the refactor. (4)
+  `simulate_fan_draw` keeps its gap-register/rate-gap-seed interface as a
+  seed-translating wrapper (signature change: takes A/Z instead of 5
+  coefficient scalars); the translations add back `xi_last`'s own named
+  slots, which the engine's first step reads back out of exact F-copies,
+  cancelling to ulps -- the zero-noise hand-derived fan tests (abs=1e-10)
+  pass unchanged. (5) The c==1 guard is retained in
+  `gap_pi_shock_decomposition` (the engine itself is c-agnostic, but the
+  surrounding r* = g+z reporting is not) and newly added to
+  `impulse_response_for_shock` (reviewer suggestion -- it was the one
+  unguarded g+z summer). Fast suite 237 passed (231 + 6 engine tests).
+  Fresh numerics-reviewer pass: no must-fix findings; its two suggestions
+  (this entry; the IRF c-guard + a family-agnostic toy-meta
+  simulate_forward test) are incorporated.
+
+- **2026-09-02 — S4.5 item 2 landed (S5-decisions): named state/coefficient
+  metadata replaces slot-peeking.** New `macrotoolkit/families/` package
+  (numerics-side family declarations, kept separate from `specs/schema/`'s
+  spec-side fragments to avoid an import cycle): `base.StateSpaceMeta` is
+  the generic machinery; `lw_sv.LW_STATE_META` declares the state labels
+  with explicit time offsets (`("g", -1)` IS the "slot 3 holds g lagged"
+  convention, now in the label rather than the reader's memory), the
+  per-shock state loadings (a declared B matrix; `Q == B diag(σ²) Bᵀ`
+  pinned against `build_lw_matrices` by `tests/test_state_metadata.py`),
+  and the measurement-shock order; `lw_sv.structural_coefficients(Z, A)`
+  is now the ONE place structural-coefficient matrix positions are read,
+  with the c≠1 guard consolidated into `require_c_is_one` (same ratio,
+  tolerance, exception type, and control-flow position as the two former
+  inline guards). `results_lw.py` consumes names only. `smoother.py` was
+  deliberately NOT edited: it DEFINES the layout (validated to ~1e-12 by
+  G1/G5a), so the metadata is pinned against it by tests instead of the
+  core being rewritten. Behavior preservation demonstrated two ways:
+  bit-for-bit identical HD bars / state components / all 25 IRF cells /
+  seeded fan-draw outputs on the g1_harness synthetic fixture before vs
+  after the refactor (the g loading 0.25·eps is an exact power-of-two
+  scale, so even the injection rewrite is bit-identical), and the full
+  fast suite green unchanged (231 passed = 219 baseline + 12 new metadata
+  pins). Fresh numerics-reviewer pass: clean, no findings.
+
 - **2026-09-02 — Pre-S5 framework review: decision menu recorded in
   `plans/S5-decisions.md`; engineering doctrine promoted to
   `ENGINEERING.md`.** The review re-framed S1–S4 as a dry run of the

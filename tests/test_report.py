@@ -31,13 +31,21 @@ from macrotoolkit.cli import main
 from macrotoolkit.report import render_report, write_report
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-REAL_RUN_HASH = "70ad47166eaf"
+# The S5-regenerated reference SV run (spec_sv.yaml at the post-item-3
+# estimation identity; previously 70ad47166eaf pre-migration). A live
+# runs/<hash> store is preferred; without one, the fixture falls back to
+# the TRACKED draw-thinned archive (runs-archive/, S5-decisions item 16)
+# copied to a tmp runs root -- so fresh containers still run this
+# acceptance test, against the development fixture.
+REAL_RUN_HASH = "a00958509083"
 REAL_RUN_DIR = REPO_ROOT / "runs" / REAL_RUN_HASH
+ARCHIVED_RUN_DIR = REPO_ROOT / "runs-archive" / REAL_RUN_HASH
 
-# 1 trend-cycle + 1 IRF matrix + 5 fan charts + 4 historical-decomposition
-# figures -- exact counts from plots.py's own return shapes (module
-# docstring / spec §3.1-§3.4), not a loose ">0" check.
-EXPECTED_IMG_COUNT = 1 + 1 + 5 + 4
+# 1 prior-predictive (spec §4, S5-decisions item 7) + 1 trend-cycle +
+# 1 IRF matrix + 5 fan charts + 4 historical-decomposition figures --
+# exact counts from plots.py's own return shapes (module docstring /
+# spec §3.1-§3.4 and §4), not a loose ">0" check.
+EXPECTED_IMG_COUNT = 1 + 1 + 1 + 5 + 4
 
 
 class _TagCollector(HTMLParser):
@@ -77,24 +85,48 @@ def _parse(html_text: str) -> _TagCollector:
 
 
 @pytest.fixture(scope="module")
-def real_run_report_cli_result():
-    """Runs `mtk report 70ad47166eaf` via CliRunner exactly once for this
-    module's assertions (the real run's 'all' smoother_draws over ~6000
-    posterior draws makes this the slowest test in the file; sharing one
-    invocation keeps the module's total cost to one pass)."""
-    if not REAL_RUN_DIR.is_dir():
-        pytest.skip(f"real run directory {REAL_RUN_DIR} not present in this checkout")
+def real_run_dir(tmp_path_factory) -> Path:
+    """The reference run directory this module reports against: the live
+    run store when present; otherwise a tmp COPY of the tracked thinned
+    archive (never the archive itself -- report.html must not dirty the
+    git tree)."""
+    if REAL_RUN_DIR.is_dir():
+        return REAL_RUN_DIR
+    if not ARCHIVED_RUN_DIR.is_dir():
+        pytest.skip(
+            f"neither {REAL_RUN_DIR} nor the tracked archive "
+            f"{ARCHIVED_RUN_DIR} is present in this checkout"
+        )
+    import shutil
+
+    root = tmp_path_factory.mktemp("archived_runs")
+    dest = root / REAL_RUN_HASH
+    shutil.copytree(ARCHIVED_RUN_DIR, dest)
+    return dest
+
+
+@pytest.fixture(scope="module")
+def real_run_report_cli_result(real_run_dir: Path):
+    """Runs `mtk report <REAL_RUN_HASH>` via CliRunner exactly once for
+    this module's assertions (the full run's 'all' smoother_draws over
+    ~6000 posterior draws makes this the slowest test in the file; sharing
+    one invocation keeps the module's total cost to one pass -- the
+    archive fallback's 600 thinned draws are proportionally faster)."""
     runner = CliRunner()
-    result = runner.invoke(main, ["report", REAL_RUN_HASH])
+    result = runner.invoke(
+        main, ["report", REAL_RUN_HASH, "--runs-root", str(real_run_dir.parent)]
+    )
     return result
 
 
-def test_s4_acceptance_report_renders_all_figures_from_real_run(real_run_report_cli_result) -> None:
+def test_s4_acceptance_report_renders_all_figures_from_real_run(
+    real_run_report_cli_result, real_run_dir
+) -> None:
     result = real_run_report_cli_result
     assert result.exit_code == 0, result.output
     assert "written ->" in result.output
 
-    report_path = REAL_RUN_DIR / "report.html"
+    report_path = real_run_dir / "report.html"
     assert report_path.is_file()
     html_text = report_path.read_text(encoding="utf-8")
     assert len(html_text) > 0
@@ -130,12 +162,14 @@ def test_s4_acceptance_report_renders_all_figures_from_real_run(real_run_report_
     assert re.search(r"<td>sigma_g</td><td>-?\d", html_text)
 
 
-def test_s4_acceptance_report_did_not_touch_sampling_artifacts(real_run_report_cli_result) -> None:
+def test_s4_acceptance_report_did_not_touch_sampling_artifacts(
+    real_run_report_cli_result, real_run_dir
+) -> None:
     """Guard against the one failure mode the task brief explicitly warns
     against: `mtk report` must never re-run sampling or touch the run's
     immutable artifacts, only add report.html."""
     for name in ("spec.yaml", "data.snapshot.csv", "draws.nc", "diagnostics.json", "_SUCCESS"):
-        assert (REAL_RUN_DIR / name).exists(), name
+        assert (real_run_dir / name).exists(), name
 
 
 # ---------------------------------------------------------------------------
