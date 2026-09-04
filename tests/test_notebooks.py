@@ -18,8 +18,9 @@ NOTEBOOK_DIR = REPO_ROOT / "examples" / "notebook_api"
 #: sample (the UCSV worked example) are executed under the slow marker.
 FAST_NOTEBOOKS = ["lw_sv_from_archive.ipynb"]
 #: Notebooks that sample (the UCSV worked example: ~15 minutes on a fresh
-#: checkout; an idempotent no-op fit when runs/f2b48ebc98a4 exists).
-SLOW_NOTEBOOKS = ["ucsv_us_inflation.ipynb"]
+#: checkout; an idempotent no-op fit when runs/f2b48ebc98a4 exists; the S7
+#: authored UC-gap model: three fits, ~1-2 hours on a fresh checkout).
+SLOW_NOTEBOOKS = ["ucsv_us_inflation.ipynb", "authored_uc_gap.ipynb"]
 
 
 def _execute(path: Path, tmp_path: Path):

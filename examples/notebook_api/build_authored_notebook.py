@@ -285,8 +285,34 @@ def main() -> None:
 
         NotebookClient(nb, timeout=7200, kernel_name="python3", resources={"metadata": {"path": str(HERE)}}).execute()
     nbformat.write(nb, TARGET)
+    if "--execute" in sys.argv:
+        strip_progress_noise(TARGET)
     print(f"wrote {TARGET}")
 
 
 if __name__ == "__main__":
     main()
+
+
+def strip_progress_noise(path: Path = TARGET) -> None:
+    """Remove CmdStan/tqdm progress-bar lines and warnings from the stored
+    stream outputs (cosmetic; results, tables and figures are untouched)."""
+    nb = nbformat.read(path, as_version=4)
+    for c in nb.cells:
+        if c.cell_type != "code":
+            continue
+        kept = []
+        for o in c.outputs:
+            if o.output_type == "stream":
+                lines = [
+                    line for line in o.text.splitlines(keepends=True)
+                    if line.strip() and not line.lstrip().startswith("chain") and "\x1b[" not in line
+                    and "it/s" not in line and "IProgress" not in line and "autonotebook" not in line
+                    and "diagnostics.py" not in line and "between_chain_variance" not in line
+                ]
+                if not lines:
+                    continue
+                o.text = "".join(lines)
+            kept.append(o)
+        c.outputs = kept
+    nbformat.write(nb, path)
