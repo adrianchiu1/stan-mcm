@@ -26,11 +26,24 @@
 //   per-point (h0, sigma_h, nu) data through sv_rw_noncentered and turned
 //   into R_t through sv_diag_variance_path -- the exact composition the SV
 //   template render uses -- and compared against the Python mirrors.
+//
+// S6 additions (the Q_t generalization, plans/S6-plan.md):
+// - `loglik_tvq` exercises the TIME-VARYING STATE-innovation covariance
+//   path: per-point log-variance paths hq (data) for the g shock, turned
+//   into Q_t = lw_Q(sigma_ystar, exp(hq_t/2), sigma_z) per period through
+//   the family's own constructor (inline plain Stan, validating the Q_t
+//   filter independently of the SV helpers); constant R.
+// - `loglik_svq` exercises the PRODUCTION Q_t SV composition: the z
+//   shock's log-variance from sv_rw_noncentered(h0_z, sigma_h_z, nu_z),
+//   turned into a (T, 1x1) variance path by sv_scalar_variance_path (the
+//   helper the ucsv template uses) and placed on Q's z slot -- compared
+//   against the same composition in the Python mirror.
 
 functions {
 {% include "functions/ssm_matrices_lw.stan" %}
 {% include "functions/kalman_loglik_tv.stan" %}
 {% include "functions/sv_rw_noncentered.stan" %}
+{% include "functions/sv_scalar_variance_path.stan" %}
 }
 
 data {
@@ -48,12 +61,18 @@ data {
   vector[n_points] sigma_h_is;      // per-point log-variance RW scales
   vector[n_points] sigma_h_pc;
   array[n_points] matrix[T, 2] nu;  // per-point SV innovations [IS, PC]
+  matrix[n_points, T] hq;           // per-point g-shock log-variance paths (Q_t path)
+  vector[n_points] h0_z;            // per-point realized initial z log-variances
+  vector[n_points] sigma_h_z;       // per-point z log-variance RW scales
+  matrix[n_points, T] nu_z;         // per-point z SV innovations
 }
 
 generated quantities {
   vector[n_points] loglik;
   vector[n_points] loglik_tv;
   vector[n_points] loglik_sv;
+  vector[n_points] loglik_tvq;
+  vector[n_points] loglik_svq;
   for (i in 1:n_points) {
     matrix[7, 7] Q = lw_Q(params[i, 6], params[i, 7], params[i, 8]);
     matrix[6, 2] A = lw_A(params[i, 1], params[i, 2], params[i, 3],
@@ -74,5 +93,26 @@ generated quantities {
             sv_rw_noncentered(h0_is[i], sigma_h_is[i], col(nu[i], 1)),
             sv_rw_noncentered(h0_pc[i], sigma_h_pc[i], col(nu[i], 2))),
         xi00, P00);
+    // Time-varying Q_t: the g shock's scale exp(hq_t/2) (h is log-VARIANCE)
+    // through lw_Q per period; constant R.
+    array[T] matrix[7, 7] Qt;
+    for (t in 1:T) {
+      Qt[t] = lw_Q(params[i, 6], exp(hq[i, t] / 2), params[i, 8]);
+    }
+    loglik_tvq[i] = kalman_loglik(yobs, x, lw_F(), Qt, A, Z,
+                                  lw_R(params[i, 9], params[i, 10]),
+                                  xi00, P00);
+    // Production Q_t SV composition: z shock variance path on Q's z slot
+    // (state slot 6, the ("z", -1) label), everything else constant.
+    array[T] matrix[1, 1] vz = sv_scalar_variance_path(
+        sv_rw_noncentered(h0_z[i], sigma_h_z[i], nu_z[i]'));
+    array[T] matrix[7, 7] Qz;
+    for (t in 1:T) {
+      Qz[t] = Q;
+      Qz[t][6, 6] = vz[t][1, 1];
+    }
+    loglik_svq[i] = kalman_loglik(yobs, x, lw_F(), Qz, A, Z,
+                                  lw_R(params[i, 9], params[i, 10]),
+                                  xi00, P00);
   }
 }

@@ -16,8 +16,11 @@
 //   variation enters R_t, not Q (HANDOFF.md's S3 warning).
 //
 // Rao-Blackwellized likelihood (spec §2.1): the linear states (y*, g, z and
-// lags) are marginalized by the Kalman filter in the model block; Stan
-// samples only the static parameters.
+// lags) are marginalized by the Kalman filter; Stan samples only the
+// static parameters. Since S6 the filter value is the transformed
+// parameter kf_loglik (added to target in the model block) so the exact
+// rendered program exposes its KF log-likelihood to the automatic
+// fit-time mirror check (S6 WP3) and saves it with every draw.
 //
 // All family-specific structure is stamped at render time (spec §2.3): the
 // priors below come from specs/schema/lw_sv.py DEFAULT_PRIORS merged with
@@ -124,19 +127,22 @@ matrix lw_R(real sigma_is, real sigma_pc) {
 // include directive inside a functions block; contains function
 // definitions only, no block wrapper.
 //
-// SCOPE (S3 generalization, decisions 2026-08-31, DECISIONS.md): the filter
-// takes a T-array of measurement covariances R_t -- the time-varying form
-// spec §2.2 contracts, landed where it actually bites for lw_sv (SV makes
-// the IS/PC shock scales, i.e. the MEASUREMENT covariance here, time-
-// varying; Q stays constant). A thin constant-R overload below delegates
-// with rep_array so no-SV call sites read naturally -- it is a wrapper,
-// not a second filter implementation. The array form is deliberately
-// family-agnostic: callers build R_t however their family defines it.
+// SCOPE (S3 generalization of R_t, decisions 2026-08-31; S6 generalization
+// of Q_t, plans/S6-plan.md, DECISIONS.md 2026-09-04): the filter core takes
+// a T-array of state-innovation covariances Q_t AND a T-array of
+// measurement covariances R_t -- the full time-varying form spec §2.2
+// contracts. lw_sv routes its SV through R_t (in the marginalized LW form
+// the SV shocks are MEASUREMENT errors; Q is constant); UCSV's trend-shock
+// SV enters the STATE innovation, which is what Q_t is for. Thin overloads
+// below delegate the constant cases with rep_array so call sites read
+// naturally -- they are wrappers, not second filter implementations. The
+// array form is deliberately family-agnostic: callers build Q_t / R_t
+// however their family defines them.
 //
 // Model (Hamilton/HLW notation, mirrored exactly by
 // macrotoolkit.smoother._kf_core -- gate G1 holds the two to <1e-8):
 //
-//   xi_t   = F xi_{t-1} + w_t,        w_t ~ N(0, Q)       (state, dim n)
+//   xi_t   = F xi_{t-1} + w_t,        w_t ~ N(0, Q_t)     (state, dim n)
 //   yobs_t = A' x_t + Z xi_t + e_t,   e_t ~ N(0, R_t)     (obs m, exog k)
 //
 // Initial state: explicit (xi00 = xi_{0|0}, P00 = P_{0|0}) -- spec §2.2
@@ -145,15 +151,19 @@ matrix lw_R(real sigma_is, real sigma_pc) {
 // Numerics (spec §2.2): Cholesky factorization of the innovation covariance
 // for both the log-determinant and every solve (no inverse, no det); each
 // covariance explicitly re-symmetrized after construction/update. Operation
-// order matches the Python mirror step for step.
+// order matches the Python mirror step for step. The constant-Q overload's
+// arithmetic (F P F' + Q[t] with every Q[t] the same matrix) is identical
+// to the pre-S6 constant-Q filter's, so constant-Q likelihoods are
+// unchanged to output resolution (pinned by tests/test_g1_mirror.py).
 
 /**
- * Kalman-filter log-likelihood, time-varying measurement covariance.
+ * Kalman-filter log-likelihood, time-varying state-innovation AND
+ * measurement covariances.
  *
  * @param yobs T x m observations (row t = observation vector at t)
  * @param x    T x k exogenous regressors entering the measurement equation
  * @param F    n x n state transition
- * @param Q    n x n state innovation covariance
+ * @param Q    array of T n x n state innovation covariances (Q[t] used at t)
  * @param A    k x m exogenous loading (measurement mean adds A' x_t)
  * @param Z    m x n state loading
  * @param R    array of T m x m measurement covariances (R[t] used at t)
@@ -162,7 +172,7 @@ matrix lw_R(real sigma_is, real sigma_pc) {
  * @return total log-likelihood sum_t log p(yobs_t | yobs_{1:t-1})
  */
 real kalman_loglik(matrix yobs, matrix x,
-                   matrix F, matrix Q, matrix A, matrix Z, array[] matrix R,
+                   matrix F, array[] matrix Q, matrix A, matrix Z, array[] matrix R,
                    vector xi00, matrix P00) {
   int T = rows(yobs);
   int m = cols(yobs);
@@ -174,10 +184,13 @@ real kalman_loglik(matrix yobs, matrix x,
   if (size(R) != T) {
     reject("kalman_loglik: size(R) = ", size(R), " must equal T = ", T);
   }
+  if (size(Q) != T) {
+    reject("kalman_loglik: size(Q) = ", size(Q), " must equal T = ", T);
+  }
 
   for (t in 1:T) {
     vector[n] xi_tp = F * xi_tt;
-    matrix[n, n] P_tp = F * P_tt * F' + Q;
+    matrix[n, n] P_tp = F * P_tt * F' + Q[t];
     P_tp = 0.5 * (P_tp + P_tp');
 
     vector[m] err = yobs[t]' - A' * x[t]' - Z * xi_tp;
@@ -199,15 +212,37 @@ real kalman_loglik(matrix yobs, matrix x,
 }
 
 /**
- * Constant-measurement-covariance overload: delegates to the time-varying
- * filter with T copies of R. Exists so no-SV call sites keep reading
- * naturally; NOT a separate filter implementation.
+ * Constant-Q, time-varying-R overload (lw_sv's SV variant): delegates to
+ * the full filter with T copies of Q. A wrapper, not a second
+ * implementation.
+ */
+real kalman_loglik(matrix yobs, matrix x,
+                   matrix F, matrix Q, matrix A, matrix Z, array[] matrix R,
+                   vector xi00, matrix P00) {
+  return kalman_loglik(yobs, x, F, rep_array(Q, rows(yobs)), A, Z, R,
+                       xi00, P00);
+}
+
+/**
+ * Time-varying-Q, constant-R overload: delegates with T copies of R.
+ */
+real kalman_loglik(matrix yobs, matrix x,
+                   matrix F, array[] matrix Q, matrix A, matrix Z, matrix R,
+                   vector xi00, matrix P00) {
+  return kalman_loglik(yobs, x, F, Q, A, Z, rep_array(R, rows(yobs)),
+                       xi00, P00);
+}
+
+/**
+ * Constant-covariance overload (lw_sv's no-SV variant): delegates to the
+ * full filter with T copies of Q and of R. Exists so constant call sites
+ * keep reading naturally; NOT a separate filter implementation.
  */
 real kalman_loglik(matrix yobs, matrix x,
                    matrix F, matrix Q, matrix A, matrix Z, matrix R,
                    vector xi00, matrix P00) {
-  return kalman_loglik(yobs, x, F, Q, A, Z, rep_array(R, rows(yobs)),
-                       xi00, P00);
+  return kalman_loglik(yobs, x, F, rep_array(Q, rows(yobs)), A, Z,
+                       rep_array(R, rows(yobs)), xi00, P00);
 }}
 
 data {
@@ -236,6 +271,21 @@ parameters {
   real<lower=0> sigma_pc;           // constant PC shock scale (no-SV variant)
 }
 
+transformed parameters {
+  // The Kalman-filter marginal log-likelihood (spec §2.1), kept as a
+  // transformed parameter (S6 WP3): evaluated once per log-density
+  // evaluation (no duplicate filter pass), added to target below, saved
+  // with every draw, and read by the automatic fit-time Stan-vs-Python
+  // mirror check at prior draws (fixed_param evaluation of this program).
+  real kf_loglik = kalman_loglik(yobs, x,
+                                 F,
+                                 lw_Q(sigma_ystar, sigma_g, sigma_z),
+                                 lw_A(a1, a2, a_r, b_pi, b_y),
+                                 lw_Z(a1, a2, a_r, b_y, c),
+                                 lw_R(sigma_is, sigma_pc),
+                                 xi00, P00);
+}
+
 model {
   // Priors (stamped from specs/schema/lw_sv.py defaults + per-run overrides).
   // Truncations are carried by the parameter constraints above; Stan
@@ -251,12 +301,6 @@ model {
   sigma_is ~ normal(0, 1.0);        // Half-N via <lower=0>
   sigma_pc ~ normal(0, 1.0);        // Half-N via <lower=0>
 
-  // Marginal likelihood via the Kalman filter.
-  target += kalman_loglik(yobs, x,
-                          F,
-                          lw_Q(sigma_ystar, sigma_g, sigma_z),
-                          lw_A(a1, a2, a_r, b_pi, b_y),
-                          lw_Z(a1, a2, a_r, b_y, c),
-                          lw_R(sigma_is, sigma_pc),
-                          xi00, P00);
+  // Marginal likelihood via the Kalman filter (the transformed parameter).
+  target += kf_loglik;
 }

@@ -343,3 +343,66 @@ def test_simulate_smoother_draw_accepts_R_as_constant_or_time_varying_path() -> 
     draw_const = simulate_smoother_draw(_YOBS, _X, _F, _Q, _A, _Z, _R, _XI00, _P00, rng1)
     draw_path = simulate_smoother_draw(_YOBS, _X, _F, _Q, _A, _Z, R_path, _XI00, _P00, rng2)
     np.testing.assert_array_equal(draw_const.xi_draw, draw_path.xi_draw)
+
+
+# ---------------------------------------------------------------------------
+# S6: generic structural-shock recovery from declared loadings
+# ---------------------------------------------------------------------------
+
+
+def test_generic_shock_recovery_is_bit_identical_to_the_lw_sv_recovery() -> None:
+    """S6 WP2 generalized the lw_sv-specific shock recovery (slots 0/3/5,
+    the /4) into ``recover_shocks`` driven by ``StateSpaceMeta.recovery_
+    order``. For lw_sv the two must agree BIT FOR BIT (0.25*x == x/4 in
+    IEEE double; /1.0 is exact) -- the behavior-preservation pin, and
+    ``simulate_smoother_draw(meta=...)`` must fill both the legacy
+    attributes and the named dicts identically."""
+    from macrotoolkit.families.lw_sv import LW_STATE_META
+    from macrotoolkit.smoother import _recover_structural_shocks, recover_shocks
+
+    F, Q, A, Z, R = _F, _Q, _A, _Z, _R
+    rng = np.random.default_rng(20260904)
+    draw_legacy = simulate_smoother_draw(_YOBS, _X, F, Q, A, Z, R, _XI00, _P00, rng)
+    rng = np.random.default_rng(20260904)
+    draw_meta = simulate_smoother_draw(_YOBS, _X, F, Q, A, Z, R, _XI00, _P00, rng, meta=LW_STATE_META)
+    np.testing.assert_array_equal(draw_legacy.xi_draw, draw_meta.xi_draw)
+    for legacy_name, shock in (("eps_ystar", "ystar"), ("eps_g", "g"), ("eps_z", "z")):
+        np.testing.assert_array_equal(getattr(draw_legacy, legacy_name), draw_meta.state_shocks[shock])
+        np.testing.assert_array_equal(getattr(draw_meta, legacy_name), draw_meta.state_shocks[shock])
+        np.testing.assert_array_equal(draw_legacy.state_shocks[shock], draw_meta.state_shocks[shock])
+    for legacy_name, shock in (("eps_is", "is"), ("eps_pc", "pc")):
+        np.testing.assert_array_equal(getattr(draw_legacy, legacy_name), draw_meta.meas_shocks[shock])
+
+    # Direct comparison of the two recovery functions on the same path.
+    xi = draw_legacy.xi_draw
+    legacy = _recover_structural_shocks(xi, _XI00, _YOBS, _X, A, Z, F)
+    state, meas = recover_shocks(xi, _XI00, _YOBS, _X, A, Z, F, LW_STATE_META)
+    np.testing.assert_array_equal(legacy[0], state["ystar"])
+    np.testing.assert_array_equal(legacy[1], state["g"])
+    np.testing.assert_array_equal(legacy[2], state["z"])
+    np.testing.assert_array_equal(legacy[3], meas["is"])
+    np.testing.assert_array_equal(legacy[4], meas["pc"])
+
+
+def test_recovery_order_is_triangular_for_lw_sv_and_rejects_non_triangular() -> None:
+    import pytest
+
+    from macrotoolkit.families.base import StateSpaceMeta
+    from macrotoolkit.families.lw_sv import LW_STATE_META
+
+    order = LW_STATE_META.recovery_order()
+    names = [o[0] for o in order]
+    # ystar must come AFTER g (its slot is shared with the g loading).
+    assert names.index("ystar") > names.index("g")
+    ystar_step = next(o for o in order if o[0] == "ystar")
+    assert ystar_step[1] == ("ystar", 0) and ystar_step[2] == 1.0 and ystar_step[3] == (("g", 0.25),)
+
+    bad = StateSpaceMeta(
+        state_labels=(("a", 0),),
+        state_shocks=("u", "v"),
+        shock_loadings={"u": {("a", 0): 1.0}, "v": {("a", 0): 2.0}},
+        measurement_shocks=("e",),
+        obs_names=("y",),
+    )
+    with pytest.raises(ValueError, match="not triangular"):
+        bad.recovery_order()

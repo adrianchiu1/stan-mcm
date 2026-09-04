@@ -230,6 +230,53 @@ class StateSpaceMeta:
             b[self.slot(*label)] = coef
         return b
 
+    def recovery_order(self) -> tuple[tuple[str, StateLabel, float, tuple[tuple[str, float], ...]], ...]:
+        """How to invert a state innovation ``w = B eps`` back into the
+        named shocks EXACTLY (no least squares): resolve shocks in an
+        order where each shock is read off ONE of its slots whose other
+        loaders are already resolved -- ``eps_s = (w[slot] - sum_r coef_r
+        eps_r) / coef_s``. Returns a tuple of ``(shock, slot_label,
+        coef, ((other_shock, other_coef), ...))`` in resolution order.
+        Raises if the loadings are not triangularizable this way (a
+        family whose shocks all load only onto shared slots would need a
+        different recovery -- fail loudly rather than approximate).
+
+        For lw_sv this reproduces the historical hand-written recovery
+        bit for bit: g from ("g",-1), z from ("z",-1), then ystar =
+        (w[ystar,0] - 0.25*eps_g)/1.0 (0.25*x == x/4 exactly in IEEE
+        double; /1.0 is exact) -- pinned by tests/test_smoother_sim.py.
+        """
+        loaders: dict[StateLabel, list[tuple[str, float]]] = {}
+        for shock in self.state_shocks:
+            for label, coef in self.shock_loadings[shock].items():
+                if coef != 0.0:
+                    loaders.setdefault(label, []).append((shock, coef))
+        resolved: list[str] = []
+        order: list[tuple[str, StateLabel, float, tuple[tuple[str, float], ...]]] = []
+        pending = list(self.state_shocks)
+        while pending:
+            progress = False
+            for shock in list(pending):
+                for label, coef in self.shock_loadings[shock].items():
+                    if coef == 0.0:
+                        continue
+                    others = [(s, c) for s, c in loaders[label] if s != shock]
+                    if all(s in resolved for s, _ in others):
+                        order.append((shock, label, float(coef), tuple(others)))
+                        resolved.append(shock)
+                        pending.remove(shock)
+                        progress = True
+                        break
+                if progress:
+                    break
+            if not progress:
+                raise ValueError(
+                    f"shock_loadings are not triangular: cannot recover shocks "
+                    f"{pending} from any slot whose other loaders are already "
+                    f"resolved (resolved so far: {resolved})."
+                )
+        return tuple(order)
+
     def loading_matrix(self) -> np.ndarray:
         """The (n_state, n_state_shocks) structural loading matrix ``B``
         (columns in ``state_shocks`` order), so the state-innovation

@@ -16,8 +16,11 @@
 //   variation enters R_t, not Q (HANDOFF.md's S3 warning).
 //
 // Rao-Blackwellized likelihood (spec §2.1): the linear states (y*, g, z and
-// lags) are marginalized by the Kalman filter in the model block; Stan
-// samples only the static parameters.
+// lags) are marginalized by the Kalman filter; Stan samples only the
+// static parameters. Since S6 the filter value is the transformed
+// parameter kf_loglik (added to target in the model block) so the exact
+// rendered program exposes its KF log-likelihood to the automatic
+// fit-time mirror check (S6 WP3) and saves it with every draw.
 //
 // All family-specific structure is stamped at render time (spec §2.3): the
 // priors below come from specs/schema/lw_sv.py DEFAULT_PRIORS merged with
@@ -76,8 +79,8 @@ parameters {
 {% endif %}
 }
 
-{% if sv_shocks %}
 transformed parameters {
+{% if sv_shocks %}
   // Log-VARIANCE paths (sd = exp(h/2), spec §1.5), built non-centered and
   // saved in the draws as the authoritative volatility paths -- S4's
   // outputs read h from here rather than re-deriving it from nu (avoiding
@@ -86,9 +89,25 @@ transformed parameters {
       mu_h0_is + {{ priors.mu_h0_is.sd }} * h0_is_raw, sigma_h_is, nu_is);
   vector[T] h_pc = sv_rw_noncentered(
       mu_h0_pc + {{ priors.mu_h0_pc.sd }} * h0_pc_raw, sigma_h_pc, nu_pc);
+{% endif %}
+  // The Kalman-filter marginal log-likelihood (spec §2.1), kept as a
+  // transformed parameter (S6 WP3): evaluated once per log-density
+  // evaluation (no duplicate filter pass), added to target below, saved
+  // with every draw, and read by the automatic fit-time Stan-vs-Python
+  // mirror check at prior draws (fixed_param evaluation of this program).
+  real kf_loglik = kalman_loglik(yobs, x,
+                                 F,
+                                 lw_Q(sigma_ystar, sigma_g, sigma_z),
+                                 lw_A(a1, a2, a_r, b_pi, b_y),
+                                 lw_Z(a1, a2, a_r, b_y, c),
+{% if sv_shocks %}
+                                 sv_diag_variance_path(h_is, h_pc),
+{% else %}
+                                 lw_R(sigma_is, sigma_pc),
+{% endif %}
+                                 xi00, P00);
 }
 
-{% endif %}
 model {
   // Priors (stamped from specs/schema/lw_sv.py defaults + per-run overrides).
   // Truncations are carried by the parameter constraints above; Stan
@@ -113,16 +132,6 @@ model {
   sigma_pc ~ normal(0, {{ priors.sigma_pc.sd }});        // Half-N via <lower=0>
 {% endif %}
 
-  // Marginal likelihood via the Kalman filter.
-  target += kalman_loglik(yobs, x,
-                          F,
-                          lw_Q(sigma_ystar, sigma_g, sigma_z),
-                          lw_A(a1, a2, a_r, b_pi, b_y),
-                          lw_Z(a1, a2, a_r, b_y, c),
-{% if sv_shocks %}
-                          sv_diag_variance_path(h_is, h_pc),
-{% else %}
-                          lw_R(sigma_is, sigma_pc),
-{% endif %}
-                          xi00, P00);
+  // Marginal likelihood via the Kalman filter (the transformed parameter).
+  target += kf_loglik;
 }

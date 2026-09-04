@@ -1,10 +1,13 @@
 """Python mirror of the Stan Kalman-filter machinery for the LW model.
 
 Scope (S2 + the S3 KF generalization, plans/S3-plan.md, + S4's simulation
-smoother, plans/S4-plan.md): the KF log-likelihood (gate G1) with constant
-OR time-varying measurement covariance R_t (in the marginalized LW form
-the SV shocks are measurement errors, so SV time variation enters through
-R_t; Q stays constant -- see HANDOFF.md's S3 warning), the RTS
+smoother, plans/S4-plan.md, + the S6 Q_t generalization, plans/S6-plan.md):
+the KF log-likelihood (gate G1) with constant OR time-varying measurement
+covariance R_t AND constant OR time-varying state-innovation covariance
+Q_t (lw_sv's SV enters through R_t only -- in the marginalized LW form the
+SV shocks are measurement errors; UCSV's trend-shock SV enters through
+Q_t, the one real KF extension family #2 needed, done by the exact R_t
+playbook: array-of-matrices core + constant-case delegation), the RTS
 fixed-interval smoother (gate G5a), and the Durbin-Koopman *simulation*
 smoother of spec §2.4 (Python-only -- no `stan/` mirror; validated by
 tests/test_smoother_sim.py instead of a G1-style Stan comparison).
@@ -227,6 +230,24 @@ def _as_R_path(R: np.ndarray, T: int) -> np.ndarray:
     raise ValueError(f"R must be (m, m) or (T, m, m); got shape {R.shape}.")
 
 
+def _as_Q_path(Q: np.ndarray, T: int) -> np.ndarray:
+    """Normalize a state-innovation covariance argument to the (T, n, n)
+    path ``_kf_core`` consumes (S6 Q_t generalization, the exact analogue
+    of :func:`_as_R_path`): a single (n, n) matrix (the constant case) is
+    tiled to T copies -- mirroring the Stan side's ``rep_array`` overload
+    -- and a (T, n, n) path passes through with its length validated."""
+    Q = np.asarray(Q, dtype=np.float64)
+    if Q.ndim == 2:
+        return np.ascontiguousarray(np.broadcast_to(Q, (T, Q.shape[0], Q.shape[1])))
+    if Q.ndim == 3:
+        if Q.shape[0] != T:
+            raise ValueError(
+                f"Time-varying Q has {Q.shape[0]} entries but yobs has T={T} rows."
+            )
+        return np.ascontiguousarray(Q)
+    raise ValueError(f"Q must be (n, n) or (T, n, n); got shape {Q.shape}.")
+
+
 @njit(cache=True)
 def _kf_core(yobs, x, F, Q, A, Z, R, xi00, P00, want_states):  # pragma: no cover -- numba
     """Shared filter recursion. Returns (loglik, xi_pred, P_pred, xi_filt,
@@ -235,8 +256,12 @@ def _kf_core(yobs, x, F, Q, A, Z, R, xi00, P00, want_states):  # pragma: no cove
     paths produce bit-identical loglik values).
 
     ``R`` is the (T, m, m) measurement-covariance PATH (S3 generalization,
-    DECISIONS.md 2026-08-31; the constant case arrives as T copies, built
-    by the public wrappers). Same operation order as the Stan mirror and
+    DECISIONS.md 2026-08-31) and ``Q`` the (T, n, n) state-innovation
+    covariance PATH (S6 generalization, the same playbook); the constant
+    cases arrive as T copies, built by the public wrappers, so the
+    constant-Q arithmetic (``F P F' + Q[t]`` with every ``Q[t]`` the same
+    matrix) is bit-identical to the pre-S6 ``F P F' + Q`` -- pinned by
+    tests/test_g1_mirror.py. Same operation order as the Stan mirror and
     HLW's kalman.log.likelihood.R: predict from (xi_{0|0}, P_{0|0}), then
     update, for t = 1..T. Cholesky of the innovation covariance for both
     the quadratic form and the log-determinant; every covariance explicitly
@@ -257,7 +282,7 @@ def _kf_core(yobs, x, F, Q, A, Z, R, xi00, P00, want_states):  # pragma: no cove
 
     for t in range(T):
         xi_tp = F @ xi_tt
-        P_tp = F @ P_tt @ F.T + Q
+        P_tp = F @ P_tt @ F.T + Q[t]
         P_tp = 0.5 * (P_tp + P_tp.T)
 
         err = yobs[t] - A.T @ x[t] - Z @ xi_tp
@@ -308,15 +333,17 @@ def kalman_loglik(
     ``R`` may be a single (m, m) matrix (constant measurement covariance)
     or a (T, m, m) path (the S3 time-varying generalization, DECISIONS.md
     2026-08-31 -- for lw_sv with SV, R_t = diag(exp(h_IS,t), exp(h_PC,t))).
-    Q stays constant: in the marginalized LW form the SV shocks are
-    measurement errors, so time variation enters through R_t only.
+    ``Q`` likewise may be a single (n, n) matrix or a (T, n, n) path (the
+    S6 generalization -- for UCSV, Q_t = [exp(h_eta,t)], the trend-shock
+    SV). lw_sv passes a constant Q: in the marginalized LW form its SV
+    shocks are measurement errors, so time variation enters through R_t.
     """
     yobs = np.ascontiguousarray(yobs, dtype=np.float64)
     ll, *_ = _kf_core(
         yobs,
         np.ascontiguousarray(x, dtype=np.float64),
         np.ascontiguousarray(F, dtype=np.float64),
-        np.ascontiguousarray(Q, dtype=np.float64),
+        _as_Q_path(Q, yobs.shape[0]),
         np.ascontiguousarray(A, dtype=np.float64),
         np.ascontiguousarray(Z, dtype=np.float64),
         _as_R_path(R, yobs.shape[0]),
@@ -378,6 +405,20 @@ def sv_diag_variance_path(h1: np.ndarray, h2: np.ndarray) -> np.ndarray:
     return R
 
 
+def sv_scalar_variance_path(h: np.ndarray) -> np.ndarray:
+    """Time-varying 1x1 covariance path from ONE log-variance path:
+    C_t = [exp(h_t)] -- exp(h) because h is log-VARIANCE (spec §1.5's
+    convention, shared by every family). The (T, 1, 1) result feeds either
+    argument of :func:`kalman_loglik` (UCSV: Q_t from h_eta, R_t from
+    h_eps). Mirrors stan/functions/sv_scalar_variance_path.stan."""
+    h = np.asarray(h, dtype=np.float64)
+    if h.ndim != 1:
+        raise ValueError(f"h must be a 1-d log-variance path; got shape {h.shape}.")
+    C = np.zeros((h.shape[0], 1, 1))
+    C[:, 0, 0] = np.exp(h)
+    return C
+
+
 # ---------------------------------------------------------------------------
 # 4. Fixed-interval (RTS) smoother -- G5a's engine. NOT the DK simulation
 #    smoother (S4 scope).
@@ -418,21 +459,24 @@ def kalman_smoother(
     'xi_filt' (T,n), 'P_filt', 'xi_pred', 'P_pred', 'xi_smooth' (T,n),
     'P_smooth' -- the filtered/one-sided and smoothed/two-sided state
     paths G5a compares against the HLW oracle. ``R`` is (m, m) constant or
-    a (T, m, m) path, as in :func:`kalman_loglik`."""
+    a (T, m, m) path, and ``Q`` (n, n) constant or a (T, n, n) path, as in
+    :func:`kalman_loglik`."""
     yobs = np.ascontiguousarray(yobs, dtype=np.float64)
-    args = [
-        np.ascontiguousarray(a, dtype=np.float64)
-        for a in (x, F, Q, A, Z)
-    ]
+    T = yobs.shape[0]
+    x_c = np.ascontiguousarray(x, dtype=np.float64)
+    F_c = np.ascontiguousarray(F, dtype=np.float64)
+    A_c = np.ascontiguousarray(A, dtype=np.float64)
+    Z_c = np.ascontiguousarray(Z, dtype=np.float64)
     tail = [
         np.ascontiguousarray(a, dtype=np.float64)
         for a in (xi00, P00)
     ]
-    R_path = _as_R_path(R, yobs.shape[0])
+    Q_path = _as_Q_path(Q, T)
+    R_path = _as_R_path(R, T)
     ll, xi_pred, P_pred, xi_filt, P_filt = _kf_core(
-        yobs, *args, R_path, *tail, True
+        yobs, x_c, F_c, Q_path, A_c, Z_c, R_path, *tail, True
     )
-    xi_sm, P_sm = _rts_smooth(xi_pred, P_pred, xi_filt, P_filt, args[1])
+    xi_sm, P_sm = _rts_smooth(xi_pred, P_pred, xi_filt, P_filt, F_c)
     return {
         "loglik": float(ll),
         "xi_pred": xi_pred,
@@ -515,9 +559,10 @@ def _simulate_plus_path(
     """Simulate one draw from the *unconditional* linear-Gaussian model at
     the given system matrices (Durbin & Koopman 2002's "plus" path, step 1
     of plans/S4-plan.md's algorithm): ``xi+_0 ~ N(xi00, P00)``,
-    ``xi+_t = F @ xi+_{t-1} + w+_t`` (``w+_t ~ N(0, Q)``),
+    ``xi+_t = F @ xi+_{t-1} + w+_t`` (``w+_t ~ N(0, Q_t)``),
     ``y+_t = A'x_t + Z @ xi+_t + e+_t`` (``e+_t ~ N(0, R_t)``) for
-    t = 1..T. Reuses the real ``x``/``A``/``Z``/``R_path``; only the noise
+    t = 1..T. ``Q`` is a constant (n, n) matrix or a (T, n, n) path (S6).
+    Reuses the real ``x``/``A``/``Z``/``R_path``; only the noise
     draws and the resulting state/obs path are simulated. Returns
     ``(xi_plus, y_plus)``, both length T, indexed exactly like
     ``kalman_smoother``'s ``xi_pred``/``xi_filt`` (row t = period t+1 in
@@ -550,13 +595,26 @@ def _simulate_plus_path(
         sqrt_P00 = _psd_sqrt(P00)
         xi_prev = xi00 + sqrt_P00 @ rng.standard_normal(n)
 
-    sqrt_Q = None if zero_noise else _psd_sqrt(Q)
+    # Q is (n, n) constant -- one factorization, the pre-S6 code path
+    # exactly -- or a (T, n, n) path (S6 Q_t generalization: per-period
+    # factors, batched by eigh like R_path below).
+    if zero_noise:
+        sqrt_Q = sqrt_Q_path = None
+    elif Q.ndim == 2:
+        sqrt_Q, sqrt_Q_path = _psd_sqrt(Q), None
+    else:
+        sqrt_Q, sqrt_Q_path = None, _psd_sqrt(Q)
     # R_path may be time-varying (SV); eigh batches over the leading T
     # dimension in one call rather than T separate decompositions.
     sqrt_R_path = None if zero_noise else _psd_sqrt(R_path)
 
     for t in range(T):
-        w_plus = np.zeros(n) if zero_noise else sqrt_Q @ rng.standard_normal(n)
+        if zero_noise:
+            w_plus = np.zeros(n)
+        elif sqrt_Q_path is None:
+            w_plus = sqrt_Q @ rng.standard_normal(n)
+        else:
+            w_plus = sqrt_Q_path[t] @ rng.standard_normal(n)
         xi_t = F @ xi_prev + w_plus
         e_plus = np.zeros(m) if zero_noise else sqrt_R_path[t] @ rng.standard_normal(m)
         y_plus[t] = A.T @ x[t] + Z @ xi_t + e_plus
@@ -564,6 +622,41 @@ def _simulate_plus_path(
         xi_prev = xi_t
 
     return xi_plus, y_plus
+
+
+def recover_shocks(
+    xi_draw: np.ndarray,
+    xi00: np.ndarray,
+    yobs: np.ndarray,
+    x: np.ndarray,
+    A: np.ndarray,
+    Z: np.ndarray,
+    F: np.ndarray,
+    meta,
+) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
+    """FAMILY-GENERIC structural-shock recovery (S6 WP2): invert a drawn
+    state path into the named STATE shocks via the family's declared
+    loadings (``StateSpaceMeta.recovery_order`` -- an exact triangular
+    solve of ``w = B eps``, no least squares) and the named MEASUREMENT
+    shocks from the per-period residual (diagonal R: the residual's row j
+    IS measurement shock j, in ``meta.measurement_shocks`` order). Same
+    process-noise/residual algebra as :func:`_recover_structural_shocks`
+    (whose lw_sv-specific slot arithmetic this generalizes; for lw_sv the
+    two are bit-identical, pinned by tests/test_smoother_sim.py) -- see
+    that function's boundary note about w_0's lag-copy rows.
+    Returns ``({state_shock: (T,)}, {measurement_shock: (T,)})``."""
+    xi_prev = np.vstack([xi00[None, :], xi_draw[:-1]])
+    w = xi_draw - xi_prev @ F.T
+    eps: dict[str, np.ndarray] = {}
+    for shock, label, coef, others in meta.recovery_order():
+        acc = w[:, meta.slot(*label)]
+        for other, other_coef in others:
+            acc = acc - other_coef * eps[other]
+        eps[shock] = acc / coef
+    state_shocks = {s: eps[s] for s in meta.state_shocks}
+    e = yobs - x @ A - xi_draw @ Z.T
+    meas_shocks = {name: e[:, j] for j, name in enumerate(meta.measurement_shocks)}
+    return state_shocks, meas_shocks
 
 
 @dataclass
@@ -586,11 +679,16 @@ class SimSmootherDraw:
     """
 
     xi_draw: np.ndarray
-    eps_ystar: np.ndarray
-    eps_g: np.ndarray
-    eps_z: np.ndarray
-    eps_is: np.ndarray
-    eps_pc: np.ndarray
+    eps_ystar: np.ndarray | None = None
+    eps_g: np.ndarray | None = None
+    eps_z: np.ndarray | None = None
+    eps_is: np.ndarray | None = None
+    eps_pc: np.ndarray | None = None
+    #: S6: the same shocks keyed by the family's declared names
+    #: (``state_shocks[name]`` / ``meas_shocks[name]``), populated for every
+    #: family; the five lw_sv attributes above stay for existing callers.
+    state_shocks: dict[str, np.ndarray] | None = None
+    meas_shocks: dict[str, np.ndarray] | None = None
 
 
 def _recover_structural_shocks(
@@ -662,6 +760,7 @@ def simulate_smoother_draw(
     xi_smooth: np.ndarray | None = None,
     *,
     zero_noise: bool = False,
+    meta=None,
 ) -> SimSmootherDraw:
     """One Durbin & Koopman (2002) simulation-smoother draw
     (plans/S4-plan.md's resolved open question 1, the literal two-pass DK
@@ -685,7 +784,9 @@ def simulate_smoother_draw(
 
     ``R`` accepts the same constant-(m,m)-or-(T,m,m)-path forms as
     :func:`kalman_loglik`/:func:`kalman_smoother` (normalized via
-    :func:`_as_R_path`) -- for an SV draw, pass
+    :func:`_as_R_path`), and ``Q`` a constant (n,n) matrix or a (T,n,n)
+    path (S6: a family with SV on a STATE shock, e.g. UCSV's trend shock,
+    passes that draw's own exp(h) path) -- for an SV draw, pass
     ``sv_diag_variance_path(h_is, h_pc)`` built from THAT draw's own saved
     h_is/h_pc transformed parameters (HANDOFF.md's S4 warning: never
     re-derive h from nu).
@@ -707,13 +808,22 @@ def simulate_smoother_draw(
     zero-plus-noise identity check, the "G1-style mirror" spec §2.4 calls
     for since there is no Stan-side smoother to mirror against).
 
+    ``meta`` (S6): the family's :class:`StateSpaceMeta`; when given, the
+    structural shocks are recovered generically from its declared loadings
+    (:func:`recover_shocks`) and returned in ``state_shocks``/
+    ``meas_shocks``; when ``None`` (the lw_sv default, every pre-S6 call
+    site) the historical lw_sv recovery runs and ALSO fills the named
+    dicts, so both interfaces are always available.
+
     Returns a :class:`SimSmootherDraw` with the drawn state path and the
-    five recovered structural shocks (spec §2.4 point 2), each length T.
+    recovered structural shocks (spec §2.4 point 2), each length T.
     """
     yobs = np.ascontiguousarray(yobs, dtype=np.float64)
     x = np.ascontiguousarray(x, dtype=np.float64)
     F = np.ascontiguousarray(F, dtype=np.float64)
     Q = np.ascontiguousarray(Q, dtype=np.float64)
+    if Q.ndim == 3:
+        Q = _as_Q_path(Q, yobs.shape[0])  # validates the path length
     A = np.ascontiguousarray(A, dtype=np.float64)
     Z = np.ascontiguousarray(Z, dtype=np.float64)
     xi00 = np.ascontiguousarray(xi00, dtype=np.float64)
@@ -731,6 +841,19 @@ def simulate_smoother_draw(
 
     xi_draw = xi_smooth - xi_plus_smooth + xi_plus
 
+    if meta is not None:
+        state_shocks, meas_shocks = recover_shocks(xi_draw, xi00, yobs, x, A, Z, F, meta)
+        return SimSmootherDraw(
+            xi_draw=xi_draw,
+            eps_ystar=state_shocks.get("ystar"),
+            eps_g=state_shocks.get("g"),
+            eps_z=state_shocks.get("z"),
+            eps_is=meas_shocks.get("is"),
+            eps_pc=meas_shocks.get("pc"),
+            state_shocks=state_shocks,
+            meas_shocks=meas_shocks,
+        )
+
     eps_ystar, eps_g, eps_z, eps_is, eps_pc = _recover_structural_shocks(
         xi_draw, xi00, yobs, x, A, Z, F
     )
@@ -742,4 +865,6 @@ def simulate_smoother_draw(
         eps_z=eps_z,
         eps_is=eps_is,
         eps_pc=eps_pc,
+        state_shocks={"ystar": eps_ystar, "g": eps_g, "z": eps_z},
+        meas_shocks={"is": eps_is, "pc": eps_pc},
     )

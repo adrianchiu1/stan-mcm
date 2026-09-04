@@ -247,6 +247,77 @@ class StateLinearExogRule:
         return total
 
 
+class StateNoise(Protocol):
+    """Per-period STATE-innovation draw for the forward simulation (S6:
+    families with SV on a state shock -- UCSV's trend shock -- continue
+    that random walk forward, spec §3.3's widening bands on the trend
+    side). RNG consumption order is part of the contract."""
+
+    def step(self, rng: np.random.Generator) -> np.ndarray: ...
+
+
+class ConstantStateNoise:
+    """Constant state innovation covariance: ``w = sqrt(Q) @ z`` with
+    ``z ~ N(0, I)`` -- exactly the pre-S6 draw (same matrix square root,
+    same RNG consumption), the default when no state-noise model is
+    declared."""
+
+    def __init__(self, Q: np.ndarray) -> None:
+        from macrotoolkit.smoother import _psd_sqrt
+
+        self._sqrt_Q = _psd_sqrt(np.asarray(Q, dtype=np.float64))
+        self._n = self._sqrt_Q.shape[0]
+
+    def step(self, rng: np.random.Generator) -> np.ndarray:
+        return self._sqrt_Q @ rng.standard_normal(self._n)
+
+
+class RandomWalkLogVarianceStateNoise:
+    """State innovations built shock by shock from the family's declared
+    loadings, with SV shocks continuing their log-variance random walks
+    (``h += sigma_h * nu``; the shock's VARIANCE is exp(h), i.e. it is
+    drawn with sd = exp(h/2) -- h is log-VARIANCE) and constant shocks at
+    fixed sds. Per period, in
+    ``meta.state_shocks`` order: an SV shock draws its h innovation then
+    its realization; a constant shock draws its realization only.
+    ``w = sum_s b_s * eps_s`` (``b_s = meta.injection_vector(s)``)."""
+
+    def __init__(
+        self,
+        meta: StateSpaceMeta,
+        sv_h_last: Mapping[str, float],
+        sv_sigma_h: Mapping[str, float],
+        constant_sds: Mapping[str, float] | None = None,
+    ) -> None:
+        constant_sds = dict(constant_sds or {})
+        unknown = set(sv_h_last) | set(sv_sigma_h) | set(constant_sds)
+        unknown -= set(meta.state_shocks)
+        if unknown:
+            raise ValueError(f"Unknown state shock(s) {sorted(unknown)}; declared: {list(meta.state_shocks)}.")
+        if set(sv_h_last) != set(sv_sigma_h):
+            raise ValueError("sv_h_last and sv_sigma_h must name the same SV state shocks.")
+        missing = [s for s in meta.state_shocks if s not in sv_h_last and s not in constant_sds]
+        if missing:
+            raise ValueError(f"State shock(s) {missing} have neither an SV path nor a constant sd.")
+        self._shocks = tuple(meta.state_shocks)
+        self._b = {s: meta.injection_vector(s) for s in self._shocks}
+        self._h = {s: float(v) for s, v in sv_h_last.items()}
+        self._sigma_h = {s: float(v) for s, v in sv_sigma_h.items()}
+        self._const = {s: float(v) for s, v in constant_sds.items()}
+        self._n = meta.n_state
+
+    def step(self, rng: np.random.Generator) -> np.ndarray:
+        w = np.zeros(self._n)
+        for s in self._shocks:
+            if s in self._h:
+                self._h[s] = self._h[s] + self._sigma_h[s] * rng.standard_normal()
+                sd = float(np.exp(self._h[s] / 2.0))  # h is log-VARIANCE
+            else:
+                sd = self._const[s]
+            w += self._b[s] * rng.normal(0.0, sd)
+        return w
+
+
 class MeasurementNoise(Protocol):
     """Per-period measurement-shock draw for the forward simulation. RNG
     consumption order is part of the contract (it preserves seeded
@@ -312,12 +383,16 @@ def simulate_forward(
     meas_noise: MeasurementNoise,
     horizon: int,
     rng: np.random.Generator,
+    state_noise: StateNoise | None = None,
 ) -> dict[str, np.ndarray | dict[str, np.ndarray]]:
     """ONE stochastic forward realization, ``horizon`` periods ahead of the
     terminal state ``xi_last``. Per period, in this exact order (RNG
     consumption preserved from the pre-engine implementation):
 
-    1. draw process noise, step the state: ``xi_s = F @ xi_prev + w``;
+    1. draw process noise, step the state: ``xi_s = F @ xi_prev + w`` --
+       from ``state_noise`` (S6: an SV state shock continues its random
+       walk), default :class:`ConstantStateNoise` over ``Q`` (the exact
+       pre-S6 draw);
     2. resolve each exogenous series' lag-1 value from ``exog_rules`` given
        the fresh state row (deeper lags come from previously resolved
        values, seeded by ``exog_seeds`` = real data) -- each rule's
@@ -347,9 +422,8 @@ def simulate_forward(
             )
 
     n = F.shape[0]
-    from macrotoolkit.smoother import _psd_sqrt
-
-    sqrt_Q = _psd_sqrt(Q)
+    if state_noise is None:
+        state_noise = ConstantStateNoise(Q)
     obs_reg = _Registers(meta.obs_names, meta.obs_lag_depth, obs_seeds)
     # Exogenous registers hold PREVIOUSLY RESOLVED values only (the lag-1
     # value is always this step's fresh resolution), so entry i covers lag
@@ -374,7 +448,7 @@ def simulate_forward(
 
     xi_prev = np.asarray(xi_last, dtype=np.float64).copy()
     for t in range(horizon):
-        w = sqrt_Q @ rng.standard_normal(n)
+        w = state_noise.step(rng)
         xi_t = F @ xi_prev + w
         states[t] = xi_t
 
@@ -412,7 +486,7 @@ def simulate_forward(
     # The post-loop alignment row -- drawn AFTER every in-loop draw so the
     # in-loop noise stream (and therefore all observables at a given seed)
     # is independent of this row's existence.
-    w_final = sqrt_Q @ rng.standard_normal(n)
+    w_final = state_noise.step(rng)
     states[horizon] = F @ xi_prev + w_final
 
     return {"obs": obs, "states": states, "exog_resolved": exog_resolved}
