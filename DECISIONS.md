@@ -3,6 +3,32 @@
 One dated line per judgment call not fixed by the spec, with rationale.
 Newest first.
 
+- **2026-09-04 — S6 COMPLETE (stage-end entry).** Everything in
+  `plans/S6-plan.md` is delivered and green on
+  `claude/s6-macrotoolkit-jpguf5` (pushed; not merged, no PR opened, per
+  the brief): WP1 the notebook-first Python API with the CLI as a thin
+  shell and the family-generic report (two committed executed notebooks);
+  WP2 family #2 (UCSV) with the ONE real KF extension (time-varying Q_t,
+  G1 over five paths, the constant-Q pin exact) and its full ladder --
+  G1, production-render mirror, G2 recovery PASSED, SBC PASSED at the
+  pre-registered design, G6 identity -- plus the worked example through
+  the notebook API with the CLI cross-check landing on the same hash;
+  WP3 the fit-time mirror check on every fit and `mtk validate <family>`
+  with both families wired. One numerics-reviewer pass over the
+  KF/smoother/engine/UCSV change set: no must-fix, one should-fix
+  applied (the mu_h0 anchor derivation). Two conflicts between the brief
+  and the repo's docs were resolved in the docs' favour and recorded
+  (plans/S6-plan.md; the lw_sv re-identification and the transformed-
+  parameter mechanism). Fast suite at stage end: **325 passed, 0
+  skipped** (from 284 at stage start); slow gates run this stage: UCSV G2
+  (~22 min) and UCSV SBC (~1.7 h), both at their registered designs. Not
+  done, deliberately: regenerating the two lw_sv reference runs at their
+  new identities (the archived S5 fixtures remain the record; ~2-3 h of
+  sampling for no numerical change) and migrating `results_lw.py` onto
+  `results_core.py` (S7 backlog). HANDOFF.md rewritten for S7 (the
+  equation-authoring DSL and the promotion/production layer are the
+  natural candidates).
+
 - **2026-09-04 — UCSV SBC and recovery designs PRE-REGISTERED (S6 WP2c;
   ENGINEERING.md ladder rung 3; the G4 precedent). Fixed and recorded
   here BEFORE any replication runs; never adjusted afterward to pass.

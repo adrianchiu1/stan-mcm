@@ -451,7 +451,8 @@ def _suite():
             mirror_gate("lw_sv", example_spec, example_df),
             hd_identity_gate("lw_sv", example_spec, example_df, hd_reconstruction_error),
             recovery_gate(LW_G2_DESIGN),
-            sbc_gate(G4_DESIGN, p_floor=CHI2_P_FLOOR, divergence_limit=DIVERGENT_TOTAL_LIMIT),
+            sbc_gate(G4_DESIGN, p_floor=CHI2_P_FLOOR, divergence_limit=DIVERGENT_TOTAL_LIMIT,
+                     artifact_root=Path(__file__).resolve().parents[3] / "tests" / "artifacts" / "g4_sbc"),
         ),
     )
 

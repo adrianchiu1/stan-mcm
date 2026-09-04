@@ -69,8 +69,10 @@ the ladder's other rungs, run through `mtk validate ucsv --tier <tier>`
 | G1 mirror (shared filter, 5 paths incl. Q_t) | `tests/test_g1_mirror.py` | max diff 7.3e-12 (gate 1e-8) |
 | Production-render mirror at 25 prior draws | fast | 1.8e-12 |
 | G6 HD identity | fast | 2e-16 (gate 1e-6) |
-| G2 recovery (20 datasets, pre-registered) | recovery | see below |
-| SBC (100 reps, pre-registered) | sbc | see below |
+| G2 recovery (20 datasets, pre-registered) | recovery | PASS: pooled coverage 0.85, per quantity 0.85/0.85/0.75/0.95, no σ_h bias |
+| SBC (100 reps, pre-registered) | sbc | PASS: χ² p 0.596/0.911/0.760/0.052, 4 divergences |
 
-Results of the slow tiers are recorded in DECISIONS.md (2026-09-04) and
-summarized below once run.
+Both slow tiers ran once at exactly their pre-registered designs on
+2026-09-04 (DECISIONS.md); the SBC record is crash-resumable
+(`tests/artifacts/ucsv_sbc/ranks.csv`, gitignored, regenerable from the
+fixed seeds via `scripts/run_ucsv_sbc.py`).

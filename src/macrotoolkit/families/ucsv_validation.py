@@ -249,13 +249,17 @@ def _suite():
         sbc_gate,
     )
 
+    # The SBC gate shares its crash-resumable ranks.csv with the pytest
+    # gate (tests/artifacts/), so `mtk validate` and `pytest -m slow` are
+    # one record, never two runs.
     return ValidationSuite(
         family="ucsv",
         gates=(
             mirror_gate("ucsv", example_spec, example_df),
             hd_identity_gate("ucsv", example_spec, example_df, hd_reconstruction_error),
             recovery_gate(UCSV_G2_DESIGN),
-            sbc_gate(UCSV_SBC_DESIGN, p_floor=SBC_CHI2_P_FLOOR, divergence_limit=SBC_DIVERGENT_TOTAL_LIMIT),
+            sbc_gate(UCSV_SBC_DESIGN, p_floor=SBC_CHI2_P_FLOOR, divergence_limit=SBC_DIVERGENT_TOTAL_LIMIT,
+                     artifact_root=Path(__file__).resolve().parents[3] / "tests" / "artifacts" / "ucsv_sbc"),
         ),
     )
 

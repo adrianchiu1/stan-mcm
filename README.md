@@ -10,17 +10,32 @@ families, a front-end for economists who never touch Stan) is in
 [VISION.md](VISION.md); the engineering doctrine that binds every family is
 in [ENGINEERING.md](ENGINEERING.md).
 
-**Status**: the v1 vertical slice — Laubach–Williams with stochastic
-volatility (`lw_sv`), spec in [lw-sv-spec.md](lw-sv-spec.md) — is complete
-through stage S5. It is deliberately a *dry run of the general framework*:
-exact HLW replication is not a goal (see the G5b exhibit below); the value
-is the validated shared machinery the next family
-(UCSV — see [docs/kf-capability-matrix.md](docs/kf-capability-matrix.md))
-plugs into.
+**Status**: through stage S6 the toolkit has **two validated families** —
+the v1 vertical slice, Laubach–Williams with stochastic volatility
+(`lw_sv`, spec in [lw-sv-spec.md](lw-sv-spec.md)), and family #2,
+Stock–Watson trend inflation with SV on both shocks (`ucsv`, scoped by
+[docs/kf-capability-matrix.md](docs/kf-capability-matrix.md)) — a
+**notebook-first Python API** (`from macrotoolkit import api as mtk`;
+`mtk.fit(spec, dataframe)` → run handle → inline figures → report →
+sweeps, the CLI being a thin shell over it), and **automatic per-model
+QC**: every fit cross-checks the exact rendered Stan program's Kalman-
+filter log-likelihood against the Python mirror before sampling, and
+`mtk validate <family>` runs a family's registered gate suite into one
+validation report. lw_sv is deliberately a *dry run of the general
+framework*: exact HLW replication is not a goal (see the G5b exhibit
+below); UCSV was the test that the shared machinery is genuinely shared
+(it needed ONE real KF extension, time-varying `Q_t`, and otherwise only
+declarations).
 
 ## Validation ladder (all gates green)
 
-Every family climbs the same ladder (ENGINEERING.md); `lw_sv`'s results:
+Every family climbs the same ladder (ENGINEERING.md), and since S6 every
+fit runs the first rung automatically (the fit-time mirror check, G1's
+1e-8 gate at prior draws of the exact rendered program, recorded in the
+run's diagnostics and report header) while `mtk validate <family> --tier
+fast|recovery|sbc|all` runs the registered rungs on demand.
+
+`lw_sv`'s results:
 
 | Gate | What it proves | Result |
 |---|---|---|
@@ -31,6 +46,18 @@ Every family climbs the same ladder (ENGINEERING.md); `lw_sv`'s results:
 | G5a | Exact HLW replication at fixed parameters | ~1e-12 vs the HLW (2017) oracle |
 | G6 | Historical-decomposition reconstruction identity | exact to 1e-6 per period per draw |
 | G5b | *(informational exhibit, not a gate)* filtered vs published one-sided HLW | differences measured + attributed (below) |
+
+`ucsv`'s results (S6; there is **no external oracle** for UCSV — nothing
+like HLW's published code — so the family's credibility rests on the
+mirror, recovery and SBC rungs, stated explicitly):
+
+| Gate | What it proves | Result |
+|---|---|---|
+| G1 | Stan KF ≡ Python KF mirror over 5 filter paths incl. time-varying Q_t (shared filter, 50 points) | max diff 7.3e-12 (gate 1e-8); constant-Q values reproduce the pre-S6 program exactly |
+| G1 (production render) | fit-time mirror at prior draws of the UCSV program | 1.8e-12 |
+| G2 | Parameter recovery, 20 pre-registered simulated datasets | PASS: pooled 90% coverage 0.85 (band [0.80, 0.97]); per quantity 0.85/0.85/0.75/0.95; no σ_h bias |
+| SBC | 100 pre-registered replications, 4 ranked quantities | χ² p = 0.596 (sigma_h_eps), 0.911 (sigma_h_eta), 0.760 (h0_eps), 0.052 (h0_eta) — all above the 0.001 floor; 4/150,000 divergences |
+| G6 | HD reconstruction identity (bars sum to inflation) | ~1e-13 per period per draw (gate 1e-6) |
 
 ## Exhibits
 
@@ -98,14 +125,33 @@ uv tool install pytest --with cmdstanpy --with numba --with arviz \
   --with-editable .
 python -m cmdstanpy.install_cmdstan --dir ~/.cmdstan --version 2.36.0
 
-# estimate, report, sweep
+# estimate, report, sweep, validate (the CLI is a thin shell over the API)
 mtk run examples/us_lw_sv/spec_sv.yaml        # ~40-80 min, immutable runs/<hash12>/
+mtk run examples/us_ucsv/spec.yaml            # family #2, a few minutes
 mtk report <hash12>                           # self-contained report.html
 mtk sweep examples/us_lw_sv/sweep_sigma_g_z.yaml
+mtk validate ucsv --tier fast                 # one validation report per family/tier
 
-# tests (fast suite; slow gates run with -m slow)
+# tests (fast suite; slow gates run with -m slow; one-liners in scripts/gate-check.sh)
 pytest -m "not slow"
+scripts/gate-check.sh validate lw_sv fast
 ```
+
+From a notebook (S6): no YAML, no CLI —
+
+```python
+from macrotoolkit import api as mtk
+spec = mtk.spec("ucsv", data={"file": "dataframe.csv", "date_column": "date",
+                              "mapping": {"pi": "core_pce_ann"}})
+run = mtk.fit(spec, df)                 # pandas DataFrame in; immutable hashed run out
+run.verdict, run.mirror_check           # diagnostics + the automatic KF mirror check
+run.outputs().figure("trend_cycle")     # matplotlib Figures, never files
+run.param_table(); run.report()         # DataFrame; self-contained report.html
+```
+
+Executed example notebooks: [examples/notebook_api/](examples/notebook_api/README.md)
+(the lw_sv output layer on the archived reference run without sampling;
+UCSV end to end).
 
 A tracked, draw-thinned copy of both reference runs lives in
 [runs-archive/](runs-archive/README.md) so a fresh checkout can exercise
@@ -114,26 +160,39 @@ regenerate for publication numbers).
 
 ## Adding a model family
 
-Mechanically true since S4.5 (registry contract,
-`specs/schema/FAMILY_REGISTRY`): a family = Stan template + spec-schema
-fragment + a `macrotoolkit/families/<family>.py` numerics module (named
-state metadata with explicit time offsets, the endogenous-lag feedback
-map, prior sampler, builders) + one registry entry + a validation suite
-instantiated from the generic harnesses (the SBC engine in
-`tests/sbc_harness.py` takes a design in and returns rank statistics).
-The generic simulate/IRF/HD engine, run store, report, sweep tool, and
-prior-predictive check pick the family up automatically. Family #2 is
-UCSV; the one real KF extension it needs (time-varying state innovation
-covariance Q_t) is scoped in
+Mechanically true since S4.5 and exercised by UCSV in S6 (registry
+contract, `specs/schema/FAMILY_REGISTRY`): a family = Stan template +
+spec-schema fragment + a `macrotoolkit/families/<family>.py` numerics
+module (named state metadata with explicit time offsets, the
+endogenous-lag feedback map, prior sampler, builders, the mirror-check
+declaration) + a results/plots/outputs declaration over the generic
+results core and engine (`results_core.py`, `engine.py`) + one registry
+entry + a `families/<family>_validation.py` declaring the gate designs
+(the generic SBC engine, recovery arithmetic, mirror and identity gates
+live in `macrotoolkit/validation/`). The run store, report, notebook
+API, sweep tool, prior-predictive check, fit-time mirror check and `mtk
+validate` pick the family up automatically. The KF's capability
+boundary (what is built, what waits for the family that needs it) is
 [docs/kf-capability-matrix.md](docs/kf-capability-matrix.md).
 
 ## Repository map
 
-- `specs/schema/` — the spec spine: Pydantic schema + the family registry
-- `stan/` — shared Stan functions library + per-family Jinja templates
-- `src/macrotoolkit/` — data → render → run store → smoother → engine →
-  results → plots → report → CLI (+ sweep, G5b exhibit)
-- `tests/` — gates G1–G6 as pytest suites (generic SBC harness included)
-- `examples/us_lw_sv/` — the worked US example (specs, data, run records)
+- `specs/schema/` — the spec spine: Pydantic schema (`RunSpec` with
+  `qc:`/`outputs:` outside the identity hash) + the family registry
+- `stan/` — shared Stan functions library (the Q_t/R_t-generalized
+  Kalman filter, SV helpers) + per-family Jinja templates
+- `src/macrotoolkit/` — `api` (the notebook-first public API) · data →
+  render → run store (`run`) → `qc` (fit-time mirror check) → `smoother`
+  → `engine` → `results_core` / `results_lw` / `results_ucsv` → plots →
+  `outputs*` (declared figure modules) → `report` → `cli` (+ `sweep`,
+  `validation/` (SBC engine, recovery, gate suites), `families/`
+  (per-family declarations + validation designs), G5b exhibit)
+- `tests/` — gates G1–G6 as pytest suites; markers `lw_sv` / `ucsv` /
+  `validation` / `slow`
+- `examples/us_lw_sv/`, `examples/us_ucsv/` — the worked examples
+  (specs, data derivation, run records); `examples/notebook_api/` — the
+  executed API notebooks
+- `runs-archive/` — tracked draw-thinned reference runs (development
+  fixtures)
 - `DECISIONS.md` — every judgment call, dated, newest first
 - `HANDOFF.md` — the current stage-end handoff

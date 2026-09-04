@@ -2,8 +2,10 @@
 
 **Status: plan of record, drafted 2026-09-04 at S6 start, on branch
 `claude/s6-macrotoolkit-jpguf5` from `origin/main` (S1–S5 complete, PR #6
-merged). Three work packages, shipped in this order, each independently
-shippable at its boundary.** Binding conventions inherited unchanged:
+merged); EXECUTED IN FULL the same day -- all three work packages shipped
+at their boundaries (see HANDOFF.md and DECISIONS.md 2026-09-04 for what
+landed and the measured gate results). Three work packages, shipped in
+this order, each independently shippable at its boundary.** Binding conventions inherited unchanged:
 immutable hash-identified runs, the validation ladder (ENGINEERING.md),
 named state metadata (never raw slot indices), the G1 Stan-vs-Python
 mirror discipline, the pre-registration rule for SBC designs, a
