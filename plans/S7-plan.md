@@ -3,7 +3,10 @@
 **Status: plan of record, drafted 2026-09-04 at S7 start, on branch
 `claude/s7-equation-dsl-og1xvc` from `origin/main` (S1–S6 complete, PR #7
 merged; `src/macrotoolkit/api.py` present, so the branch starts from main
-as the brief prefers).** Baseline at stage start: fresh container per the
+as the brief prefers); EXECUTED IN FULL the same day -- M1–M6 shipped at
+their boundaries (see HANDOFF.md and DECISIONS.md 2026-09-04 for what
+landed, the measured gate results, and the two numerics-reviewer passes'
+findings and disposition).** Baseline at stage start: fresh container per the
 HANDOFF recipe (CmdStan 2.36.0 built at `~/.cmdstan`), fast suite green
 (count recorded in DECISIONS.md at the first commit).
 
