@@ -3,6 +3,119 @@
 One dated line per judgment call not fixed by the spec, with rationale.
 Newest first.
 
+- **2026-09-04 — uc_gap_sv SBC PRE-REGISTERED (S8 UC-gap SBC execution;
+  ENGINEERING.md ladder rung 3; the UCSV/G4 precedent). Fixed and
+  recorded here BEFORE any replication runs; never adjusted afterward to
+  pass. The declaration is `examples/notebook_api/uc_gap_sv_validation.py`
+  (`UC_GAP_SV_SBC_DESIGN`, built from `macrotoolkit.authoring.validation.
+  sbc_design` -- no new gate mechanism, an instantiation), driven by
+  `scripts/run_uc_gap_sbc.py`. The model is the EXACT `uc_gap_sv`
+  definition from `examples/notebook_api/authored_uc_gap.ipynb` cell 3
+  (bivariate UC output-gap, AR(2) gap state with SV on the demand shock
+  `eta_gap`, accelerationist Phillips curve) -- copied verbatim into the
+  design module, never re-derived.
+
+  - **N_REPLICATIONS = 100**, **SIM_T = 100**;
+  - sampler per replication: **2 chains x 750 warmup + 750 sampling**,
+    adapt_delta 0.95, max_treedepth 12 (the UCSV/G4 per-rep settings);
+  - ranks from **99** evenly thinned pooled draws, **10** chi^2 bins,
+    p-value floor **0.001** per ranked quantity; total-divergence ceiling
+    **150** (0.1% of 100 x 1,500 post-warmup draws);
+  - **10 ranked quantities**: the model's full static parameter set --
+    `a1, a2, b_pi, b_y, sigma_ystar, sigma_g, sigma_y, sigma_pi,
+    sigma_h_eta_gap` (`CompiledModel.param_names` for this model, 9
+    scalars: the 8 declared parameters plus the SV block's own
+    half-normal scale) -- plus `h0_eta_gap`, the SV block's initial
+    log-variance, recovered from the posterior's non-centered
+    `h0_eta_gap_raw` via `h0 = mu_h0 + h0_sd*raw` (the template's own
+    line, the same transform UCSV/G4 rank) -- exactly what
+    `authoring/validation.py::_ranked` emits for a model with one SV
+    shock, unmodified;
+  - **seeds**: `SBC_SEED_BASE = 20260904` (fresh -- distinct from every
+    seed base already in use: UCSV's 20260920/20260921, lw_sv G4's
+    20260910, lw_sv G2's 20260831); rep i fully reproducible from
+    `seed_base + i` (its prior draw, its simulated dataset, its sampler
+    seed); crash-resume from `ranks.csv` is byte-identical by
+    construction (`run_sbc`'s existing resume mechanism, untouched);
+  - **prior config**: production defaults, NO override (the AR(2) gap
+    coefficients a1/a2 keep their declared priors; no family here needs a
+    stationarity-restricted SBC prior config, matching UCSV's "nothing
+    needs a stationarity override" precedent), with the render-time
+    assertion that the stamped prior equals the sampled prior (below);
+  - **fixed anchors** (the G3 Y_ANCHOR / UCSV mu_h0 pattern) in place of
+    the model's two data-derived pieces:
+    - `YSTAR_ANCHOR = 900.0` for the initial state's ystar mean, in place
+      of production's `au.first_obs("y")` (the data's first observation)
+      -- literally `Y_ANCHOR` from `macrotoolkit/families/
+      lw_sv_validation.py`, reused unchanged: this model's "y" maps to
+      the EXACT SAME `lgdp100` series as lw_sv's own y observable (same
+      file, same column, same units), so the already-established anchor
+      applies verbatim rather than a new one being invented. g's and
+      gap's initial means (3.0, 0.0) are already fixed by the model's own
+      declaration and need no override; every state's marginal sd (2.0,
+      1.0, 2.0, 2.0 for ystar/g/gap/gap[-1]) is read straight off the
+      model's own `initial_state` declaration.
+    - `MU_H0_ETA_GAP_ANCHOR = 2*ln(0.5)` for the SV block's initial
+      log-variance anchor, in place of production's
+      `au.log_var_diff("y", 0.5)` (`ln(0.5 * Var(Delta y))` over the
+      estimation sample) -- the UCSV/G4 fixed-mu_h0 formula ("the
+      log-variance of a plausible half-unit shock"), reused verbatim.
+      Evaluated once on the notebook's own worked-example data
+      (1960Q1-2019Q4 lgdp100) for plausibility only, the production
+      anchor is `ln(0.5 * Var(Delta y))` = -1.11, the same order of
+      magnitude as `2*ln(0.5)` = -1.386 -- confirming the fixed anchor is
+      plausible without the design being data-derived.
+    - The Stan program takes `xi00`, `P00` and `mu_h0_eta_gap` as plain
+      data, so the production program is validated at fixed rather than
+      data-chosen anchors, exactly the G3/G4/UCSV pattern.
+  - **structural simulator**: `macrotoolkit.authoring.validation.
+    simulate_dataset` unmodified -- the compiled model's own equations
+    through the engine's `simulate_forward`, exactly the generative model
+    the rendered program's KF likelihood defines; `uc_gap_sv` has no
+    exogenous series, so `exog_paths` is not needed.
+
+  **A framework-level compile-path issue, found and worked around without
+  touching `src/macrotoolkit/`:** `macrotoolkit.validation.sbc.
+  render_design_model` (the generic SBC engine's compile step, used by
+  every hand-family design so far) asserts `context["priors"] ==
+  design.expected_priors` against the family's `build_render_context`
+  output. The authored family's render context
+  (`authoring/stan.py::render_context`) has no top-level `priors` key --
+  priors are stamped directly into each parameter's declaration/prior
+  Stan statement instead -- so that assertion raises `KeyError` for
+  EVERY authored SBC design, not just this one; it is a framework gap in
+  the S7-added authored render-context shape meeting the pre-S7 SBC
+  engine, out of this task's scope (the fix is in
+  `src/macrotoolkit/validation/sbc.py`, not touched here, per the brief).
+  Worked around entirely in `examples/notebook_api/uc_gap_sv_validation.py`:
+  `render_uc_gap_sv_model()` renders and compiles the SAME production
+  template through the authored family's own path
+  (`authoring.family.build_render_context` -> `render_stan_source` ->
+  `compile_model`) and asserts the SAME exactness invariant directly
+  against `CompiledModel.resolve_priors`, then `scripts/run_uc_gap_sbc.py`
+  passes the already-compiled model into `run_sbc(..., model=...)`,
+  bypassing `render_design_model` entirely. No behavior of
+  `run_sbc`/`SbcDesign`/`sbc_design` changed; this is a caller-side
+  workaround, confirmed to compile and to run one replication cleanly
+  (rank statistics recorded, 0 divergences) before this entry was
+  written -- that one replication used the artifact directory
+  `/tmp/.../dryrun_uc_gap_sbc` (outside the repo, deleted after), never
+  `tests/artifacts/uc_gap_sbc/`, so it is NOT one of the registered
+  replications; the loop timing observed (~106s/replication on this
+  container, 2 chains parallel) is recorded here only as the basis for
+  the wall-cost estimate below, not as banked SBC evidence. The
+  pre-registered run below starts its own `ranks.csv` from replication 0
+  at the frozen seed base.
+
+  Execution rule (the UCSV/G4 precedent): a <=3-replication smoke may run
+  first solely to measure per-replication wall cost; its reps are the
+  design's own first reps, banked in `tests/artifacts/uc_gap_sbc/
+  ranks.csv`. At ~106s/replication observed above, 100 replications
+  extrapolate to roughly 3 hours; the design does not shrink silently --
+  if the measured cost runs materially over that, the partial record is
+  stated honestly rather than a reduced design being passed off as the
+  registered one.
+
 - **2026-09-04 — S7 COMPLETE (stage-end entry).** Everything in
   `plans/S7-plan.md` is delivered and green on
   `claude/s7-equation-dsl-og1xvc` (pushed; not merged, no PR opened, per
