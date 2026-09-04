@@ -1,8 +1,9 @@
 # Handoff
 
 Status as of 2026-09-04 (end of S6 session). **S6 is complete and green on
-branch `claude/s6-macrotoolkit-jpguf5`** (pushed; not merged; the user
-decides when/how to PR). The binding scope record is `plans/S6-plan.md`
+branch `claude/s6-macrotoolkit-jpguf5`** (pushed; PR #7,
+https://github.com/adrianchiu1/stan-mcm/pull/7, opened by the user from
+the Claude Code UI; the stage-per-PR cadence continues). The binding scope record is `plans/S6-plan.md`
 (including the two places the brief and the repo's own docs conflicted
 and how they were resolved). Three work packages shipped in order, each
 at a clean boundary: **WP1** the notebook-first Python API, **WP2**
