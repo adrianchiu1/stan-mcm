@@ -291,7 +291,22 @@ def test_estimation_yaml_excludes_outputs_and_is_otherwise_canonical() -> None:
     assert "outputs" not in est
     full = yaml.safe_load(spec.to_canonical_yaml())
     full.pop("outputs")
+    # qc (S6 WP3) is likewise outside the estimation identity.
+    assert "qc" not in est
+    full.pop("qc")
     assert est == full
+
+
+def test_estimation_yaml_identical_for_specs_differing_only_in_qc() -> None:
+    """The automatic-QC block (S6 WP3) configures a check, not the
+    estimation: two specs differing only in ``qc`` share their identity."""
+    d1 = _valid_spec_dict()
+    d2 = _valid_spec_dict()
+    d2["qc"] = {"mirror_check": False, "mirror_points": 3}
+    s1, s2 = RunSpec.model_validate(d1), RunSpec.model_validate(d2)
+    assert s1.to_estimation_yaml() == s2.to_estimation_yaml()
+    assert s1.qc_to_canonical_yaml() != s2.qc_to_canonical_yaml()
+    assert s2.qc.mirror_check is False and s2.qc.mirror_points == 3
 
 
 def test_estimation_yaml_identical_for_specs_differing_only_in_outputs() -> None:

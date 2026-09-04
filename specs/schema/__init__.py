@@ -64,6 +64,19 @@ class FamilyEntry:
     - ``headline_series``: ``(run_dir) -> {name: (dates, median_path)}``
       -- the family's headline smoothed series for cross-run comparison
       overlays (the sweep report).
+    - ``output_modules`` (S6 WP1): a tuple of
+      :class:`macrotoolkit.outputs.OutputModule` -- the family's report /
+      notebook figures, declared once and consumed by both the generic
+      report assembler and the Python API.
+    - ``mirror`` (S6 WP3): a :class:`macrotoolkit.qc.MirrorDecl` -- how to
+      turn a prior draw into Stan inits and evaluate the Python KF mirror,
+      for the automatic fit-time Stan-vs-Python cross-check.
+    - ``validation_suite`` (S6 WP3): a
+      :class:`macrotoolkit.validation.suite.ValidationSuite` declaring the
+      family's registered gate designs per tier (fast / recovery / sbc)
+      for ``mtk validate <family>``.
+    - ``display_name``: human-readable family name for report titles
+      (plain field, not a dotted path).
     """
 
     options_model: Type[BaseModel]
@@ -77,6 +90,10 @@ class FamilyEntry:
     report_writer: str | None = None
     prior_sd_table: str | None = None
     headline_series: str | None = None
+    output_modules: str | None = None
+    mirror: str | None = None
+    validation_suite: str | None = None
+    display_name: str | None = None
 
     def resolve(self, capability: str) -> Any:
         """Resolve one of the dotted-path capability fields to the actual
@@ -91,6 +108,9 @@ class FamilyEntry:
             "report_writer",
             "prior_sd_table",
             "headline_series",
+            "output_modules",
+            "mirror",
+            "validation_suite",
         ):
             raise ValueError(
                 f"Unknown family capability {capability!r} -- see "
@@ -128,6 +148,7 @@ FAMILY_REGISTRY: dict[str, FamilyEntry] = {
         required_mapping=("y",),
         build_stan_data="macrotoolkit.families.local_level:build_stan_data",
         build_render_context="macrotoolkit.families.local_level:build_render_context",
+        display_name="Local level (toy)",
         # No state metadata, results module, or report assembler: the S1
         # toy family has no output modules (spec §7's S1 scope).
     ),
@@ -143,6 +164,8 @@ FAMILY_REGISTRY: dict[str, FamilyEntry] = {
         report_writer="macrotoolkit.report:write_report",
         prior_sd_table="macrotoolkit.families.lw_sv:prior_scalar_sds",
         headline_series="macrotoolkit.families.lw_sv:headline_series",
+        output_modules="macrotoolkit.outputs_lw:OUTPUT_MODULES",
+        display_name="LW-SV",
     ),
 }
 

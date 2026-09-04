@@ -130,6 +130,9 @@ def load_run_spec(run_dir: str | Path) -> RunSpec:
     outputs_path = run_dir / "outputs.yaml"
     if outputs_path.is_file():
         raw["outputs"] = yaml.safe_load(outputs_path.read_text())
+    qc_path = run_dir / "qc.yaml"
+    if qc_path.is_file():
+        raw["qc"] = yaml.safe_load(qc_path.read_text())
     return RunSpec.model_validate(raw)
 
 
@@ -259,14 +262,35 @@ def run(
     would for the file itself). Used by the sweep runner (S5-decisions
     item 9) to run derived variants of a base spec without writing
     temporary spec files next to the user's own.
+
+    Thin wrapper over :func:`run_spec` (S6 WP1: the spec-taking core the
+    Python API calls directly).
     """
     spec_path = Path(spec_path).resolve()
+    spec = spec_override if spec_override is not None else load_spec(str(spec_path))
+    return run_spec(spec, base_dir=spec_path.parent, runs_root=runs_root, spec_path=spec_path)
+
+
+def run_spec(
+    spec: RunSpec,
+    *,
+    base_dir: str | Path,
+    runs_root: str | Path | None = None,
+    spec_path: Path | None = None,
+) -> RunResult:
+    """The run-store pipeline for an in-memory, validated :class:`RunSpec`
+    (S6 WP1): render -> identity -> (idempotent no-op | compile -> mirror
+    check -> sample -> store). ``base_dir`` anchors ``data.file``
+    resolution (the spec file's directory for a YAML spec; the notebook's
+    chosen directory or a DataFrame staging dir for the API).
+    ``spec_path`` is informational (logged) when the spec came from a file.
+    """
+    base_dir = Path(base_dir).resolve()
     runs_root_path = Path(runs_root).resolve() if runs_root is not None else REPO_ROOT / "runs"
 
-    spec = spec_override if spec_override is not None else load_spec(str(spec_path))
     family = get_family(spec.model.family)
 
-    df, raw_hash, data_path = load_data(spec, spec_path)
+    df, raw_hash, data_path = load_data(spec, base_dir=base_dir)
 
     context = build_render_context(spec)
     source = render_stan_source(family.template, context)
@@ -288,6 +312,10 @@ def run(
             outputs_path = run_dir / "outputs.yaml"
             if not outputs_path.is_file() or outputs_path.read_text() != outputs_yaml:
                 outputs_path.write_text(outputs_yaml)
+            qc_yaml = spec.qc_to_canonical_yaml()
+            qc_path = run_dir / "qc.yaml"
+            if not qc_path.is_file() or qc_path.read_text() != qc_yaml:
+                qc_path.write_text(qc_yaml)
             return RunResult(run_id=run_id, run_dir=run_dir, is_new=False)
         raise RuntimeError(
             f"Run directory {run_dir} already exists but has no _SUCCESS "
@@ -312,7 +340,8 @@ def run(
 
     try:
         logger.info("Run id: %s (full digest: %s)", run_id, run_id_full)
-        logger.info("Spec file: %s", spec_path)
+        logger.info("Spec file: %s", spec_path if spec_path is not None else "<RunSpec built in Python>")
+        logger.info("Data base directory: %s", base_dir)
         logger.info("Model family: %s", spec.model.family)
         logger.info("Data file: %s (sha256=%s)", data_path, raw_hash)
         logger.info("Rendered Stan source sha256: %s", src_hash)
@@ -324,6 +353,7 @@ def run(
         # item 3). load_run_spec() reassembles the full RunSpec.
         (run_dir / "spec.yaml").write_text(spec.to_estimation_yaml())
         (run_dir / "outputs.yaml").write_text(spec.outputs_to_canonical_yaml())
+        (run_dir / "qc.yaml").write_text(spec.qc_to_canonical_yaml())
         shutil.copy2(data_path, run_dir / "data.snapshot.csv")
 
         model, _ = compile_model(source, cmdstan_version)
