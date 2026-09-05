@@ -293,6 +293,14 @@ recovery and SBC are one-call design constructors
 per-model work, not framework work. The end-state walkthrough is
 [examples/notebook_api/authored_uc_gap.ipynb](examples/notebook_api/authored_uc_gap.ipynb).
 
+## The CCBS handbook companion
+
+[docs/companion/](docs/companion/README.md) re-fashions Blake & Mumtaz (2017),
+*Applied Bayesian Econometrics for Central Bankers*, with macrotoolkit: every
+chapter's models as authored equations on the handbook's own data, real runs,
+stated prior substitutions, and the gaps. Specs under `examples/handbook/`,
+notebooks under `examples/handbook/notebooks/`.
+
 ## Repository map
 
 - `specs/schema/` — the spec spine: Pydantic schema (`RunSpec` with
