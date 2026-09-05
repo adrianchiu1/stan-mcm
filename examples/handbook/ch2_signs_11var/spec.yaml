@@ -1,0 +1,2119 @@
+model:
+  family: authored
+  options:
+    family: authored
+    name: ch2_signs_11var
+    observables:
+    - ffr
+    - gdp_growth
+    - cpi_inflation
+    - pce_growth
+    - unemployment
+    - investment
+    - net_exports
+    - m2
+    - bond10y
+    - stock_growth
+    - yen_dollar
+    exogenous: []
+    equations:
+      measurement:
+      - ffr = c_ffr + b_ffr_ffr_1*ffr[-1] + b_ffr_gdp_growth_1*gdp_growth[-1] + b_ffr_cpi_inflation_1*cpi_inflation[-1]
+        + b_ffr_pce_growth_1*pce_growth[-1] + b_ffr_unemployment_1*unemployment[-1]
+        + b_ffr_investment_1*investment[-1] + b_ffr_net_exports_1*net_exports[-1]
+        + b_ffr_m2_1*m2[-1] + b_ffr_bond10y_1*bond10y[-1] + b_ffr_stock_growth_1*stock_growth[-1]
+        + b_ffr_yen_dollar_1*yen_dollar[-1] + b_ffr_ffr_2*ffr[-2] + b_ffr_gdp_growth_2*gdp_growth[-2]
+        + b_ffr_cpi_inflation_2*cpi_inflation[-2] + b_ffr_pce_growth_2*pce_growth[-2]
+        + b_ffr_unemployment_2*unemployment[-2] + b_ffr_investment_2*investment[-2]
+        + b_ffr_net_exports_2*net_exports[-2] + b_ffr_m2_2*m2[-2] + b_ffr_bond10y_2*bond10y[-2]
+        + b_ffr_stock_growth_2*stock_growth[-2] + b_ffr_yen_dollar_2*yen_dollar[-2]
+        + e_ffr
+      - gdp_growth = c_gdp_growth + a0_gdp_growth_ffr*ffr + b_gdp_growth_ffr_1*ffr[-1]
+        + b_gdp_growth_gdp_growth_1*gdp_growth[-1] + b_gdp_growth_cpi_inflation_1*cpi_inflation[-1]
+        + b_gdp_growth_pce_growth_1*pce_growth[-1] + b_gdp_growth_unemployment_1*unemployment[-1]
+        + b_gdp_growth_investment_1*investment[-1] + b_gdp_growth_net_exports_1*net_exports[-1]
+        + b_gdp_growth_m2_1*m2[-1] + b_gdp_growth_bond10y_1*bond10y[-1] + b_gdp_growth_stock_growth_1*stock_growth[-1]
+        + b_gdp_growth_yen_dollar_1*yen_dollar[-1] + b_gdp_growth_ffr_2*ffr[-2] +
+        b_gdp_growth_gdp_growth_2*gdp_growth[-2] + b_gdp_growth_cpi_inflation_2*cpi_inflation[-2]
+        + b_gdp_growth_pce_growth_2*pce_growth[-2] + b_gdp_growth_unemployment_2*unemployment[-2]
+        + b_gdp_growth_investment_2*investment[-2] + b_gdp_growth_net_exports_2*net_exports[-2]
+        + b_gdp_growth_m2_2*m2[-2] + b_gdp_growth_bond10y_2*bond10y[-2] + b_gdp_growth_stock_growth_2*stock_growth[-2]
+        + b_gdp_growth_yen_dollar_2*yen_dollar[-2] + e_gdp_growth
+      - cpi_inflation = c_cpi_inflation + a0_cpi_inflation_ffr*ffr + a0_cpi_inflation_gdp_growth*gdp_growth
+        + b_cpi_inflation_ffr_1*ffr[-1] + b_cpi_inflation_gdp_growth_1*gdp_growth[-1]
+        + b_cpi_inflation_cpi_inflation_1*cpi_inflation[-1] + b_cpi_inflation_pce_growth_1*pce_growth[-1]
+        + b_cpi_inflation_unemployment_1*unemployment[-1] + b_cpi_inflation_investment_1*investment[-1]
+        + b_cpi_inflation_net_exports_1*net_exports[-1] + b_cpi_inflation_m2_1*m2[-1]
+        + b_cpi_inflation_bond10y_1*bond10y[-1] + b_cpi_inflation_stock_growth_1*stock_growth[-1]
+        + b_cpi_inflation_yen_dollar_1*yen_dollar[-1] + b_cpi_inflation_ffr_2*ffr[-2]
+        + b_cpi_inflation_gdp_growth_2*gdp_growth[-2] + b_cpi_inflation_cpi_inflation_2*cpi_inflation[-2]
+        + b_cpi_inflation_pce_growth_2*pce_growth[-2] + b_cpi_inflation_unemployment_2*unemployment[-2]
+        + b_cpi_inflation_investment_2*investment[-2] + b_cpi_inflation_net_exports_2*net_exports[-2]
+        + b_cpi_inflation_m2_2*m2[-2] + b_cpi_inflation_bond10y_2*bond10y[-2] + b_cpi_inflation_stock_growth_2*stock_growth[-2]
+        + b_cpi_inflation_yen_dollar_2*yen_dollar[-2] + e_cpi_inflation
+      - pce_growth = c_pce_growth + a0_pce_growth_ffr*ffr + a0_pce_growth_gdp_growth*gdp_growth
+        + a0_pce_growth_cpi_inflation*cpi_inflation + b_pce_growth_ffr_1*ffr[-1] +
+        b_pce_growth_gdp_growth_1*gdp_growth[-1] + b_pce_growth_cpi_inflation_1*cpi_inflation[-1]
+        + b_pce_growth_pce_growth_1*pce_growth[-1] + b_pce_growth_unemployment_1*unemployment[-1]
+        + b_pce_growth_investment_1*investment[-1] + b_pce_growth_net_exports_1*net_exports[-1]
+        + b_pce_growth_m2_1*m2[-1] + b_pce_growth_bond10y_1*bond10y[-1] + b_pce_growth_stock_growth_1*stock_growth[-1]
+        + b_pce_growth_yen_dollar_1*yen_dollar[-1] + b_pce_growth_ffr_2*ffr[-2] +
+        b_pce_growth_gdp_growth_2*gdp_growth[-2] + b_pce_growth_cpi_inflation_2*cpi_inflation[-2]
+        + b_pce_growth_pce_growth_2*pce_growth[-2] + b_pce_growth_unemployment_2*unemployment[-2]
+        + b_pce_growth_investment_2*investment[-2] + b_pce_growth_net_exports_2*net_exports[-2]
+        + b_pce_growth_m2_2*m2[-2] + b_pce_growth_bond10y_2*bond10y[-2] + b_pce_growth_stock_growth_2*stock_growth[-2]
+        + b_pce_growth_yen_dollar_2*yen_dollar[-2] + e_pce_growth
+      - unemployment = c_unemployment + a0_unemployment_ffr*ffr + a0_unemployment_gdp_growth*gdp_growth
+        + a0_unemployment_cpi_inflation*cpi_inflation + a0_unemployment_pce_growth*pce_growth
+        + b_unemployment_ffr_1*ffr[-1] + b_unemployment_gdp_growth_1*gdp_growth[-1]
+        + b_unemployment_cpi_inflation_1*cpi_inflation[-1] + b_unemployment_pce_growth_1*pce_growth[-1]
+        + b_unemployment_unemployment_1*unemployment[-1] + b_unemployment_investment_1*investment[-1]
+        + b_unemployment_net_exports_1*net_exports[-1] + b_unemployment_m2_1*m2[-1]
+        + b_unemployment_bond10y_1*bond10y[-1] + b_unemployment_stock_growth_1*stock_growth[-1]
+        + b_unemployment_yen_dollar_1*yen_dollar[-1] + b_unemployment_ffr_2*ffr[-2]
+        + b_unemployment_gdp_growth_2*gdp_growth[-2] + b_unemployment_cpi_inflation_2*cpi_inflation[-2]
+        + b_unemployment_pce_growth_2*pce_growth[-2] + b_unemployment_unemployment_2*unemployment[-2]
+        + b_unemployment_investment_2*investment[-2] + b_unemployment_net_exports_2*net_exports[-2]
+        + b_unemployment_m2_2*m2[-2] + b_unemployment_bond10y_2*bond10y[-2] + b_unemployment_stock_growth_2*stock_growth[-2]
+        + b_unemployment_yen_dollar_2*yen_dollar[-2] + e_unemployment
+      - investment = c_investment + a0_investment_ffr*ffr + a0_investment_gdp_growth*gdp_growth
+        + a0_investment_cpi_inflation*cpi_inflation + a0_investment_pce_growth*pce_growth
+        + a0_investment_unemployment*unemployment + b_investment_ffr_1*ffr[-1] + b_investment_gdp_growth_1*gdp_growth[-1]
+        + b_investment_cpi_inflation_1*cpi_inflation[-1] + b_investment_pce_growth_1*pce_growth[-1]
+        + b_investment_unemployment_1*unemployment[-1] + b_investment_investment_1*investment[-1]
+        + b_investment_net_exports_1*net_exports[-1] + b_investment_m2_1*m2[-1] +
+        b_investment_bond10y_1*bond10y[-1] + b_investment_stock_growth_1*stock_growth[-1]
+        + b_investment_yen_dollar_1*yen_dollar[-1] + b_investment_ffr_2*ffr[-2] +
+        b_investment_gdp_growth_2*gdp_growth[-2] + b_investment_cpi_inflation_2*cpi_inflation[-2]
+        + b_investment_pce_growth_2*pce_growth[-2] + b_investment_unemployment_2*unemployment[-2]
+        + b_investment_investment_2*investment[-2] + b_investment_net_exports_2*net_exports[-2]
+        + b_investment_m2_2*m2[-2] + b_investment_bond10y_2*bond10y[-2] + b_investment_stock_growth_2*stock_growth[-2]
+        + b_investment_yen_dollar_2*yen_dollar[-2] + e_investment
+      - net_exports = c_net_exports + a0_net_exports_ffr*ffr + a0_net_exports_gdp_growth*gdp_growth
+        + a0_net_exports_cpi_inflation*cpi_inflation + a0_net_exports_pce_growth*pce_growth
+        + a0_net_exports_unemployment*unemployment + a0_net_exports_investment*investment
+        + b_net_exports_ffr_1*ffr[-1] + b_net_exports_gdp_growth_1*gdp_growth[-1]
+        + b_net_exports_cpi_inflation_1*cpi_inflation[-1] + b_net_exports_pce_growth_1*pce_growth[-1]
+        + b_net_exports_unemployment_1*unemployment[-1] + b_net_exports_investment_1*investment[-1]
+        + b_net_exports_net_exports_1*net_exports[-1] + b_net_exports_m2_1*m2[-1]
+        + b_net_exports_bond10y_1*bond10y[-1] + b_net_exports_stock_growth_1*stock_growth[-1]
+        + b_net_exports_yen_dollar_1*yen_dollar[-1] + b_net_exports_ffr_2*ffr[-2]
+        + b_net_exports_gdp_growth_2*gdp_growth[-2] + b_net_exports_cpi_inflation_2*cpi_inflation[-2]
+        + b_net_exports_pce_growth_2*pce_growth[-2] + b_net_exports_unemployment_2*unemployment[-2]
+        + b_net_exports_investment_2*investment[-2] + b_net_exports_net_exports_2*net_exports[-2]
+        + b_net_exports_m2_2*m2[-2] + b_net_exports_bond10y_2*bond10y[-2] + b_net_exports_stock_growth_2*stock_growth[-2]
+        + b_net_exports_yen_dollar_2*yen_dollar[-2] + e_net_exports
+      - m2 = c_m2 + a0_m2_ffr*ffr + a0_m2_gdp_growth*gdp_growth + a0_m2_cpi_inflation*cpi_inflation
+        + a0_m2_pce_growth*pce_growth + a0_m2_unemployment*unemployment + a0_m2_investment*investment
+        + a0_m2_net_exports*net_exports + b_m2_ffr_1*ffr[-1] + b_m2_gdp_growth_1*gdp_growth[-1]
+        + b_m2_cpi_inflation_1*cpi_inflation[-1] + b_m2_pce_growth_1*pce_growth[-1]
+        + b_m2_unemployment_1*unemployment[-1] + b_m2_investment_1*investment[-1]
+        + b_m2_net_exports_1*net_exports[-1] + b_m2_m2_1*m2[-1] + b_m2_bond10y_1*bond10y[-1]
+        + b_m2_stock_growth_1*stock_growth[-1] + b_m2_yen_dollar_1*yen_dollar[-1]
+        + b_m2_ffr_2*ffr[-2] + b_m2_gdp_growth_2*gdp_growth[-2] + b_m2_cpi_inflation_2*cpi_inflation[-2]
+        + b_m2_pce_growth_2*pce_growth[-2] + b_m2_unemployment_2*unemployment[-2]
+        + b_m2_investment_2*investment[-2] + b_m2_net_exports_2*net_exports[-2] +
+        b_m2_m2_2*m2[-2] + b_m2_bond10y_2*bond10y[-2] + b_m2_stock_growth_2*stock_growth[-2]
+        + b_m2_yen_dollar_2*yen_dollar[-2] + e_m2
+      - bond10y = c_bond10y + a0_bond10y_ffr*ffr + a0_bond10y_gdp_growth*gdp_growth
+        + a0_bond10y_cpi_inflation*cpi_inflation + a0_bond10y_pce_growth*pce_growth
+        + a0_bond10y_unemployment*unemployment + a0_bond10y_investment*investment
+        + a0_bond10y_net_exports*net_exports + a0_bond10y_m2*m2 + b_bond10y_ffr_1*ffr[-1]
+        + b_bond10y_gdp_growth_1*gdp_growth[-1] + b_bond10y_cpi_inflation_1*cpi_inflation[-1]
+        + b_bond10y_pce_growth_1*pce_growth[-1] + b_bond10y_unemployment_1*unemployment[-1]
+        + b_bond10y_investment_1*investment[-1] + b_bond10y_net_exports_1*net_exports[-1]
+        + b_bond10y_m2_1*m2[-1] + b_bond10y_bond10y_1*bond10y[-1] + b_bond10y_stock_growth_1*stock_growth[-1]
+        + b_bond10y_yen_dollar_1*yen_dollar[-1] + b_bond10y_ffr_2*ffr[-2] + b_bond10y_gdp_growth_2*gdp_growth[-2]
+        + b_bond10y_cpi_inflation_2*cpi_inflation[-2] + b_bond10y_pce_growth_2*pce_growth[-2]
+        + b_bond10y_unemployment_2*unemployment[-2] + b_bond10y_investment_2*investment[-2]
+        + b_bond10y_net_exports_2*net_exports[-2] + b_bond10y_m2_2*m2[-2] + b_bond10y_bond10y_2*bond10y[-2]
+        + b_bond10y_stock_growth_2*stock_growth[-2] + b_bond10y_yen_dollar_2*yen_dollar[-2]
+        + e_bond10y
+      - stock_growth = c_stock_growth + a0_stock_growth_ffr*ffr + a0_stock_growth_gdp_growth*gdp_growth
+        + a0_stock_growth_cpi_inflation*cpi_inflation + a0_stock_growth_pce_growth*pce_growth
+        + a0_stock_growth_unemployment*unemployment + a0_stock_growth_investment*investment
+        + a0_stock_growth_net_exports*net_exports + a0_stock_growth_m2*m2 + a0_stock_growth_bond10y*bond10y
+        + b_stock_growth_ffr_1*ffr[-1] + b_stock_growth_gdp_growth_1*gdp_growth[-1]
+        + b_stock_growth_cpi_inflation_1*cpi_inflation[-1] + b_stock_growth_pce_growth_1*pce_growth[-1]
+        + b_stock_growth_unemployment_1*unemployment[-1] + b_stock_growth_investment_1*investment[-1]
+        + b_stock_growth_net_exports_1*net_exports[-1] + b_stock_growth_m2_1*m2[-1]
+        + b_stock_growth_bond10y_1*bond10y[-1] + b_stock_growth_stock_growth_1*stock_growth[-1]
+        + b_stock_growth_yen_dollar_1*yen_dollar[-1] + b_stock_growth_ffr_2*ffr[-2]
+        + b_stock_growth_gdp_growth_2*gdp_growth[-2] + b_stock_growth_cpi_inflation_2*cpi_inflation[-2]
+        + b_stock_growth_pce_growth_2*pce_growth[-2] + b_stock_growth_unemployment_2*unemployment[-2]
+        + b_stock_growth_investment_2*investment[-2] + b_stock_growth_net_exports_2*net_exports[-2]
+        + b_stock_growth_m2_2*m2[-2] + b_stock_growth_bond10y_2*bond10y[-2] + b_stock_growth_stock_growth_2*stock_growth[-2]
+        + b_stock_growth_yen_dollar_2*yen_dollar[-2] + e_stock_growth
+      - yen_dollar = c_yen_dollar + a0_yen_dollar_ffr*ffr + a0_yen_dollar_gdp_growth*gdp_growth
+        + a0_yen_dollar_cpi_inflation*cpi_inflation + a0_yen_dollar_pce_growth*pce_growth
+        + a0_yen_dollar_unemployment*unemployment + a0_yen_dollar_investment*investment
+        + a0_yen_dollar_net_exports*net_exports + a0_yen_dollar_m2*m2 + a0_yen_dollar_bond10y*bond10y
+        + a0_yen_dollar_stock_growth*stock_growth + b_yen_dollar_ffr_1*ffr[-1] + b_yen_dollar_gdp_growth_1*gdp_growth[-1]
+        + b_yen_dollar_cpi_inflation_1*cpi_inflation[-1] + b_yen_dollar_pce_growth_1*pce_growth[-1]
+        + b_yen_dollar_unemployment_1*unemployment[-1] + b_yen_dollar_investment_1*investment[-1]
+        + b_yen_dollar_net_exports_1*net_exports[-1] + b_yen_dollar_m2_1*m2[-1] +
+        b_yen_dollar_bond10y_1*bond10y[-1] + b_yen_dollar_stock_growth_1*stock_growth[-1]
+        + b_yen_dollar_yen_dollar_1*yen_dollar[-1] + b_yen_dollar_ffr_2*ffr[-2] +
+        b_yen_dollar_gdp_growth_2*gdp_growth[-2] + b_yen_dollar_cpi_inflation_2*cpi_inflation[-2]
+        + b_yen_dollar_pce_growth_2*pce_growth[-2] + b_yen_dollar_unemployment_2*unemployment[-2]
+        + b_yen_dollar_investment_2*investment[-2] + b_yen_dollar_net_exports_2*net_exports[-2]
+        + b_yen_dollar_m2_2*m2[-2] + b_yen_dollar_bond10y_2*bond10y[-2] + b_yen_dollar_stock_growth_2*stock_growth[-2]
+        + b_yen_dollar_yen_dollar_2*yen_dollar[-2] + e_yen_dollar
+      transition: []
+    parameters:
+      c_ffr:
+        dist: normal
+        mu: 0.0
+        sd: 1.038583348177131
+        lower: null
+        upper: null
+      b_ffr_ffr_1:
+        dist: normal
+        mu: 1.0
+        sd: 1.0
+        lower: null
+        upper: null
+      b_ffr_gdp_growth_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.9174649744122542
+        lower: null
+        upper: null
+      b_ffr_cpi_inflation_1:
+        dist: normal
+        mu: 0.0
+        sd: 1.3408461673622158
+        lower: null
+        upper: null
+      b_ffr_pce_growth_1:
+        dist: normal
+        mu: 0.0
+        sd: 1.1691725058338363
+        lower: null
+        upper: null
+      b_ffr_unemployment_1:
+        dist: normal
+        mu: 0.0
+        sd: 2.9192645621258344
+        lower: null
+        upper: null
+      b_ffr_investment_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.16545967467860873
+        lower: null
+        upper: null
+      b_ffr_net_exports_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.03362983027154191
+        lower: null
+        upper: null
+      b_ffr_m2_1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0913775614177135
+        lower: null
+        upper: null
+      b_ffr_bond10y_1:
+        dist: normal
+        mu: 0.0
+        sd: 1.8261935169323693
+        lower: null
+        upper: null
+      b_ffr_stock_growth_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.11142823611573423
+        lower: null
+        upper: null
+      b_ffr_yen_dollar_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.11888177859535823
+        lower: null
+        upper: null
+      b_ffr_ffr_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.5
+        lower: null
+        upper: null
+      b_ffr_gdp_growth_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.4587324872061271
+        lower: null
+        upper: null
+      b_ffr_cpi_inflation_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.6704230836811079
+        lower: null
+        upper: null
+      b_ffr_pce_growth_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.5845862529169181
+        lower: null
+        upper: null
+      b_ffr_unemployment_2:
+        dist: normal
+        mu: 0.0
+        sd: 1.4596322810629172
+        lower: null
+        upper: null
+      b_ffr_investment_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.08272983733930436
+        lower: null
+        upper: null
+      b_ffr_net_exports_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.016814915135770957
+        lower: null
+        upper: null
+      b_ffr_m2_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.5456887807088567
+        lower: null
+        upper: null
+      b_ffr_bond10y_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.9130967584661847
+        lower: null
+        upper: null
+      b_ffr_stock_growth_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.055714118057867114
+        lower: null
+        upper: null
+      b_ffr_yen_dollar_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.059440889297679114
+        lower: null
+        upper: null
+      sigma_ffr:
+        dist: half_normal
+        sd: 5.0
+      c_gdp_growth:
+        dist: normal
+        mu: 0.0
+        sd: 1.1320141663636452
+        lower: null
+        upper: null
+      a0_gdp_growth_ffr:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      b_gdp_growth_ffr_1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0899598653786422
+        lower: null
+        upper: null
+      b_gdp_growth_gdp_growth_1:
+        dist: normal
+        mu: 1.0
+        sd: 1.0
+        lower: null
+        upper: null
+      b_gdp_growth_cpi_inflation_1:
+        dist: normal
+        mu: 0.0
+        sd: 1.4614685080715892
+        lower: null
+        upper: null
+      b_gdp_growth_pce_growth_1:
+        dist: normal
+        mu: 0.0
+        sd: 1.274351107063058
+        lower: null
+        upper: null
+      b_gdp_growth_unemployment_1:
+        dist: normal
+        mu: 0.0
+        sd: 3.1818812091393154
+        lower: null
+        upper: null
+      b_gdp_growth_investment_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.18034440473829033
+        lower: null
+        upper: null
+      b_gdp_growth_net_exports_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.03665516527547641
+        lower: null
+        upper: null
+      b_gdp_growth_m2_1:
+        dist: normal
+        mu: 0.0
+        sd: 1.1895577399201218
+        lower: null
+        upper: null
+      b_gdp_growth_bond10y_1:
+        dist: normal
+        mu: 0.0
+        sd: 1.9904776398709545
+        lower: null
+        upper: null
+      b_gdp_growth_stock_growth_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.12145230523608525
+        lower: null
+        upper: null
+      b_gdp_growth_yen_dollar_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.1295763673937702
+        lower: null
+        upper: null
+      b_gdp_growth_ffr_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.5449799326893211
+        lower: null
+        upper: null
+      b_gdp_growth_gdp_growth_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.5
+        lower: null
+        upper: null
+      b_gdp_growth_cpi_inflation_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.7307342540357946
+        lower: null
+        upper: null
+      b_gdp_growth_pce_growth_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.637175553531529
+        lower: null
+        upper: null
+      b_gdp_growth_unemployment_2:
+        dist: normal
+        mu: 0.0
+        sd: 1.5909406045696577
+        lower: null
+        upper: null
+      b_gdp_growth_investment_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.09017220236914517
+        lower: null
+        upper: null
+      b_gdp_growth_net_exports_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.018327582637738205
+        lower: null
+        upper: null
+      b_gdp_growth_m2_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.5947788699600609
+        lower: null
+        upper: null
+      b_gdp_growth_bond10y_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.9952388199354772
+        lower: null
+        upper: null
+      b_gdp_growth_stock_growth_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.06072615261804262
+        lower: null
+        upper: null
+      b_gdp_growth_yen_dollar_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.0647881836968851
+        lower: null
+        upper: null
+      sigma_gdp_growth:
+        dist: half_normal
+        sd: 5.0
+      c_cpi_inflation:
+        dist: normal
+        mu: 0.0
+        sd: 0.77457308187731
+        lower: null
+        upper: null
+      a0_cpi_inflation_ffr:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_cpi_inflation_gdp_growth:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      b_cpi_inflation_ffr_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.7457977091937797
+        lower: null
+        upper: null
+      b_cpi_inflation_gdp_growth_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.6842432761821889
+        lower: null
+        upper: null
+      b_cpi_inflation_cpi_inflation_1:
+        dist: normal
+        mu: 1.0
+        sd: 1.0
+        lower: null
+        upper: null
+      b_cpi_inflation_pce_growth_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.8719661765032262
+        lower: null
+        upper: null
+      b_cpi_inflation_unemployment_1:
+        dist: normal
+        mu: 0.0
+        sd: 2.1771808229640297
+        lower: null
+        upper: null
+      b_cpi_inflation_investment_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.12339944633925444
+        lower: null
+        upper: null
+      b_cpi_inflation_net_exports_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.025081050377091588
+        lower: null
+        upper: null
+      b_cpi_inflation_m2_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.8139468851708245
+        lower: null
+        upper: null
+      b_cpi_inflation_bond10y_1:
+        dist: normal
+        mu: 0.0
+        sd: 1.361970941472693
+        lower: null
+        upper: null
+      b_cpi_inflation_stock_growth_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.08310292323461818
+        lower: null
+        upper: null
+      b_cpi_inflation_yen_dollar_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.08866175814130028
+        lower: null
+        upper: null
+      b_cpi_inflation_ffr_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.3728988545968899
+        lower: null
+        upper: null
+      b_cpi_inflation_gdp_growth_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.34212163809109447
+        lower: null
+        upper: null
+      b_cpi_inflation_cpi_inflation_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.5
+        lower: null
+        upper: null
+      b_cpi_inflation_pce_growth_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.4359830882516131
+        lower: null
+        upper: null
+      b_cpi_inflation_unemployment_2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0885904114820149
+        lower: null
+        upper: null
+      b_cpi_inflation_investment_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.06169972316962722
+        lower: null
+        upper: null
+      b_cpi_inflation_net_exports_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.012540525188545794
+        lower: null
+        upper: null
+      b_cpi_inflation_m2_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.40697344258541224
+        lower: null
+        upper: null
+      b_cpi_inflation_bond10y_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.6809854707363465
+        lower: null
+        upper: null
+      b_cpi_inflation_stock_growth_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.04155146161730909
+        lower: null
+        upper: null
+      b_cpi_inflation_yen_dollar_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.04433087907065014
+        lower: null
+        upper: null
+      sigma_cpi_inflation:
+        dist: half_normal
+        sd: 5.0
+      c_pce_growth:
+        dist: normal
+        mu: 0.0
+        sd: 0.8883063388806162
+        lower: null
+        upper: null
+      a0_pce_growth_ffr:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_pce_growth_gdp_growth:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_pce_growth_cpi_inflation:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      b_pce_growth_ffr_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.855305778240838
+        lower: null
+        upper: null
+      b_pce_growth_gdp_growth_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.7847130939483835
+        lower: null
+        upper: null
+      b_pce_growth_cpi_inflation_1:
+        dist: normal
+        mu: 0.0
+        sd: 1.1468334746769848
+        lower: null
+        upper: null
+      b_pce_growth_pce_growth_1:
+        dist: normal
+        mu: 1.0
+        sd: 1.0
+        lower: null
+        upper: null
+      b_pce_growth_unemployment_1:
+        dist: normal
+        mu: 0.0
+        sd: 2.496863848199936
+        lower: null
+        upper: null
+      b_pce_growth_investment_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.1415186158184633
+        lower: null
+        upper: null
+      b_pce_growth_net_exports_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.02876378815250845
+        lower: null
+        upper: null
+      b_pce_growth_m2_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.9334615345229654
+        lower: null
+        upper: null
+      b_pce_growth_bond10y_1:
+        dist: normal
+        mu: 0.0
+        sd: 1.5619538672182132
+        lower: null
+        upper: null
+      b_pce_growth_stock_growth_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.09530521420897192
+        lower: null
+        upper: null
+      b_pce_growth_yen_dollar_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.10168027216015786
+        lower: null
+        upper: null
+      b_pce_growth_ffr_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.427652889120419
+        lower: null
+        upper: null
+      b_pce_growth_gdp_growth_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.39235654697419176
+        lower: null
+        upper: null
+      b_pce_growth_cpi_inflation_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.5734167373384924
+        lower: null
+        upper: null
+      b_pce_growth_pce_growth_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.5
+        lower: null
+        upper: null
+      b_pce_growth_unemployment_2:
+        dist: normal
+        mu: 0.0
+        sd: 1.248431924099968
+        lower: null
+        upper: null
+      b_pce_growth_investment_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.07075930790923166
+        lower: null
+        upper: null
+      b_pce_growth_net_exports_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.014381894076254224
+        lower: null
+        upper: null
+      b_pce_growth_m2_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.4667307672614827
+        lower: null
+        upper: null
+      b_pce_growth_bond10y_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.7809769336091066
+        lower: null
+        upper: null
+      b_pce_growth_stock_growth_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.04765260710448596
+        lower: null
+        upper: null
+      b_pce_growth_yen_dollar_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.05084013608007893
+        lower: null
+        upper: null
+      sigma_pce_growth:
+        dist: half_normal
+        sd: 5.0
+      c_unemployment:
+        dist: normal
+        mu: 0.0
+        sd: 0.35576883357938116
+        lower: null
+        upper: null
+      a0_unemployment_ffr:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_unemployment_gdp_growth:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_unemployment_cpi_inflation:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_unemployment_pce_growth:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      b_unemployment_ffr_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.34255202936173457
+        lower: null
+        upper: null
+      b_unemployment_gdp_growth_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.31427948885322954
+        lower: null
+        upper: null
+      b_unemployment_cpi_inflation_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.45930957569183106
+        lower: null
+        upper: null
+      b_unemployment_pce_growth_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.40050241454732505
+        lower: null
+        upper: null
+      b_unemployment_unemployment_1:
+        dist: normal
+        mu: 1.0
+        sd: 1.0
+        lower: null
+        upper: null
+      b_unemployment_investment_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.05667854733868983
+        lower: null
+        upper: null
+      b_unemployment_net_exports_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.011519966606607377
+        lower: null
+        upper: null
+      b_unemployment_m2_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.3738535984634989
+        lower: null
+        upper: null
+      b_unemployment_bond10y_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.6255662952324264
+        lower: null
+        upper: null
+      b_unemployment_stock_growth_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.03816996840964328
+        lower: null
+        upper: null
+      b_unemployment_yen_dollar_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.04072319451197238
+        lower: null
+        upper: null
+      b_unemployment_ffr_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.17127601468086728
+        lower: null
+        upper: null
+      b_unemployment_gdp_growth_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.15713974442661477
+        lower: null
+        upper: null
+      b_unemployment_cpi_inflation_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.22965478784591553
+        lower: null
+        upper: null
+      b_unemployment_pce_growth_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.20025120727366252
+        lower: null
+        upper: null
+      b_unemployment_unemployment_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.5
+        lower: null
+        upper: null
+      b_unemployment_investment_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.028339273669344914
+        lower: null
+        upper: null
+      b_unemployment_net_exports_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.005759983303303688
+        lower: null
+        upper: null
+      b_unemployment_m2_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.18692679923174946
+        lower: null
+        upper: null
+      b_unemployment_bond10y_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.3127831476162132
+        lower: null
+        upper: null
+      b_unemployment_stock_growth_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.01908498420482164
+        lower: null
+        upper: null
+      b_unemployment_yen_dollar_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.02036159725598619
+        lower: null
+        upper: null
+      sigma_unemployment:
+        dist: half_normal
+        sd: 5.0
+      c_investment:
+        dist: normal
+        mu: 0.0
+        sd: 6.276957513632794
+        lower: null
+        upper: null
+      a0_investment_ffr:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_investment_gdp_growth:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_investment_cpi_inflation:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_investment_pce_growth:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_investment_unemployment:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      b_investment_ffr_1:
+        dist: normal
+        mu: 0.0
+        sd: 6.043768682263001
+        lower: null
+        upper: null
+      b_investment_gdp_growth_1:
+        dist: normal
+        mu: 0.0
+        sd: 5.5449460794260075
+        lower: null
+        upper: null
+      b_investment_cpi_inflation_1:
+        dist: normal
+        mu: 0.0
+        sd: 8.103764074036135
+        lower: null
+        upper: null
+      b_investment_pce_growth_1:
+        dist: normal
+        mu: 0.0
+        sd: 7.0662081749214956
+        lower: null
+        upper: null
+      b_investment_unemployment_1:
+        dist: normal
+        mu: 0.0
+        sd: 17.64335973581633
+        lower: null
+        upper: null
+      b_investment_investment_1:
+        dist: normal
+        mu: 1.0
+        sd: 1.0
+        lower: null
+        upper: null
+      b_investment_net_exports_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.20325091498496525
+        lower: null
+        upper: null
+      b_investment_m2_1:
+        dist: normal
+        mu: 0.0
+        sd: 6.596033526220943
+        lower: null
+        upper: null
+      b_investment_bond10y_1:
+        dist: normal
+        mu: 0.0
+        sd: 11.037091185387583
+        lower: null
+        upper: null
+      b_investment_stock_growth_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.6734464837560816
+        lower: null
+        upper: null
+      b_investment_yen_dollar_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.71849397036635
+        lower: null
+        upper: null
+      b_investment_ffr_2:
+        dist: normal
+        mu: 0.0
+        sd: 3.0218843411315004
+        lower: null
+        upper: null
+      b_investment_gdp_growth_2:
+        dist: normal
+        mu: 0.0
+        sd: 2.7724730397130037
+        lower: null
+        upper: null
+      b_investment_cpi_inflation_2:
+        dist: normal
+        mu: 0.0
+        sd: 4.051882037018068
+        lower: null
+        upper: null
+      b_investment_pce_growth_2:
+        dist: normal
+        mu: 0.0
+        sd: 3.5331040874607478
+        lower: null
+        upper: null
+      b_investment_unemployment_2:
+        dist: normal
+        mu: 0.0
+        sd: 8.821679867908164
+        lower: null
+        upper: null
+      b_investment_investment_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.5
+        lower: null
+        upper: null
+      b_investment_net_exports_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.10162545749248263
+        lower: null
+        upper: null
+      b_investment_m2_2:
+        dist: normal
+        mu: 0.0
+        sd: 3.2980167631104713
+        lower: null
+        upper: null
+      b_investment_bond10y_2:
+        dist: normal
+        mu: 0.0
+        sd: 5.518545592693791
+        lower: null
+        upper: null
+      b_investment_stock_growth_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.3367232418780408
+        lower: null
+        upper: null
+      b_investment_yen_dollar_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.359246985183175
+        lower: null
+        upper: null
+      sigma_investment:
+        dist: half_normal
+        sd: 5.0
+      c_net_exports:
+        dist: normal
+        mu: 0.0
+        sd: 30.882800769172967
+        lower: null
+        upper: null
+      a0_net_exports_ffr:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_net_exports_gdp_growth:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_net_exports_cpi_inflation:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_net_exports_pce_growth:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_net_exports_unemployment:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_net_exports_investment:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      b_net_exports_ffr_1:
+        dist: normal
+        mu: 0.0
+        sd: 29.735505410689377
+        lower: null
+        upper: null
+      b_net_exports_gdp_growth_1:
+        dist: normal
+        mu: 0.0
+        sd: 27.281284710753575
+        lower: null
+        upper: null
+      b_net_exports_cpi_inflation_1:
+        dist: normal
+        mu: 0.0
+        sd: 39.87073846450129
+        lower: null
+        upper: null
+      b_net_exports_pce_growth_1:
+        dist: normal
+        mu: 0.0
+        sd: 34.765935373251295
+        lower: null
+        upper: null
+      b_net_exports_unemployment_1:
+        dist: normal
+        mu: 0.0
+        sd: 86.8058071823265
+        lower: null
+        upper: null
+      b_net_exports_investment_1:
+        dist: normal
+        mu: 0.0
+        sd: 4.920027051656675
+        lower: null
+        upper: null
+      b_net_exports_net_exports_1:
+        dist: normal
+        mu: 1.0
+        sd: 1.0
+        lower: null
+        upper: null
+      b_net_exports_m2_1:
+        dist: normal
+        mu: 0.0
+        sd: 32.4526633826414
+        lower: null
+        upper: null
+      b_net_exports_bond10y_1:
+        dist: normal
+        mu: 0.0
+        sd: 54.302787203708334
+        lower: null
+        upper: null
+      b_net_exports_stock_growth_1:
+        dist: normal
+        mu: 0.0
+        sd: 3.3133749179229888
+        lower: null
+        upper: null
+      b_net_exports_yen_dollar_1:
+        dist: normal
+        mu: 0.0
+        sd: 3.5350097706546513
+        lower: null
+        upper: null
+      b_net_exports_ffr_2:
+        dist: normal
+        mu: 0.0
+        sd: 14.867752705344689
+        lower: null
+        upper: null
+      b_net_exports_gdp_growth_2:
+        dist: normal
+        mu: 0.0
+        sd: 13.640642355376787
+        lower: null
+        upper: null
+      b_net_exports_cpi_inflation_2:
+        dist: normal
+        mu: 0.0
+        sd: 19.935369232250643
+        lower: null
+        upper: null
+      b_net_exports_pce_growth_2:
+        dist: normal
+        mu: 0.0
+        sd: 17.382967686625648
+        lower: null
+        upper: null
+      b_net_exports_unemployment_2:
+        dist: normal
+        mu: 0.0
+        sd: 43.40290359116325
+        lower: null
+        upper: null
+      b_net_exports_investment_2:
+        dist: normal
+        mu: 0.0
+        sd: 2.4600135258283373
+        lower: null
+        upper: null
+      b_net_exports_net_exports_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.5
+        lower: null
+        upper: null
+      b_net_exports_m2_2:
+        dist: normal
+        mu: 0.0
+        sd: 16.2263316913207
+        lower: null
+        upper: null
+      b_net_exports_bond10y_2:
+        dist: normal
+        mu: 0.0
+        sd: 27.151393601854167
+        lower: null
+        upper: null
+      b_net_exports_stock_growth_2:
+        dist: normal
+        mu: 0.0
+        sd: 1.6566874589614944
+        lower: null
+        upper: null
+      b_net_exports_yen_dollar_2:
+        dist: normal
+        mu: 0.0
+        sd: 1.7675048853273256
+        lower: null
+        upper: null
+      sigma_net_exports:
+        dist: half_normal
+        sd: 5.0
+      c_m2:
+        dist: normal
+        mu: 0.0
+        sd: 0.9516260778057392
+        lower: null
+        upper: null
+      a0_m2_ffr:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_m2_gdp_growth:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_m2_cpi_inflation:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_m2_pce_growth:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_m2_unemployment:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_m2_investment:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_m2_net_exports:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      b_m2_ffr_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.9162731902798029
+        lower: null
+        upper: null
+      b_m2_gdp_growth_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.8406485590746939
+        lower: null
+        upper: null
+      b_m2_cpi_inflation_1:
+        dist: normal
+        mu: 0.0
+        sd: 1.2285813954434242
+        lower: null
+        upper: null
+      b_m2_pce_growth_1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0712814219078006
+        lower: null
+        upper: null
+      b_m2_unemployment_1:
+        dist: normal
+        mu: 0.0
+        sd: 2.67484385360981
+        lower: null
+        upper: null
+      b_m2_investment_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.15160626398042717
+        lower: null
+        upper: null
+      b_m2_net_exports_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.030814111871474002
+        lower: null
+        upper: null
+      b_m2_m2_1:
+        dist: normal
+        mu: 1.0
+        sd: 1.0
+        lower: null
+        upper: null
+      b_m2_bond10y_1:
+        dist: normal
+        mu: 0.0
+        sd: 1.6732921598279156
+        lower: null
+        upper: null
+      b_m2_stock_growth_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.10209870539301497
+        lower: null
+        upper: null
+      b_m2_yen_dollar_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.10892818653970607
+        lower: null
+        upper: null
+      b_m2_ffr_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.45813659513990146
+        lower: null
+        upper: null
+      b_m2_gdp_growth_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.42032427953734697
+        lower: null
+        upper: null
+      b_m2_cpi_inflation_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.6142906977217121
+        lower: null
+        upper: null
+      b_m2_pce_growth_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.5356407109539003
+        lower: null
+        upper: null
+      b_m2_unemployment_2:
+        dist: normal
+        mu: 0.0
+        sd: 1.337421926804905
+        lower: null
+        upper: null
+      b_m2_investment_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.07580313199021359
+        lower: null
+        upper: null
+      b_m2_net_exports_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.015407055935737001
+        lower: null
+        upper: null
+      b_m2_m2_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.5
+        lower: null
+        upper: null
+      b_m2_bond10y_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.8366460799139578
+        lower: null
+        upper: null
+      b_m2_stock_growth_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.05104935269650748
+        lower: null
+        upper: null
+      b_m2_yen_dollar_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.054464093269853034
+        lower: null
+        upper: null
+      sigma_m2:
+        dist: half_normal
+        sd: 5.0
+      c_bond10y:
+        dist: normal
+        mu: 0.0
+        sd: 0.5687148369257919
+        lower: null
+        upper: null
+      a0_bond10y_ffr:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_bond10y_gdp_growth:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_bond10y_cpi_inflation:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_bond10y_pce_growth:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_bond10y_unemployment:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_bond10y_investment:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_bond10y_net_exports:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_bond10y_m2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      b_bond10y_ffr_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.5475870934422081
+        lower: null
+        upper: null
+      b_bond10y_gdp_growth_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.5023919786734361
+        lower: null
+        upper: null
+      b_bond10y_cpi_inflation_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.7342300555390003
+        lower: null
+        upper: null
+      b_bond10y_pce_growth_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.6402237742020935
+        lower: null
+        upper: null
+      b_bond10y_unemployment_1:
+        dist: normal
+        mu: 0.0
+        sd: 1.598551596563326
+        lower: null
+        upper: null
+      b_bond10y_investment_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.09060358233915268
+        lower: null
+        upper: null
+      b_bond10y_net_exports_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.01841526101134842
+        lower: null
+        upper: null
+      b_bond10y_m2_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.5976242667047708
+        lower: null
+        upper: null
+      b_bond10y_bond10y_1:
+        dist: normal
+        mu: 1.0
+        sd: 1.0
+        lower: null
+        upper: null
+      b_bond10y_stock_growth_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.06101666394200699
+        lower: null
+        upper: null
+      b_bond10y_yen_dollar_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.06509812760427232
+        lower: null
+        upper: null
+      b_bond10y_ffr_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.27379354672110406
+        lower: null
+        upper: null
+      b_bond10y_gdp_growth_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.25119598933671805
+        lower: null
+        upper: null
+      b_bond10y_cpi_inflation_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.36711502776950017
+        lower: null
+        upper: null
+      b_bond10y_pce_growth_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.32011188710104677
+        lower: null
+        upper: null
+      b_bond10y_unemployment_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.799275798281663
+        lower: null
+        upper: null
+      b_bond10y_investment_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.04530179116957634
+        lower: null
+        upper: null
+      b_bond10y_net_exports_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.00920763050567421
+        lower: null
+        upper: null
+      b_bond10y_m2_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.2988121333523854
+        lower: null
+        upper: null
+      b_bond10y_bond10y_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.5
+        lower: null
+        upper: null
+      b_bond10y_stock_growth_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.030508331971003496
+        lower: null
+        upper: null
+      b_bond10y_yen_dollar_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.03254906380213616
+        lower: null
+        upper: null
+      sigma_bond10y:
+        dist: half_normal
+        sd: 5.0
+      c_stock_growth:
+        dist: normal
+        mu: 0.0
+        sd: 9.320647839192329
+        lower: null
+        upper: null
+      a0_stock_growth_ffr:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_stock_growth_gdp_growth:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_stock_growth_cpi_inflation:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_stock_growth_pce_growth:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_stock_growth_unemployment:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_stock_growth_investment:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_stock_growth_net_exports:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_stock_growth_m2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_stock_growth_bond10y:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      b_stock_growth_ffr_1:
+        dist: normal
+        mu: 0.0
+        sd: 8.974385980240738
+        lower: null
+        upper: null
+      b_stock_growth_gdp_growth_1:
+        dist: normal
+        mu: 0.0
+        sd: 8.233684803727261
+        lower: null
+        upper: null
+      b_stock_growth_cpi_inflation_1:
+        dist: normal
+        mu: 0.0
+        sd: 12.033271046034997
+        lower: null
+        upper: null
+      b_stock_growth_pce_growth_1:
+        dist: normal
+        mu: 0.0
+        sd: 10.492605344838113
+        lower: null
+        upper: null
+      b_stock_growth_unemployment_1:
+        dist: normal
+        mu: 0.0
+        sd: 26.198606958955704
+        lower: null
+        upper: null
+      b_stock_growth_investment_1:
+        dist: normal
+        mu: 0.0
+        sd: 1.4848989847308998
+        lower: null
+        upper: null
+      b_stock_growth_net_exports_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.30180707730680134
+        lower: null
+        upper: null
+      b_stock_growth_m2_1:
+        dist: normal
+        mu: 0.0
+        sd: 9.794443486336453
+        lower: null
+        upper: null
+      b_stock_growth_bond10y_1:
+        dist: normal
+        mu: 0.0
+        sd: 16.38896549556438
+        lower: null
+        upper: null
+      b_stock_growth_stock_growth_1:
+        dist: normal
+        mu: 1.0
+        sd: 1.0
+        lower: null
+        upper: null
+      b_stock_growth_yen_dollar_1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0668909671322664
+        lower: null
+        upper: null
+      b_stock_growth_ffr_2:
+        dist: normal
+        mu: 0.0
+        sd: 4.487192990120369
+        lower: null
+        upper: null
+      b_stock_growth_gdp_growth_2:
+        dist: normal
+        mu: 0.0
+        sd: 4.1168424018636305
+        lower: null
+        upper: null
+      b_stock_growth_cpi_inflation_2:
+        dist: normal
+        mu: 0.0
+        sd: 6.016635523017499
+        lower: null
+        upper: null
+      b_stock_growth_pce_growth_2:
+        dist: normal
+        mu: 0.0
+        sd: 5.2463026724190565
+        lower: null
+        upper: null
+      b_stock_growth_unemployment_2:
+        dist: normal
+        mu: 0.0
+        sd: 13.099303479477852
+        lower: null
+        upper: null
+      b_stock_growth_investment_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.7424494923654499
+        lower: null
+        upper: null
+      b_stock_growth_net_exports_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.15090353865340067
+        lower: null
+        upper: null
+      b_stock_growth_m2_2:
+        dist: normal
+        mu: 0.0
+        sd: 4.897221743168227
+        lower: null
+        upper: null
+      b_stock_growth_bond10y_2:
+        dist: normal
+        mu: 0.0
+        sd: 8.19448274778219
+        lower: null
+        upper: null
+      b_stock_growth_stock_growth_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.5
+        lower: null
+        upper: null
+      b_stock_growth_yen_dollar_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.5334454835661332
+        lower: null
+        upper: null
+      sigma_stock_growth:
+        dist: half_normal
+        sd: 5.0
+      c_yen_dollar:
+        dist: normal
+        mu: 0.0
+        sd: 8.73627027159638
+        lower: null
+        upper: null
+      a0_yen_dollar_ffr:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_yen_dollar_gdp_growth:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_yen_dollar_cpi_inflation:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_yen_dollar_pce_growth:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_yen_dollar_unemployment:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_yen_dollar_investment:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_yen_dollar_net_exports:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_yen_dollar_m2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_yen_dollar_bond10y:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_yen_dollar_stock_growth:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      b_yen_dollar_ffr_1:
+        dist: normal
+        mu: 0.0
+        sd: 8.411718026222777
+        lower: null
+        upper: null
+      b_yen_dollar_gdp_growth_1:
+        dist: normal
+        mu: 0.0
+        sd: 7.7174566636915785
+        lower: null
+        upper: null
+      b_yen_dollar_cpi_inflation_1:
+        dist: normal
+        mu: 0.0
+        sd: 11.278819876392475
+        lower: null
+        upper: null
+      b_yen_dollar_pce_growth_1:
+        dist: normal
+        mu: 0.0
+        sd: 9.834749443086537
+        lower: null
+        upper: null
+      b_yen_dollar_unemployment_1:
+        dist: normal
+        mu: 0.0
+        sd: 24.556030340547224
+        lower: null
+        upper: null
+      b_yen_dollar_investment_1:
+        dist: normal
+        mu: 0.0
+        sd: 1.3918001281070096
+        lower: null
+        upper: null
+      b_yen_dollar_net_exports_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.2828846495139416
+        lower: null
+        upper: null
+      b_yen_dollar_m2_1:
+        dist: normal
+        mu: 0.0
+        sd: 9.180360306792439
+        lower: null
+        upper: null
+      b_yen_dollar_bond10y_1:
+        dist: normal
+        mu: 0.0
+        sd: 15.361424925751184
+        lower: null
+        upper: null
+      b_yen_dollar_stock_growth_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.9373029023649296
+        lower: null
+        upper: null
+      b_yen_dollar_yen_dollar_1:
+        dist: normal
+        mu: 1.0
+        sd: 1.0
+        lower: null
+        upper: null
+      b_yen_dollar_ffr_2:
+        dist: normal
+        mu: 0.0
+        sd: 4.205859013111389
+        lower: null
+        upper: null
+      b_yen_dollar_gdp_growth_2:
+        dist: normal
+        mu: 0.0
+        sd: 3.8587283318457892
+        lower: null
+        upper: null
+      b_yen_dollar_cpi_inflation_2:
+        dist: normal
+        mu: 0.0
+        sd: 5.639409938196238
+        lower: null
+        upper: null
+      b_yen_dollar_pce_growth_2:
+        dist: normal
+        mu: 0.0
+        sd: 4.917374721543268
+        lower: null
+        upper: null
+      b_yen_dollar_unemployment_2:
+        dist: normal
+        mu: 0.0
+        sd: 12.278015170273612
+        lower: null
+        upper: null
+      b_yen_dollar_investment_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.6959000640535048
+        lower: null
+        upper: null
+      b_yen_dollar_net_exports_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.1414423247569708
+        lower: null
+        upper: null
+      b_yen_dollar_m2_2:
+        dist: normal
+        mu: 0.0
+        sd: 4.590180153396219
+        lower: null
+        upper: null
+      b_yen_dollar_bond10y_2:
+        dist: normal
+        mu: 0.0
+        sd: 7.680712462875592
+        lower: null
+        upper: null
+      b_yen_dollar_stock_growth_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.4686514511824648
+        lower: null
+        upper: null
+      b_yen_dollar_yen_dollar_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.5
+        lower: null
+        upper: null
+      sigma_yen_dollar:
+        dist: half_normal
+        sd: 5.0
+    shocks:
+      e_ffr:
+        sd: sigma_ffr
+        sv: null
+      e_gdp_growth:
+        sd: sigma_gdp_growth
+        sv: null
+      e_cpi_inflation:
+        sd: sigma_cpi_inflation
+        sv: null
+      e_pce_growth:
+        sd: sigma_pce_growth
+        sv: null
+      e_unemployment:
+        sd: sigma_unemployment
+        sv: null
+      e_investment:
+        sd: sigma_investment
+        sv: null
+      e_net_exports:
+        sd: sigma_net_exports
+        sv: null
+      e_m2:
+        sd: sigma_m2
+        sv: null
+      e_bond10y:
+        sd: sigma_bond10y
+        sv: null
+      e_stock_growth:
+        sd: sigma_stock_growth
+        sv: null
+      e_yen_dollar:
+        sd: sigma_yen_dollar
+        sv: null
+    initial_state: {}
+    forecast_rules: {}
+data:
+  file: ../data/ch2_usdata_11var.csv
+  date_column: date
+  mapping:
+    ffr: ffr
+    gdp_growth: gdp_growth
+    cpi_inflation: cpi_inflation
+    pce_growth: pce_growth
+    unemployment: unemployment
+    investment: investment
+    net_exports: net_exports
+    m2: m2
+    bond10y: bond10y
+    stock_growth: stock_growth
+    yen_dollar: yen_dollar
+  sample:
+    start: null
+    end: null
+priors: {}
+sampler:
+  chains: 2
+  warmup: 200
+  sampling: 200
+  adapt_delta: 0.8
+  max_treedepth: 10
+  seed: 20260905
+outputs:
+  horizon: 8
+  irf_horizon: 36
+  irf_vol_reference: end_of_sample
+  smoother_draws:
+    thin: 4
+  prior_predictive_draws: 20
+qc:
+  mirror_check: true
+  mirror_points: 5
+  mirror_tolerance: 1.0e-08
+  mirror_rtol: 1.0e-11
+  mirror_seed: 20260904
