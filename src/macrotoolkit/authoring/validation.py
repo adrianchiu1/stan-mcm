@@ -96,8 +96,8 @@ def simulate_dataset(compiled: CompiledModel, params: Mapping[str, float], rng: 
     rows (pre-sample rows included) -- supplied by the caller through
     ``exog_paths[e]`` (length ``L + T``, aligned with the dataset rows: lag
     k of estimation step i is row ``L + i - k``)."""
-    from macrotoolkit.authoring.results import DrawMatrices, _noise_models
-    from macrotoolkit.engine import DataPathExogRule, simulate_forward
+    from macrotoolkit.authoring.results import DrawMatrices, _noise_models, data_path_rules, presample_exog_seeds
+    from macrotoolkit.engine import simulate_forward
     from macrotoolkit.smoother import _psd_sqrt
 
     meta = compiled.meta
@@ -105,13 +105,10 @@ def simulate_dataset(compiled: CompiledModel, params: Mapping[str, float], rng: 
     h0 = {s: float(params[f"h0_{s}"]) for s in compiled.sv_shocks}
     F, Q, A, Z, R = compiled.build_matrices(params, h={s: np.array([h0[s]]) for s in compiled.sv_shocks} or None, T=1)
     extras = {**{k: float(v) for k, v in params.items() if not k.startswith("h0_")}, **{f"h_{s}": np.array([h0[s]]) for s in compiled.sv_shocks}}
-    dm = DrawMatrices(F=F, Q=Q if Q.ndim == 2 else Q[0], A=A, Z=Z, R=R if R.ndim == 2 else R[0], extras=extras)
+    dm = DrawMatrices(F=F, Q=Q if Q.ndim == 2 else Q[0], A=A, Z=Z, R=R if R.ndim == 2 else R[0], extras=extras, M=compiled.build_M(params))
     state_noise, meas_noise = _noise_models(compiled, dm, h_last=h0)
-    rules = {}
-    exog_seeds: dict[str, dict[int, float]] = {}
     out_exog: dict[str, np.ndarray] = {}
     for e in meta.exog_names:
-        depth = meta.exog_lag_depth(e)
         if exog_paths is None or e not in exog_paths:
             raise ValueError(
                 f"simulate_dataset: exogenous series {e!r} needs a supplied path exog_paths[{e!r}] of length L + T = {L + T} "
@@ -121,12 +118,10 @@ def simulate_dataset(compiled: CompiledModel, params: Mapping[str, float], rng: 
         if path.shape != (L + T,):
             raise ValueError(f"simulate_dataset: exog_paths[{e!r}] must have shape ({L + T},) = (L + T,); got {path.shape}.")
         out_exog[e] = path.copy()
-        if depth:
-            rules[e] = DataPathExogRule(path[L - 1 : L - 1 + T])
-            if depth >= 2:
-                exog_seeds[e] = {k: float(path[L - k]) for k in range(2, depth + 1)}
+    rules = data_path_rules(compiled, out_exog, T)
+    exog_seeds = presample_exog_seeds(compiled, out_exog)
     xi_init = xi00 + _psd_sqrt(P00) @ rng.standard_normal(len(xi00))
-    out = simulate_forward(F, dm.Q, A, Z, meta, xi_init, {}, exog_seeds, rules, meas_noise, T, rng, state_noise=state_noise)
+    out = simulate_forward(F, dm.Q, A, Z, meta, xi_init, {}, exog_seeds, rules, meas_noise, T, rng, state_noise=state_noise, meas_loading=dm.M)
     return {**{o: out["obs"][:, i].copy() for i, o in enumerate(meta.obs_names)}, **out_exog}
 
 

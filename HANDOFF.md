@@ -1,17 +1,99 @@
 # Handoff
 
-Status as of 2026-09-04 (end of S7 session). **S7 is complete and green on
-branch `claude/s7-equation-dsl-og1xvc`** (pushed; not merged, no PR opened,
-per the brief -- the stage-per-PR cadence continues from the user's side).
-The binding scope record is `plans/S7-plan.md` (including the four places
-the brief and the repo's own doctrine conflicted and how each was
-resolved). Six milestones shipped in order, each at a clean boundary and
-each pushed: **M1** the equation IR + compiler, **M2** the generic Stan
-template + the kf_loglik equivalence gate, **M3** pipeline integration,
-**M4** auto-validation + generic outputs, **M5** the authored-model
-notebook, **M6** this stage-end docs pass. **The natural S8 candidates are
-per-authored-model SBC registration and the promotion/production layer**
-(see "What's next").
+Status as of 2026-09-05 (end of the S8 session). **S8 WP1-WP3 are
+complete and green on branch `claude/s8-grammar-var-extensions-o193mw`
+(pushed; PR https://github.com/adrianchiu1/stan-mcm/pull/9 opened from the Claude Code UI, not merged); WP4 is IN PROGRESS --
+see the section right below.** The binding scope record is
+`plans/S8-plan.md` (its five brief-vs-doctrine conflicts, the E3 proof,
+and the progress record at its end); the measured gate results and the
+judgment calls are in DECISIONS.md 2026-09-05.
+
+## S8 IN PROGRESS -- resume here
+
+Done and recorded (DECISIONS.md 2026-09-05; `tests/test_s8_*.py`, marker
+`authored`): **WP1** the grammar bundle (E0 zero state shocks / zero
+states, E1 intercepts and drifts, E2 contemporaneous exogenous
+regressors, E3 shock-free rows with the PD rule, E5 contemporaneous
+observables -> recursive VARs with non-diagonal R through measurement
+loadings), every extension gated against a hand-built oracle, the
+compiled Stan programs against the Python mirror at 50 prior draws, and
+the E5 fit oracle against OLS on the handbook data; **WP2** `au.var`,
+`au.minnesota_priors`, the Villani steady-state form (closed-form
+oracle), FEVD in the generic layer (+ the `fevd` output module);
+**WP3** `macrotoolkit.postprocess` (sign restrictions, Waggoner-Zha
+conditional forecasts) with tests on synthetic draws and adapters over a
+real run. One numerics-reviewer pass over WP1 (no must-fix; three
+should-fix applied). **WP4** `examples/handbook/`: `make_data.py`
+(all Chapter 1-3 files -> CSV, dates reconstructed and recorded),
+`build_specs.py` (nine specs generated through the authoring API),
+`run_smoke.py` (fit + fast tier + post-processors -> README records).
+Smoke records exist for `ch1_ar2`, `ch1_ar2_ar1err`, `ch2_bivar_minnesota`,
+`ch2_steady_state`, `ch2_conditional`, `ch3_uc_trend_cycle`,
+`ch2_var4_monthly_cholesky` (see each README's "Smoke run record").
+
+**Not done -- resume here:** (1) the two large smoke runs,
+`ch2_signs_11var` (319 parameters; the sign-restriction post-processor
+call is in `run_smoke.py`; one attempt at 2 chains x 200/200 was killed
+by a 40-minute cap on a busy 4-core container -- budget an hour or more,
+or lower `SMOKE_BIG` further for a first look) and `ch3_dfm_uk_panel`
+(m = 40, n = 6; the 40x40 innovation Cholesky per period makes NUTS
+slow) -- run
+`python examples/handbook/run_smoke.py ch2_signs_11var ch3_dfm_uk_panel`
+when the machine-hours are available and check the records in (a killed
+attempt leaves an incomplete `runs/<id>/` without `_SUCCESS`; remove it
+before retrying); if the DFM's
+mirror check or diagnostics disappoint, that is the finding to record
+(short chains are stated as smoke, not evidence). (2) The FAVAR's rate
+block (the policy rate as an observable inside the factor VAR) needs
+the E5 substitution on the STATE side, which the grammar rejects
+("shock loadings must be numeric") -- an S9 item next to E4. (3) The
+handbook-example notebook (none was built; the specs + READMEs are the
+walkthrough). (4) `examples/handbook/README.md`'s table is the index;
+the run ids recorded there are smoke runs at short chains -- every
+record says so.
+
+## Warnings for whoever builds S9
+
+- **E4 (data-dependent measurement loadings, the TVP regression of
+  handbook §3.2's first example and the TVP-VAR of example 3) is next**
+  and is NOT a grammar tweak: `Z_t` varies with data, so the KF core
+  (`kalman_loglik_tv.stan` + `_kf_core`) needs a `Z_t` path exactly as
+  `R_t`/`Q_t` were added (the S3/S6 playbook: array-of-matrices core,
+  constant overloads, G1 mirror, the run-hash consequence for every
+  family whose render inlines the filter -- see DECISIONS 2026-09-04
+  WP2a for how that was taken last time). Budget the hash re-identification.
+- **The mirror gate is now `|diff| < max(1e-8, 1e-11 |loglik|)`**
+  (`qc.mirror_rtol`). Flat-prior draws reach |loglik| ~ 1e7-1e9 where an
+  absolute 1e-8 is below float64 resolution; the relative term is inert
+  for every hand family (|loglik| ~ 1e2-1e3). Do not loosen it further:
+  a wide prior on a recursive VAR's contemporaneous coefficients (`a0`)
+  makes the innovation Cholesky lose ~4 digits per recursion level --
+  `au.var`'s `a0_sd` default is 1.0 for exactly that reason (the
+  4-variable example failed the gate at N(0, 10)). If a model fails the
+  relative gate, look at the conditioning of R = M D M' before touching
+  the tolerance.
+- **The `_const` unit state** (a transition drift) has exactly zero
+  variance: the RTS smoother's masked-Cholesky branch exists for it
+  (`smoother._rts_smooth`; condition = an exact 0.0 predicted diagonal).
+  Do not give it a tiny variance "to be safe" -- the branch is exact and
+  the pre-S8 arithmetic is untouched only because the condition is exact.
+- **The HD `init` bar carries the drift** (labelled "incl. drift"); the
+  `const` bar is the MEASUREMENT intercept's column. A shock-free row has
+  no measurement bar; its identity is `Y = C + tau` per period.
+- **`measurement_loadings` is `None` for every hand family and every S7
+  model**; every consumer branches on `M is None` to the pre-S8 path.
+  Keep it that way -- the full suite's bit-identity for lw_sv/ucsv
+  depends on it.
+- **A flat prior has no stationary draws**: the fast tier's HD-identity
+  gate raises (FAIL, not skip) for `N(0, 10)` VAR coefficients. Use the
+  Minnesota prior (or any prior with stationary mass) for anything the
+  fast tier must pass; `ch2_conditional` was moved for this reason.
+- **Prior-predictive figures exclude explosive paths and COUNT them in
+  the title** (a flat-prior VAR's prior mass is mostly explosive); the
+  rule (non-finite or > 1e3 x the data scale) is on the figure.
+- Term order is still meaning; the Const column is x column 0.
+- All S7 warnings below still apply; the S7 stage record follows
+  unchanged.
 
 ## What S7 delivered (all green)
 
@@ -100,7 +182,7 @@ and structural derivation in `specs/schema/equations.py`,
   check, and its fast validation tier. Run record in the notebook and in
   DECISIONS.md.
 
-## Warnings for whoever builds S8
+## Warnings from S7 (still binding)
 
 - **Term order in an authored equation is meaning.** It fixes the
   regressor (feedback-map) column order and therefore the rendered `A`
@@ -168,7 +250,7 @@ pre-registered design, G6. S6: the notebook API, the fit-time mirror
 check, `mtk validate`. Details in README.md's ladder table,
 `STRESS-TESTS.md`, the example READMEs and DECISIONS.md's dated entries.
 
-## What's next: S8 candidates
+## What's next after S8 (the S7 list, still open)
 
 1. **Per-authored-model SBC registration + the promotion/production
    layer.** `authoring/validation.py` exposes `recovery_design` /

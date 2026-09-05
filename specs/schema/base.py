@@ -125,6 +125,10 @@ class QcSpec(BaseModel):
     mirror_check: bool = True
     mirror_points: int = Field(default=5, ge=1, description="Prior draws evaluated on both sides of the mirror.")
     mirror_tolerance: float = Field(default=1e-8, gt=0, description="Max abs loglik difference tolerated (G1's gate).")
+    mirror_rtol: float = Field(
+        default=1e-11, ge=0,
+        description="Relative slack per point: a point passes when |Stan - Python| < max(mirror_tolerance, mirror_rtol * |loglik|) (S8: flat-prior draws reach |loglik| ~ 1e7-1e9, where identical float64 arithmetic differs by ~1e-14 relative, and a recursive VAR at |a0| ~ 10 loses ~4 digits in the innovation Cholesky's cancellation).",
+    )
     mirror_seed: int = Field(default=20260904, description="Seed for the prior draws the mirror check evaluates.")
 
 

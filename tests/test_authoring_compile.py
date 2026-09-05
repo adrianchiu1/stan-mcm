@@ -253,11 +253,12 @@ def _ll(**overrides):
     "overrides, message",
     [
         ({"equations": {"measurement": ["y = mu*mu + eps"], "transition": ["mu = mu[-1] + eta"]}}, "LINEAR"),
-        ({"equations": {"measurement": ["y = mu + 1 + eps"], "transition": ["mu = mu[-1] + eta"]}}, "intercept"),
-        ({"equations": {"measurement": ["y = mu + eps"], "transition": ["mu = mu[-1] + 0.1 + eta"]}}, "drift"),
         ({"equations": {"measurement": ["y = mu + eps"], "transition": ["mu = mu[-1] + y[-1] + eta"]}}, "transition equations must be linear in states"),
         ({"equations": {"measurement": ["y = mu + eps + eta"], "transition": ["mu = mu[-1] + eta"]}}, "transition equation AND a measurement equation"),
-        ({"equations": {"measurement": ["y = mu"], "transition": ["mu = mu[-1] + eta + eps"]}}, "exactly one measurement shock"),
+        ({"equations": {"measurement": ["y = mu + eps + eps2"], "transition": ["mu = mu[-1] + eta"]},
+          "shocks": {"eps": {"sd": "sigma_obs"}, "eps2": {"sd": "sigma_obs"}, "eta": {"sd": "sigma_level"}}}, "at most ONE shock"),
+        ({"equations": {"measurement": ["y = mu + y + eps"], "transition": ["mu = mu[-1] + eta"]}}, "references itself contemporaneously"),
+        ({"equations": {"measurement": ["y = mu"], "transition": ["mu = mu[-1]"]}, "shocks": {}, "parameters": {}}, "nothing is stochastic"),
         ({"equations": {"measurement": ["y = mu + 2*eps"], "transition": ["mu = mu[-1] + eta"]}}, "unit coefficient"),
         ({"equations": {"measurement": ["y = mu + eps"], "transition": ["mu = mu[-1] + eta[-1]"]}}, "MA term"),
         ({"equations": {"measurement": ["y = mu + eps"], "transition": ["mu = mu[-1] + eta + eta"]}}, "once per equation"),
@@ -279,18 +280,31 @@ def test_scope_fence_rejects_with_a_message_naming_the_limitation(overrides, mes
         AuthoredOptions.model_validate(_ll(**overrides))
 
 
-def test_contemporaneous_observable_and_exogenous_are_rejected() -> None:
+def test_contemporaneous_observable_cycle_and_singular_row_are_rejected() -> None:
+    """S8 widened the fence (intercepts, contemporaneous observables and
+    exogenous series, shock-free rows are features now -- tests/test_s8_grammar.py);
+    what stays rejected: a contemporaneous CYCLE among observables and a
+    shock-free row no state shock can explain."""
     base = local_level_model().to_dict()
     base["observables"] = ["y", "w"]
-    base["equations"] = {"measurement": ["y = mu + w + eps", "w = mu + e2"], "transition": ["mu = mu[-1] + eta"]}
+    base["equations"] = {"measurement": ["y = mu + w + eps", "w = mu + y + e2"], "transition": ["mu = mu[-1] + eta"]}
     base["shocks"]["e2"] = {"sd": "sigma_obs"}
-    with pytest.raises(ValueError, match="simultaneous observables"):
+    with pytest.raises(ValueError, match="cycle among observables"):
         AuthoredOptions.model_validate(base)
     base = local_level_model().to_dict()
-    base["exogenous"] = ["r"]
-    base["equations"] = {"measurement": ["y = mu + b*r + eps"], "transition": ["mu = mu[-1] + eta"]}
-    base["parameters"]["b"] = {"dist": "normal", "mu": 0.0, "sd": 1.0}
-    with pytest.raises(ValueError, match="strictly lagged"):
+    base["equations"] = {"measurement": ["y = mu"], "transition": ["mu = mu[-1]"]}
+    base["shocks"] = {"eps": {"sd": "sigma_obs"}}  # declared but unused -> the earlier fence
+    with pytest.raises(ValueError, match="appears in no equation"):
+        AuthoredOptions.model_validate(base)
+    base["shocks"] = {}
+    base["parameters"] = {}
+    with pytest.raises(ValueError, match="nothing is stochastic"):
+        AuthoredOptions.model_validate(base)
+    base["observables"] = ["y", "w"]
+    base["equations"] = {"measurement": ["y = mu", "w = 2*mu"], "transition": ["mu = mu[-1] + eta"]}
+    base["shocks"] = {"eta": {"sd": "sigma_level"}}
+    base["parameters"] = {"sigma_level": {"dist": "half_normal", "sd": 1.0}}
+    with pytest.raises(ValueError, match="singular"):
         AuthoredOptions.model_validate(base)
 
 

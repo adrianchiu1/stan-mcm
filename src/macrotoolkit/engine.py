@@ -55,6 +55,7 @@ from typing import Mapping, Protocol
 import numpy as np
 
 from macrotoolkit.families.base import (
+    Const,
     ExogLag,
     ObsLag,
     ObsLagMean,
@@ -118,11 +119,13 @@ def _build_x_row(
     meta: StateSpaceMeta,
     obs_reg: _Registers,
     exog_row: np.ndarray | None,
+    const_on: bool = False,
 ) -> np.ndarray:
     """One period's x vector from the feedback map: endogenous columns from
     the observable registers, exogenous columns copied from ``exog_row``
     (the caller supplies real or zero data per column; ``None`` = all
-    zero)."""
+    zero), the ``Const`` column (S8 E1) 1 iff ``const_on`` -- never read
+    from ``exog_row``, so a data-injection bar cannot double count it."""
     x_t = np.zeros(len(meta.feedback_map))
     for j, term in enumerate(meta.feedback_map):
         if isinstance(term, ObsLag):
@@ -132,6 +135,9 @@ def _build_x_row(
             for lag in term.lags:
                 total += obs_reg.value(term.name, lag)
             x_t[j] = total / len(term.lags)
+        elif isinstance(term, Const):
+            if const_on:
+                x_t[j] = 1.0
         elif exog_row is not None:  # ExogLag
             x_t[j] = exog_row[j]
     return x_t
@@ -145,6 +151,7 @@ def observable_recursion(
     meas_inject: np.ndarray,
     exog_x: np.ndarray | None = None,
     obs_seeds: Mapping[str, Mapping[int, float]] | None = None,
+    const_on: bool = False,
 ) -> np.ndarray:
     """The deterministic observation recursion for ONE additive component:
 
@@ -155,7 +162,9 @@ def observable_recursion(
     sample values, default 0.0) and its exogenous columns read from
     ``exog_x`` (a (T, k) matrix in x's own column layout; only the ExogLag
     columns are consulted; ``None`` means all-zero exogenous input -- the
-    convention for every component except a data-injection bar).
+    convention for every component except a data-injection bar); the
+    ``Const`` column is 1 iff ``const_on`` (S8 E1: a component is a
+    DEVIATION path unless it is the intercept's own bar).
 
     Returns the (T, m) observable path. By linearity, components computed
     this way sum to the full model's observables -- the identity gate G6
@@ -175,7 +184,7 @@ def observable_recursion(
 
     obs = np.zeros((T, meta.n_obs))
     for t in range(T):
-        x_t = _build_x_row(meta, obs_reg, exog_x[t] if exog_x is not None else None)
+        x_t = _build_x_row(meta, obs_reg, exog_x[t] if exog_x is not None else None, const_on)
         y_t = A.T @ x_t + Z @ state_path[t] + meas_inject[t]
         obs[t] = y_t
         for name in meta.obs_names:
@@ -192,7 +201,13 @@ class ExogForecastRule(Protocol):
     """Resolves an exogenous series' LAG-1 value for the period being
     simulated, given the state row drawn for that period (whose offset -1
     slots describe the previous period -- see the module docstring's
-    timing convention)."""
+    timing convention). S8 E2: for a series the feedback map references
+    at LAG 0 (``meta.exog_contemporaneous``) the rule must return the
+    CURRENT period's value instead -- ``simulate_forward`` uses the
+    resolution as that period's lag-0 regressor and shifts it into the
+    lag-1.. register afterwards (``last_value``/``constant`` mean the
+    same thing either way; a ``state_linear`` rule still reads the
+    freshly drawn state row)."""
 
     def resolve(self, state_row: np.ndarray) -> float: ...
 
@@ -384,6 +399,7 @@ def simulate_forward(
     horizon: int,
     rng: np.random.Generator,
     state_noise: StateNoise | None = None,
+    meas_loading: np.ndarray | None = None,
 ) -> dict[str, np.ndarray | dict[str, np.ndarray]]:
     """ONE stochastic forward realization, ``horizon`` periods ahead of the
     terminal state ``xi_last``. Per period, in this exact order (RNG
@@ -397,9 +413,19 @@ def simulate_forward(
        the fresh state row (deeper lags come from previously resolved
        values, seeded by ``exog_seeds`` = real data) -- each rule's
        ``resolve`` is called EXACTLY once per step, in step order (a
-       contract stateful rules like :class:`DataPathExogRule` rely on);
-    3. draw measurement shocks via ``meas_noise.step``;
-    4. build x from the feedback registers, apply the measurement equation,
+       contract stateful rules like :class:`DataPathExogRule` rely on).
+       S8 E2: a series the feedback map references at LAG 0
+       (``meta.exog_contemporaneous``) is resolved for the CURRENT period
+       instead; its lags 1..depth then come from the register, which
+       ``exog_seeds`` seeds at lags 1..depth (plans/S8-plan.md conflict 4;
+       every series without a lag-0 reference keeps the S4 contract
+       exactly);
+    3. draw measurement shocks via ``meas_noise.step`` -- one per declared
+       measurement SHOCK; with ``meas_loading`` (S8 E5, the (m, n_shocks)
+       matrix ``M``) the row-space error is ``M @ eps``, else ``eps`` is
+       already in row space (the pre-S8 identity);
+    4. build x from the feedback registers (the ``Const`` column is 1: a
+       forward path is a LEVEL path), apply the measurement equation,
        push the new observables (and the resolved exogenous values) into
        their registers.
 
@@ -415,10 +441,10 @@ def simulate_forward(
     at step t (lw_sv's rate-gap diagnostic derives from it).
     """
     for name in meta.exog_names:
-        if meta.exog_lag_depth(name) > 0 and name not in exog_rules:
+        if meta.exog_is_referenced(name) and name not in exog_rules:
             raise ValueError(
                 f"simulate_forward needs an exog_rules entry for series "
-                f"{name!r} (the feedback map references its lags)."
+                f"{name!r} (the feedback map references it)."
             )
 
     n = F.shape[0]
@@ -429,18 +455,24 @@ def simulate_forward(
     # value is always this step's fresh resolution), so entry i covers lag
     # i+2. Seeds use natural lag semantics relative to the FIRST simulated
     # period: {"r": {2: r_{T-1}}} seeds the lag-2 slot for step 0.
+    # A series referenced at lag 0 (S8 E2) is resolved for the CURRENT
+    # period, so its register starts at lag 1 (entry i covers lag i+1) and
+    # seeds cover lags 1..depth.
     exog_hist: dict[str, list[float]] = {}
+    first_lag: dict[str, int] = {}
     for name in exog_rules:
         depth = meta.exog_lag_depth(name)
+        lo = 1 if meta.exog_contemporaneous(name) else 2
+        first_lag[name] = lo
         series_seeds = dict(exog_seeds.get(name, {}))
-        unknown = set(series_seeds) - set(range(2, depth + 1))
+        unknown = set(series_seeds) - set(range(lo, depth + 1))
         if unknown:
             raise ValueError(
                 f"Exog seeds for series {name!r} reference lag(s) "
-                f"{sorted(unknown)}; only lags 2..{depth} are seedable (the "
-                f"lag-1 value is always resolved by the forecast rule)."
+                f"{sorted(unknown)}; only lags {lo}..{depth} are seedable (the "
+                f"lag-{lo - 1} value is always resolved by the forecast rule)."
             )
-        exog_hist[name] = [float(series_seeds.get(lag, 0.0)) for lag in range(2, depth + 1)]
+        exog_hist[name] = [float(series_seeds.get(lag, 0.0)) for lag in range(lo, depth + 1)]
 
     obs = np.empty((horizon, meta.n_obs))
     states = np.empty((horizon + 1, n))
@@ -457,9 +489,11 @@ def simulate_forward(
             exog_resolved[name][t] = value
 
         eps = meas_noise.step(rng)
+        e_row = eps if meas_loading is None else meas_loading @ eps
 
         # x's exogenous lag-1 columns read this step's freshly resolved
-        # value; deeper lags read the register (prior resolutions/seeds).
+        # value (lag-0 columns for a contemporaneously referenced series);
+        # deeper lags read the register (prior resolutions/seeds).
         x_t = np.zeros(len(meta.feedback_map))
         for j, term in enumerate(meta.feedback_map):
             if isinstance(term, ObsLag):
@@ -469,10 +503,13 @@ def simulate_forward(
                 for lag in term.lags:
                     total += obs_reg.value(term.name, lag)
                 x_t[j] = total / len(term.lags)
+            elif isinstance(term, Const):
+                x_t[j] = 1.0
             else:  # ExogLag
-                x_t[j] = resolved[term.name] if term.lag == 1 else exog_hist[term.name][term.lag - 2]
+                lo = first_lag[term.name]
+                x_t[j] = resolved[term.name] if term.lag == lo - 1 else exog_hist[term.name][term.lag - lo]
 
-        y_t = A.T @ x_t + Z @ xi_t + eps
+        y_t = A.T @ x_t + Z @ xi_t + e_row
         obs[t] = y_t
 
         for name in meta.obs_names:

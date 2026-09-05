@@ -71,15 +71,25 @@ class ObsLagMean:
 
 @dataclass(frozen=True)
 class ExogLag:
-    """x column = genuinely exogenous series ``name`` lagged ``lag`` >= 1
+    """x column = genuinely exogenous series ``name`` lagged ``lag`` >= 0
     periods -- real data in-sample; a declared forecast rule out of
-    sample."""
+    sample. ``lag == 0`` (S8 E2) is a CONTEMPORANEOUS exogenous regressor:
+    the engine resolves the series for the period being simulated
+    instead of the previous one (see ``simulate_forward``)."""
 
     name: str
     lag: int
 
 
-FeedbackTerm = ObsLag | ObsLagMean | ExogLag
+@dataclass(frozen=True)
+class Const:
+    """x column = 1 in every period (S8 E1): a measurement-equation
+    intercept enters ``A'x_t`` through this column. The engine switches
+    it on for level paths (forward simulation, the HD ``const`` bar) and
+    off for deviation paths (IRFs, every other HD bar)."""
+
+
+FeedbackTerm = ObsLag | ObsLagMean | ExogLag | Const
 
 
 @dataclass(frozen=True)
@@ -106,6 +116,16 @@ class StateSpaceMeta:
     - ``feedback_map``: one :data:`FeedbackTerm` per x column, in column
       order (S5-decisions item 1) -- empty for a family whose measurement
       equation has no exogenous-regressor matrix.
+    - ``measurement_loadings`` (S8 E5, optional): per measurement shock,
+      the observation ROWS it loads into, its OWN row first -- the
+      measurement-side analogue of ``shock_loadings``, declared as a
+      sparsity pattern because the coefficients are parameter-dependent
+      (a recursive VAR's contemporaneous coefficient IS the parameter)
+      and arrive per draw as the numeric ``M`` matrix. ``None`` (every
+      hand family) means each shock loads its own row only, by position,
+      and every consumer takes the pre-S8 path bit for bit. With it,
+      ``measurement_shocks`` may be SHORTER than ``obs_names`` (a
+      shock-free row, S8 E3) and ``n_obs`` is the row count.
     """
 
     state_labels: tuple[StateLabel, ...]
@@ -115,13 +135,33 @@ class StateSpaceMeta:
     obs_names: tuple[str, ...] = ()
     exog_names: tuple[str, ...] = ()
     feedback_map: tuple[FeedbackTerm, ...] = ()
+    measurement_loadings: Mapping[str, tuple[str, ...]] | None = None
 
     def __post_init__(self) -> None:
-        if self.obs_names and len(self.obs_names) != len(self.measurement_shocks):
-            raise ValueError(
-                f"obs_names {self.obs_names} and measurement_shocks "
-                f"{self.measurement_shocks} must align row-for-row."
-            )
+        if self.measurement_loadings is None:
+            if self.obs_names and len(self.obs_names) != len(self.measurement_shocks):
+                raise ValueError(
+                    f"obs_names {self.obs_names} and measurement_shocks "
+                    f"{self.measurement_shocks} must align row-for-row."
+                )
+        else:
+            if not self.obs_names:
+                raise ValueError("measurement_loadings needs obs_names (the observation rows).")
+            if set(self.measurement_loadings) != set(self.measurement_shocks):
+                raise ValueError(
+                    f"measurement_loadings must name exactly the measurement_shocks "
+                    f"{self.measurement_shocks}; got {sorted(self.measurement_loadings)}."
+                )
+            own_rows = []
+            for shock, rows in self.measurement_loadings.items():
+                if not rows:
+                    raise ValueError(f"measurement_loadings[{shock!r}] is empty; a shock loads at least its own row.")
+                unknown = [r for r in rows if r not in self.obs_names]
+                if unknown:
+                    raise ValueError(f"measurement_loadings[{shock!r}] references unknown observable(s) {unknown}; obs_names: {self.obs_names}.")
+                own_rows.append(rows[0])
+            if len(set(own_rows)) != len(own_rows):
+                raise ValueError(f"measurement_loadings: two shocks share an own row ({own_rows}); one own shock per row.")
         for term in self.feedback_map:
             if isinstance(term, (ObsLag, ObsLagMean)):
                 if term.name not in self.obs_names:
@@ -135,15 +175,22 @@ class StateSpaceMeta:
                         f"feedback_map term {term!r} references unknown "
                         f"exogenous series; exog_names: {self.exog_names}."
                     )
+                if term.lag < 0:
+                    raise ValueError(f"feedback_map term {term!r} has a negative lag.")
+                continue
+            elif isinstance(term, Const):
+                continue
             else:
                 raise ValueError(f"feedback_map term {term!r} is not a FeedbackTerm.")
             lags = term.lags if isinstance(term, ObsLagMean) else (term.lag,)
             if any(l < 1 for l in lags):
                 raise ValueError(
-                    f"feedback_map term {term!r} has a lag < 1; x columns "
+                    f"feedback_map term {term!r} has a lag < 1; endogenous x columns "
                     f"must be strictly lagged (a contemporaneous endogenous "
                     f"regressor would not be a valid feedback declaration)."
                 )
+        if sum(isinstance(t, Const) for t in self.feedback_map) > 1:
+            raise ValueError("feedback_map declares more than one Const column; one column of ones suffices.")
         if len(set(self.state_labels)) != len(self.state_labels):
             raise ValueError(
                 f"state_labels must be unique; got {self.state_labels!r}."
@@ -172,7 +219,69 @@ class StateSpaceMeta:
 
     @property
     def n_obs(self) -> int:
+        return len(self.obs_names) if self.obs_names else len(self.measurement_shocks)
+
+    @property
+    def n_meas_shocks(self) -> int:
         return len(self.measurement_shocks)
+
+    def meas_shock_row(self, shock: str) -> int:
+        """The observation row a measurement shock OWNS (the row of the
+        equation it was written in): its position when no loadings are
+        declared, else its declared own row."""
+        if self.measurement_loadings is None:
+            return self.measurement_shocks.index(shock)
+        return self.obs_index(self.measurement_loadings[shock][0])
+
+    def meas_recovery_order(self) -> tuple[tuple[str, int, tuple[str, ...]], ...]:
+        """How to invert a measurement residual ``e = M eps`` back into the
+        named measurement shocks EXACTLY: resolve each shock off its OWN
+        row once every other shock loading into that row is resolved
+        (``eps_s = (e[row] - sum_r M[row, r] eps_r) / M[row, s]``) -- the
+        measurement-side twin of :meth:`recovery_order`. Returns
+        ``(shock, own_row_index, other_shocks_on_that_row)`` in resolution
+        order; without declared loadings each shock is simply its own
+        row's residual (the pre-S8 read)."""
+        if self.measurement_loadings is None:
+            return tuple((s, j, ()) for j, s in enumerate(self.measurement_shocks))
+        loaders: dict[str, list[str]] = {}
+        for shock, rows in self.measurement_loadings.items():
+            for r in rows:
+                loaders.setdefault(r, []).append(shock)
+        resolved: list[str] = []
+        order: list[tuple[str, int, tuple[str, ...]]] = []
+        pending = list(self.measurement_shocks)
+        while pending:
+            progress = False
+            for shock in list(pending):
+                own = self.measurement_loadings[shock][0]
+                others = tuple(s for s in loaders[own] if s != shock)
+                if all(s in resolved for s in others):
+                    order.append((shock, self.obs_index(own), others))
+                    resolved.append(shock)
+                    pending.remove(shock)
+                    progress = True
+                    break
+            if not progress:
+                raise ValueError(
+                    f"measurement_loadings are not triangular: cannot recover shocks {pending} "
+                    f"from their own rows (resolved so far: {resolved})."
+                )
+        return tuple(order)
+
+    def has_const_column(self) -> bool:
+        return any(isinstance(t, Const) for t in self.feedback_map)
+
+    def exog_is_referenced(self, name: str) -> bool:
+        """True iff some x column is a lag (any lag, 0 included) of the
+        exogenous series."""
+        return any(isinstance(t, ExogLag) and t.name == name for t in self.feedback_map)
+
+    def exog_contemporaneous(self, name: str) -> bool:
+        """True iff the feedback map references the exogenous series at
+        lag 0 (S8 E2) -- the engine then resolves it for the CURRENT
+        period."""
+        return any(isinstance(t, ExogLag) and t.name == name and t.lag == 0 for t in self.feedback_map)
 
     def obs_index(self, name: str) -> int:
         """Observation-row index of the named observable."""
@@ -283,4 +392,6 @@ class StateSpaceMeta:
         covariance is ``Q = B @ diag(sigma^2) @ B.T`` for per-shock
         variances ``sigma^2`` -- pinned against the family's own matrix
         constructor by ``tests/test_state_metadata.py``."""
+        if not self.state_shocks:  # S8 E0: no stochastic state shock -> B is (n, 0), Q = 0
+            return np.zeros((self.n_state, 0))
         return np.column_stack([self.injection_vector(s) for s in self.state_shocks])

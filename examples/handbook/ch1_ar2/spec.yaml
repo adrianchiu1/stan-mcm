@@ -1,0 +1,68 @@
+model:
+  family: authored
+  options:
+    family: authored
+    name: ch1_ar2
+    observables:
+    - infl
+    exogenous: []
+    equations:
+      measurement:
+      - infl = c + b1*infl[-1] + b2*infl[-2] + e
+      transition: []
+    parameters:
+      c:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      b1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      b2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      sigma:
+        dist: half_normal
+        sd: 2.0
+    shocks:
+      e:
+        sd: sigma
+        sv: null
+    initial_state: {}
+    forecast_rules: {}
+data:
+  file: ../data/ch1_inflation.csv
+  date_column: date
+  mapping:
+    infl: inflation
+  sample:
+    start: null
+    end: null
+priors: {}
+sampler:
+  chains: 2
+  warmup: 300
+  sampling: 300
+  adapt_delta: 0.8
+  max_treedepth: 10
+  seed: 20260905
+outputs:
+  horizon: 12
+  irf_horizon: 12
+  irf_vol_reference: end_of_sample
+  smoother_draws: all
+  prior_predictive_draws: 200
+qc:
+  mirror_check: true
+  mirror_points: 5
+  mirror_tolerance: 1.0e-08
+  mirror_rtol: 1.0e-11
+  mirror_seed: 20260904

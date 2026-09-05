@@ -117,14 +117,23 @@ def run_mirror_check(spec, stan_data: dict, model, mirror: MirrorDecl | None) ->
     diffs = np.abs(stan_vals - py_vals)
     finite = bool(np.all(np.isfinite(stan_vals)) and np.all(np.isfinite(py_vals)))
     max_diff = float(np.max(diffs)) if finite else float("inf")
-    passed = finite and max_diff < qc.mirror_tolerance
+    # Per point: |diff| < max(atol, rtol * |loglik|). The relative term
+    # (S8; rtol 1e-11 against float64's ~1e-16, a T-step accumulation and an ill-conditioned innovation Cholesky at extreme flat-prior draws)
+    # only matters at badly scaled points -- for every hand family and
+    # every S7 gate |loglik| ~ 1e2-1e3, where atol = 1e-8 is the binding
+    # (and unchanged) rule.
+    gates = np.maximum(qc.mirror_tolerance, qc.mirror_rtol * np.abs(py_vals)) if finite else np.zeros_like(diffs)
+    max_rel_diff = float(np.max(diffs / np.maximum(1.0, np.abs(py_vals)))) if finite else float("inf")
+    passed = finite and bool(np.all(diffs < gates))
     record = {
         "enabled": True,
         "applicable": True,
         "n_points": len(points),
         "tolerance": qc.mirror_tolerance,
+        "rtol": qc.mirror_rtol,
         "seed": qc.mirror_seed,
         "max_abs_diff": max_diff,
+        "max_rel_diff": max_rel_diff,
         "passed": bool(passed),
         "points": [
             {"stan": float(s), "python": float(p), "abs_diff": float(d)}
@@ -132,11 +141,11 @@ def run_mirror_check(spec, stan_data: dict, model, mirror: MirrorDecl | None) ->
         ],
     }
     if not passed:
-        worst = int(np.argmax(diffs)) if finite else 0
+        worst = int(np.argmax(diffs - gates)) if finite else 0
         raise MirrorCheckError(
             f"KF mirror check FAILED for family {spec.model.family!r}: max |Stan - "
             f"Python| = {max_diff:.3e} over {len(points)} prior draws exceeds the "
-            f"gate {qc.mirror_tolerance:.1e} (worst point {worst}: Stan "
+            f"gate max({qc.mirror_tolerance:.1e}, {qc.mirror_rtol:.0e} * |loglik|) (worst point {worst}: Stan "
             f"{stan_vals[worst]!r}, Python {py_vals[worst]!r}). The rendered program "
             f"and macrotoolkit.smoother disagree -- nothing was sampled. Fix the "
             f"discrepancy (or, to investigate a run anyway, set qc.mirror_check: "

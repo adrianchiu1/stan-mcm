@@ -23,8 +23,31 @@ The derivation (plans/S7-plan.md "Compilation"):
   order, which IS the feedback map (ObsLag / ObsLagMean / ExogLag).
 - Lag slots are deterministic copies: ``F[(s,-j), (s,-(j-1))] = 1``.
 - Shock loadings must be numeric (``StateSpaceMeta`` declares them as
-  data); a measurement equation carries exactly one measurement shock at
-  unit coefficient.
+  data); a measurement equation carries AT MOST one measurement shock of
+  its own, at unit coefficient.
+
+S8 extensions (plans/S8-plan.md, WP1) -- the same derivation, widened:
+
+- **E0** no stochastic state shock at all, and no transition equation at
+  all (``n = 0``): first-class (``B`` is ``(n, 0)``, ``Q = 0``).
+- **E1** a constant term in a measurement equation becomes the
+  ``("const",)`` feedback column (x column 0 = 1) with ``A[0, row]`` the
+  constant expression; a constant term in a transition equation (a
+  drift) becomes a loading on an IMPLICIT deterministic unit state
+  ``_const`` (last slot; ``F[_const, _const] = 1``, ``xi00 = 1``,
+  ``P00 = 0``; the name cannot collide with a user state).
+- **E2** a contemporaneous exogenous regressor is ``("exog_lag", x, 0)``.
+- **E3** a measurement row may carry no shock (singular ``R``) iff the
+  innovation covariance stays positive definite:
+  ``rank([M | Z B]) = n_obs`` (``M`` the measurement loadings, ``B`` the
+  state loadings), checked at a generic parameter point -- the proof is
+  in plans/S8-plan.md.
+- **E5** a contemporaneous OBSERVABLE on a right-hand side is substituted
+  (its own measurement row -- A, Z, constant, AND its shock -- composed
+  into the referencing row with the coefficient) in dependency order; a
+  cycle is an error. The composed measurement-shock loadings ``M`` are
+  therefore parameter-dependent coefficient expressions (unit on the own
+  row) and ``R = M diag(var) M'`` is no longer diagonal in general.
 
 Everything here is a plain dataclass of plain values (labels as tuples,
 matrix entries as :class:`specs.schema.equations.Expr` trees keyed by
@@ -38,6 +61,7 @@ from dataclasses import dataclass, field
 
 from specs.schema.equations import (
     Expr,
+    evaluate,
     LinearForm,
     MeanTerm,
     Num,
@@ -82,8 +106,11 @@ RESERVED_NAMES = frozenset(
 GRAMMAR_RESERVED = frozenset({"mean"})
 
 #: Feedback-map terms as plain tuples (converted to ObsLag / ObsLagMean /
-#: ExogLag by the numpy side).
+#: ExogLag / Const by the numpy side).
 FeedbackTuple = tuple
+
+#: The implicit deterministic unit state carrying transition drifts (E1).
+CONST_STATE = "_const"
 
 
 @dataclass
@@ -93,23 +120,29 @@ class ModelStructure:
     name: str
     obs_names: tuple[str, ...]
     exog_names: tuple[str, ...]
-    state_names: tuple[str, ...]
+    state_names: tuple[str, ...]  # the USER's states (the implicit _const state is not among them)
     head_offset: dict[str, int]
     n_slots: dict[str, int]
-    state_labels: tuple[tuple[str, int], ...]
+    state_labels: tuple[tuple[str, int], ...]  # includes ("_const", 0) last when a drift exists
     state_shocks: tuple[str, ...]
-    measurement_shocks: tuple[str, ...]
+    measurement_shocks: tuple[str, ...]  # own-row order (<= n_obs of them)
     shock_loadings: dict[str, dict[tuple[str, int], float]]
     feedback_map: tuple[FeedbackTuple, ...]
     #: Sparse symbolic matrices: missing entries are exact zeros.
     F: dict[tuple[int, int], Expr]
     A: dict[tuple[int, int], Expr]  # (x column, observation row)
     Z: dict[tuple[int, int], Expr]  # (observation row, state slot)
+    #: Measurement-shock loadings (observation row, shock index) -> coefficient (unit on the own row).
+    M: dict[tuple[int, int], Expr]
+    #: Per measurement shock, the observation rows it loads into, own row first.
+    meas_loadings: dict[str, tuple[str, ...]]
     params: tuple[str, ...]
     #: Constant-scale shocks -> the half_normal parameter carrying their sd.
     shock_scale_param: dict[str, str]
     sv_shocks: tuple[str, ...]
     lag_depth: int
+    has_const_state: bool = False
+    obs_substitution_order: tuple[str, ...] = field(default_factory=tuple)
     canonical_measurement: tuple[str, ...] = field(default_factory=tuple)
     canonical_transition: tuple[str, ...] = field(default_factory=tuple)
 
@@ -132,8 +165,20 @@ class ModelStructure:
         return self.slot(name, -self.head_offset[name])
 
     def matrix_is_numeric(self, which: str) -> bool:
-        entries = {"F": self.F, "A": self.A, "Z": self.Z}[which]
+        entries = {"F": self.F, "A": self.A, "Z": self.Z, "M": self.M}[which]
         return all(is_numeric(e) for e in entries.values())
+
+    def meas_loading_is_identity(self) -> bool:
+        """True iff every measurement shock loads its own row only, at
+        unit coefficient, and every row has a shock -- the pre-S8 case
+        (every consumer then takes the pre-S8 code path bit for bit)."""
+        if len(self.measurement_shocks) != self.n_obs or len(self.M) != self.n_obs:
+            return False
+        return all(i == j and isinstance(e, Num) and e.value == 1.0 for (i, j), e in self.M.items())
+
+    def shock_free_rows(self) -> tuple[str, ...]:
+        loaded = {i for (i, _) in self.M}
+        return tuple(o for i, o in enumerate(self.obs_names) if i not in loaded)
 
     def sv_state_shocks(self) -> tuple[str, ...]:
         return tuple(s for s in self.state_shocks if s in self.sv_shocks)
@@ -157,6 +202,42 @@ def _check_identifier(name: str, role: str) -> None:
         )
 
 
+def _generic_point(params: tuple[str, ...]) -> dict[str, float]:
+    """A fixed pseudo-random parameter point for GENERIC rank checks
+    (rank is generic in the coefficient expressions; a special point --
+    e.g. two parameters equal -- could only lower it)."""
+    import random
+
+    rng = random.Random(20260905)
+    return {p: rng.uniform(0.37, 1.91) * rng.choice((-1.0, 1.0)) for p in params}
+
+
+def _rank(rows: list[list[float]], tol: float = 1e-9) -> int:
+    """Rank of a small dense matrix by Gaussian elimination with partial
+    pivoting (pure Python: specs.schema stays numpy-free)."""
+    A = [list(r) for r in rows]
+    if not A or not A[0]:
+        return 0
+    n_rows, n_cols = len(A), len(A[0])
+    scale = max((abs(v) for r in A for v in r), default=0.0) or 1.0
+    rank = 0
+    col = 0
+    while rank < n_rows and col < n_cols:
+        piv = max(range(rank, n_rows), key=lambda i: abs(A[i][col]))
+        if abs(A[piv][col]) <= tol * scale:
+            col += 1
+            continue
+        A[rank], A[piv] = A[piv], A[rank]
+        for i in range(rank + 1, n_rows):
+            f = A[i][col] / A[rank][col]
+            if f != 0.0:
+                for j in range(col, n_cols):
+                    A[i][j] -= f * A[rank][j]
+        rank += 1
+        col += 1
+    return rank
+
+
 def compile_structure(
     *,
     name: str,
@@ -175,8 +256,6 @@ def compile_structure(
             _check_identifier(n, role)
     if not observables:
         raise ModelStructureError("An authored model needs at least one observable.")
-    if not transition:
-        raise ModelStructureError("An authored model needs at least one transition equation (a state).")
     parsed_meas = [parse_equation(e) for e in measurement]
     parsed_trans = [parse_equation(e) for e in transition]
     states = [p.lhs_name for p in parsed_trans]
@@ -207,27 +286,12 @@ def compile_structure(
     kinds = {**{n: "symbol" for n in observables}, **{n: "symbol" for n in exogenous}, **{n: "symbol" for n in states}, **{n: "symbol" for n in shocks}, **{n: "param" for n in parameters}}
     kind_of = kinds.get
 
-    meas_forms: list[LinearForm] = []
-    for text, p in zip(measurement, parsed_meas):
-        lf = linearize(p.rhs, kind_of, equation=text)
-        if lf.const is not None:
-            raise ModelStructureError(
-                f"Equation {text!r} has a constant term ({lf.const.emit()}) -- intercepts are outside this stage "
-                f"(the KF measurement equation carries no constant; add a constant state or demean the series)."
-            )
-        meas_forms.append(lf)
-    trans_forms: list[LinearForm] = []
-    for text, p in zip(transition, parsed_trans):
-        lf = linearize(p.rhs, kind_of, equation=text)
-        if lf.const is not None:
-            raise ModelStructureError(
-                f"Equation {text!r} has a constant term ({lf.const.emit()}) -- intercepts/drifts are outside this stage "
-                f"(model a drift as a state, e.g. a random-walk growth state)."
-            )
-        trans_forms.append(lf)
+    meas_forms: list[LinearForm] = [linearize(p.rhs, kind_of, equation=text) for text, p in zip(measurement, parsed_meas)]
+    trans_forms: list[LinearForm] = [linearize(p.rhs, kind_of, equation=text) for text, p in zip(transition, parsed_trans)]
 
     head_offset = {p.lhs_name: p.lhs_lag for p in parsed_trans}
     obs_set, exog_set, state_set, shock_set = set(observables), set(exogenous), set(states), set(shocks)
+    obs_index = {o: i for i, o in enumerate(observables)}
 
     # --- shock classification -----------------------------------------
     in_trans: dict[str, list[str]] = {}
@@ -262,30 +326,36 @@ def compile_structure(
             )
         if sh not in in_trans and sh not in in_meas:
             raise ModelStructureError(f"Shock {sh!r} is declared but appears in no equation.")
-    meas_shocks: list[str] = []
+    own_shock: dict[int, str] = {}  # observation row -> its own measurement shock
     for i, (text, lf) in enumerate(zip(measurement, meas_forms)):
         here = [s for s in shocks if i in in_meas.get(s, [])]
-        if len(here) != 1:
+        if len(here) > 1:
             raise ModelStructureError(
-                f"Measurement equation {text!r} must carry exactly one measurement shock (found {here}); a shock-free "
-                f"measurement row (singular R) or several shocks on one row are outside this stage."
+                f"Measurement equation {text!r} carries {len(here)} measurement shocks {here}; a row has at most ONE shock of its "
+                f"own (a second orthogonal shock reaching the row must come through another observable's equation, S8 E5)."
             )
-        coef = lf.terms[SeriesTerm(here[0], 0)]
-        if not (is_numeric(coef) and numeric_value(coef) == 1.0):
-            raise ModelStructureError(
-                f"Measurement shock {here[0]!r} in {text!r} must enter with unit coefficient (found {coef.emit()}); "
-                f"scale it through its sd parameter instead."
-            )
-        meas_shocks.append(here[0])
-    for s in meas_shocks:
-        if len(in_meas[s]) != 1:
-            raise ModelStructureError(f"Measurement shock {s!r} appears in {len(in_meas[s])} measurement equations; one row per shock.")
+        if here:
+            coef = lf.terms[SeriesTerm(here[0], 0)]
+            if not (is_numeric(coef) and numeric_value(coef) == 1.0):
+                raise ModelStructureError(
+                    f"Measurement shock {here[0]!r} in {text!r} must enter with unit coefficient (found {coef.emit()}); "
+                    f"scale it through its sd parameter instead."
+                )
+            own_shock[i] = here[0]
+    for s, rows in in_meas.items():
+        if len(rows) != 1:
+            raise ModelStructureError(f"Measurement shock {s!r} appears in {len(rows)} measurement equations; one row per shock.")
+    meas_shocks: list[str] = [own_shock[i] for i in range(len(observables)) if i in own_shock]
     # State shocks in order of first appearance across transition equations.
     state_shocks: list[str] = []
     for lf in trans_forms:
         for t in lf.terms:
             if isinstance(t, SeriesTerm) and t.name in in_trans and t.name not in state_shocks:
                 state_shocks.append(t.name)
+    if not state_shocks and not meas_shocks:
+        raise ModelStructureError(
+            "The model has no state shock and no measurement shock -- nothing is stochastic; declare a shock."
+        )
 
     # --- slot counts ---------------------------------------------------
     n_slots = {s: 1 for s in states}
@@ -312,10 +382,16 @@ def compile_structure(
         n_slots[s] = max(n_slots[s], k - d)
         return "lag"
 
+    # --- feedback map (x columns): the Const column first when any
+    # measurement equation has an intercept (plans/S8-plan.md conflict 5),
+    # then first-appearance order ---------------------------------------
     feedback: list[FeedbackTuple] = []
+    if any(lf.const is not None for lf in meas_forms):
+        feedback.append(("const",))
     lag_depth = 0
-    for text, lf in zip(measurement, meas_forms):
-        for t in lf.terms:
+    obs_deps: dict[int, dict[int, Expr]] = {i: {} for i in range(len(observables))}  # row -> {row of the contemporaneous observable: coef}
+    for i, (text, lf) in enumerate(zip(measurement, meas_forms)):
+        for t, coef in lf.terms.items():
             if isinstance(t, MeanTerm):
                 if t.name not in obs_set:
                     raise ModelStructureError(
@@ -330,23 +406,16 @@ def compile_structure(
                 need_meas(t.name, t.lag, text)
             elif t.name in obs_set:
                 if t.lag == 0:
-                    raise ModelStructureError(
-                        f"Equation {text!r}: observable {t.name!r} appears contemporaneously on the right-hand side -- "
-                        f"simultaneous observables are outside the DSL (the measurement equation must be y_t = A'x_t + Z xi_t + e_t; "
-                        f"substitute the other equation or lag the reference)."
-                    )
+                    if t.name == observables[i]:
+                        raise ModelStructureError(f"Equation {text!r}: observable {t.name!r} references itself contemporaneously.")
+                    obs_deps[i][obs_index[t.name]] = coef  # E5: substituted below
+                    continue
                 fb = ("obs_lag", t.name, t.lag)
                 if fb not in feedback:
                     feedback.append(fb)
                 lag_depth = max(lag_depth, t.lag)
             elif t.name in exog_set:
-                if t.lag == 0:
-                    raise ModelStructureError(
-                        f"Equation {text!r}: exogenous series {t.name!r} appears contemporaneously -- the feedback map "
-                        f"requires strictly lagged regressors (ExogLag with lag >= 1); write {t.name}[-1] (and date the "
-                        f"series accordingly)."
-                    )
-                fb = ("exog_lag", t.name, t.lag)
+                fb = ("exog_lag", t.name, t.lag)  # lag 0 = contemporaneous (E2)
                 if fb not in feedback:
                     feedback.append(fb)
                 lag_depth = max(lag_depth, t.lag)
@@ -372,12 +441,15 @@ def compile_structure(
                 kinds_here[t] = "shock"
         ref_kind.append(kinds_here)
 
-    # --- slot layout ---------------------------------------------------
+    # --- slot layout (the implicit _const state last, E1 drifts) ------
+    has_const_state = any(lf.const is not None for lf in trans_forms)
     labels: list[tuple[str, int]] = []
     for s in states:
         d = head_offset[s]
         for j in range(n_slots[s]):
             labels.append((s, -(d + j)))
+    if has_const_state:
+        labels.append((CONST_STATE, 0))
     slot_index = {lab: i for i, lab in enumerate(labels)}
 
     # --- F rows + loadings (topological substitution order) ------------
@@ -415,6 +487,8 @@ def compile_structure(
     for s in order:
         lf, kinds_here = form_of[s]
         r = row_of[s]
+        if lf.const is not None:  # E1 drift: a loading on the unit state
+            add_entry(F, (r, slot_index[(CONST_STATE, 0)]), lf.const)
         for t, kind in kinds_here.items():
             coef = lf.terms[t]
             if kind == "lag":
@@ -445,6 +519,9 @@ def compile_structure(
         d = head_offset[s]
         for j in range(1, n_slots[s]):
             F[(slot_index[(s, -(d + j))], slot_index[(s, -(d + j - 1))])] = Num(1.0)
+    if has_const_state:
+        c = slot_index[(CONST_STATE, 0)]
+        F[(c, c)] = Num(1.0)
 
     numeric_loadings: dict[str, dict[tuple[str, int], float]] = {}
     for sh in state_shocks:
@@ -454,20 +531,63 @@ def compile_structure(
             raise ModelStructureError(f"State shock {sh!r} has an all-zero loading into the state vector.")
         numeric_loadings[sh] = entries
 
-    # --- Z, A ----------------------------------------------------------
-    Z: dict[tuple[int, int], Expr] = {}
-    A: dict[tuple[int, int], Expr] = {}
+    # --- Z, A, M: own rows, then E5 substitution in dependency order ----
     col_index = {fb: j for j, fb in enumerate(feedback)}
+    shock_col = {s: j for j, s in enumerate(meas_shocks)}
+    own_Z: list[dict[int, Expr]] = [{} for _ in observables]
+    own_A: list[dict[int, Expr]] = [{} for _ in observables]
+    own_M: list[dict[int, Expr]] = [{} for _ in observables]
     for i, lf in enumerate(meas_forms):
+        if lf.const is not None:
+            add_entry(own_A[i], col_index[("const",)], lf.const)
+        if i in own_shock:
+            own_M[i][shock_col[own_shock[i]]] = Num(1.0)
         for t, coef in lf.terms.items():
             if isinstance(t, MeanTerm):
-                add_entry(A, (col_index[("obs_lag_mean", t.name, tuple(t.lags))], i), coef)
+                add_entry(own_A[i], col_index[("obs_lag_mean", t.name, tuple(t.lags))], coef)
             elif t.name in state_set:
-                add_entry(Z, (i, slot_index[(t.name, -t.lag)]), coef)
+                add_entry(own_Z[i], slot_index[(t.name, -t.lag)], coef)
             elif t.name in obs_set:
-                add_entry(A, (col_index[("obs_lag", t.name, t.lag)], i), coef)
+                if t.lag > 0:
+                    add_entry(own_A[i], col_index[("obs_lag", t.name, t.lag)], coef)
             elif t.name in exog_set:
-                add_entry(A, (col_index[("exog_lag", t.name, t.lag)], i), coef)
+                add_entry(own_A[i], col_index[("exog_lag", t.name, t.lag)], coef)
+    # Topological order over observables (a cycle is an error naming them).
+    sub_order: list[int] = []
+    resolved_obs: set[int] = set()
+    pending_obs = list(range(len(observables)))
+    while pending_obs:
+        progress = False
+        for i in list(pending_obs):
+            if set(obs_deps[i]) <= resolved_obs:
+                sub_order.append(i)
+                resolved_obs.add(i)
+                pending_obs.remove(i)
+                progress = True
+        if not progress:
+            raise ModelStructureError(
+                f"Measurement equations reference each other contemporaneously in a cycle among observables "
+                f"{[observables[i] for i in pending_obs]}; a recursive (Cholesky-ordered) system is acyclic -- each observable "
+                f"may depend contemporaneously only on observables earlier in the ordering."
+            )
+    rows_Z: list[dict[int, Expr]] = [dict(r) for r in own_Z]
+    rows_A: list[dict[int, Expr]] = [dict(r) for r in own_A]
+    rows_M: list[dict[int, Expr]] = [dict(r) for r in own_M]
+    for i in sub_order:
+        for j, coef in obs_deps[i].items():  # rows_*[j] are already fully composed
+            for store_i, store_j in ((rows_Z[i], rows_Z[j]), (rows_A[i], rows_A[j]), (rows_M[i], rows_M[j])):
+                for k, val in store_j.items():
+                    add_entry(store_i, k, _simplify_mul(coef, val))
+    Z: dict[tuple[int, int], Expr] = {(i, k): v for i, row in enumerate(rows_Z) for k, v in row.items()}
+    A: dict[tuple[int, int], Expr] = {(k, i): v for i, row in enumerate(rows_A) for k, v in row.items()}
+    M: dict[tuple[int, int], Expr] = {(i, j): v for i, row in enumerate(rows_M) for j, v in row.items()}
+    meas_loadings: dict[str, tuple[str, ...]] = {}
+    row_of_shock = {sh: i for i, sh in own_shock.items()}
+    for s in meas_shocks:
+        j = shock_col[s]
+        own_row = observables[row_of_shock[s]]
+        others = [observables[i] for i in range(len(observables)) if (i, j) in M and observables[i] != own_row]
+        meas_loadings[s] = (own_row, *others)
 
     # --- shock scales --------------------------------------------------
     scale_param: dict[str, str] = {}
@@ -478,9 +598,29 @@ def compile_structure(
         else:
             scale_param[sh] = decl["sd"]
 
+    # --- E3: shock-free rows keep the innovation covariance PD ---------
+    free_rows = [i for i in range(len(observables)) if i not in {r for (r, _) in M}]
+    if free_rows:
+        point = _generic_point(tuple(parameters))
+        n_state = len(labels)
+        B_cols = [[float(numeric_loadings[sh].get(lab, 0.0)) for lab in labels] for sh in state_shocks]  # per shock: n-vector
+        rows = []
+        for i in range(len(observables)):
+            m_part = [evaluate(M[(i, j)], point) if (i, j) in M else 0.0 for j in range(len(meas_shocks))]
+            z_row = [evaluate(Z[(i, k)], point) if (i, k) in Z else 0.0 for k in range(n_state)]
+            zb_part = [sum(z_row[k] * b[k] for k in range(n_state)) for b in B_cols]
+            rows.append(m_part + zb_part)
+        if _rank(rows) < len(observables):
+            names_free = [observables[i] for i in free_rows]
+            raise ModelStructureError(
+                f"Measurement row(s) {names_free} carry no shock (singular R), and the innovation covariance "
+                f"S_t = Z P Z' + R would be singular: rank([M | Z B]) < {len(observables)} -- a shock-free row must load a "
+                f"state driven by a state shock that no other shock-free row already explains (plans/S8-plan.md, E3)."
+            )
+
     # --- parameter usage -----------------------------------------------
     used: set[str] = set()
-    for store in (F, A, Z):
+    for store in (F, A, Z, M):
         for e in store.values():
             used |= parameters_in(e)
     doubled = sorted(used & set(scale_param.values()))
@@ -512,10 +652,14 @@ def compile_structure(
         F=F,
         A=A,
         Z=Z,
+        M=M,
+        meas_loadings=meas_loadings,
         params=tuple(parameters),
         shock_scale_param=scale_param,
         sv_shocks=tuple(sv),
         lag_depth=lag_depth,
+        has_const_state=has_const_state,
+        obs_substitution_order=tuple(observables[i] for i in sub_order),
         canonical_measurement=tuple(p.emit() for p in parsed_meas),
         canonical_transition=tuple(p.emit() for p in parsed_trans),
     )

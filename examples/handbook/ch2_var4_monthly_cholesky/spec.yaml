@@ -1,0 +1,343 @@
+model:
+  family: authored
+  options:
+    family: authored
+    name: ch2_var4_monthly_cholesky
+    observables:
+    - ffr
+    - bond10y
+    - unemployment
+    - inflation
+    exogenous: []
+    equations:
+      measurement:
+      - ffr = c_ffr + b_ffr_ffr_1*ffr[-1] + b_ffr_bond10y_1*bond10y[-1] + b_ffr_unemployment_1*unemployment[-1]
+        + b_ffr_inflation_1*inflation[-1] + b_ffr_ffr_2*ffr[-2] + b_ffr_bond10y_2*bond10y[-2]
+        + b_ffr_unemployment_2*unemployment[-2] + b_ffr_inflation_2*inflation[-2]
+        + e_ffr
+      - bond10y = c_bond10y + a0_bond10y_ffr*ffr + b_bond10y_ffr_1*ffr[-1] + b_bond10y_bond10y_1*bond10y[-1]
+        + b_bond10y_unemployment_1*unemployment[-1] + b_bond10y_inflation_1*inflation[-1]
+        + b_bond10y_ffr_2*ffr[-2] + b_bond10y_bond10y_2*bond10y[-2] + b_bond10y_unemployment_2*unemployment[-2]
+        + b_bond10y_inflation_2*inflation[-2] + e_bond10y
+      - unemployment = c_unemployment + a0_unemployment_ffr*ffr + a0_unemployment_bond10y*bond10y
+        + b_unemployment_ffr_1*ffr[-1] + b_unemployment_bond10y_1*bond10y[-1] + b_unemployment_unemployment_1*unemployment[-1]
+        + b_unemployment_inflation_1*inflation[-1] + b_unemployment_ffr_2*ffr[-2]
+        + b_unemployment_bond10y_2*bond10y[-2] + b_unemployment_unemployment_2*unemployment[-2]
+        + b_unemployment_inflation_2*inflation[-2] + e_unemployment
+      - inflation = c_inflation + a0_inflation_ffr*ffr + a0_inflation_bond10y*bond10y
+        + a0_inflation_unemployment*unemployment + b_inflation_ffr_1*ffr[-1] + b_inflation_bond10y_1*bond10y[-1]
+        + b_inflation_unemployment_1*unemployment[-1] + b_inflation_inflation_1*inflation[-1]
+        + b_inflation_ffr_2*ffr[-2] + b_inflation_bond10y_2*bond10y[-2] + b_inflation_unemployment_2*unemployment[-2]
+        + b_inflation_inflation_2*inflation[-2] + e_inflation
+      transition: []
+    parameters:
+      c_ffr:
+        dist: normal
+        mu: 0.0
+        sd: 0.21826547317259976
+        lower: null
+        upper: null
+      b_ffr_ffr_1:
+        dist: normal
+        mu: 0.95
+        sd: 0.1
+        lower: null
+        upper: null
+      b_ffr_bond10y_1:
+        dist: normal
+        mu: 0.0
+        sd: 3.1622776601683795e-05
+        lower: null
+        upper: null
+      b_ffr_unemployment_1:
+        dist: normal
+        mu: 0.0
+        sd: 3.1622776601683795e-05
+        lower: null
+        upper: null
+      b_ffr_inflation_1:
+        dist: normal
+        mu: 0.0
+        sd: 3.1622776601683795e-05
+        lower: null
+        upper: null
+      b_ffr_ffr_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.09659363289248456
+        lower: null
+        upper: null
+      b_ffr_bond10y_2:
+        dist: normal
+        mu: 0.0
+        sd: 3.1622776601683795e-05
+        lower: null
+        upper: null
+      b_ffr_unemployment_2:
+        dist: normal
+        mu: 0.0
+        sd: 3.1622776601683795e-05
+        lower: null
+        upper: null
+      b_ffr_inflation_2:
+        dist: normal
+        mu: 0.0
+        sd: 3.1622776601683795e-05
+        lower: null
+        upper: null
+      sigma_ffr:
+        dist: half_normal
+        sd: 5.0
+      c_bond10y:
+        dist: normal
+        mu: 0.0
+        sd: 0.315702965911567
+        lower: null
+        upper: null
+      a0_bond10y_ffr:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      b_bond10y_ffr_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.14464173436259234
+        lower: null
+        upper: null
+      b_bond10y_bond10y_1:
+        dist: normal
+        mu: 0.95
+        sd: 0.1
+        lower: null
+        upper: null
+      b_bond10y_unemployment_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.15180215612101003
+        lower: null
+        upper: null
+      b_bond10y_inflation_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.044309475214868485
+        lower: null
+        upper: null
+      b_bond10y_ffr_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.13971470589952512
+        lower: null
+        upper: null
+      b_bond10y_bond10y_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.09659363289248456
+        lower: null
+        upper: null
+      b_bond10y_unemployment_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.1466312174064047
+        lower: null
+        upper: null
+      b_bond10y_inflation_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.042800131825636495
+        lower: null
+        upper: null
+      sigma_bond10y:
+        dist: half_normal
+        sd: 5.0
+      c_unemployment:
+        dist: normal
+        mu: 0.0
+        sd: 0.2079700143783876
+        lower: null
+        upper: null
+      a0_unemployment_ffr:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_unemployment_bond10y:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      b_unemployment_ffr_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.0952830566169892
+        lower: null
+        upper: null
+      b_unemployment_bond10y_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.06587521716113463
+        lower: null
+        upper: null
+      b_unemployment_unemployment_1:
+        dist: normal
+        mu: 0.95
+        sd: 0.1
+        lower: null
+        upper: null
+      b_unemployment_inflation_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.029188963020753744
+        lower: null
+        upper: null
+      b_unemployment_ffr_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.09203736591735276
+        lower: null
+        upper: null
+      b_unemployment_bond10y_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.06363126543175338
+        lower: null
+        upper: null
+      b_unemployment_unemployment_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.09659363289248456
+        lower: null
+        upper: null
+      b_unemployment_inflation_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.02819467978538994
+        lower: null
+        upper: null
+      sigma_unemployment:
+        dist: half_normal
+        sd: 5.0
+      c_inflation:
+        dist: normal
+        mu: 0.0
+        sd: 0.7124953847470297
+        lower: null
+        upper: null
+      a0_inflation_ffr:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_inflation_bond10y:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_inflation_unemployment:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      b_inflation_ffr_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.3264352233042389
+        lower: null
+        upper: null
+      b_inflation_bond10y_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.2256853630404632
+        lower: null
+        upper: null
+      b_inflation_unemployment_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.3425952471449522
+        lower: null
+        upper: null
+      b_inflation_inflation_1:
+        dist: normal
+        mu: 0.95
+        sd: 0.1
+        lower: null
+        upper: null
+      b_inflation_ffr_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.3153156412302587
+        lower: null
+        upper: null
+      b_inflation_bond10y_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.21799769106737604
+        lower: null
+        upper: null
+      b_inflation_unemployment_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.3309251953342953
+        lower: null
+        upper: null
+      b_inflation_inflation_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.09659363289248456
+        lower: null
+        upper: null
+      sigma_inflation:
+        dist: half_normal
+        sd: 5.0
+    shocks:
+      e_ffr:
+        sd: sigma_ffr
+        sv: null
+      e_bond10y:
+        sd: sigma_bond10y
+        sv: null
+      e_unemployment:
+        sd: sigma_unemployment
+        sv: null
+      e_inflation:
+        sd: sigma_inflation
+        sv: null
+    initial_state: {}
+    forecast_rules: {}
+data:
+  file: ../data/ch2_dataus_monthly.csv
+  date_column: date
+  mapping:
+    ffr: ffr
+    bond10y: bond10y
+    unemployment: unemployment
+    inflation: inflation
+  sample:
+    start: null
+    end: null
+priors: {}
+sampler:
+  chains: 2
+  warmup: 300
+  sampling: 300
+  adapt_delta: 0.8
+  max_treedepth: 10
+  seed: 20260905
+outputs:
+  horizon: 12
+  irf_horizon: 36
+  irf_vol_reference: end_of_sample
+  smoother_draws: all
+  prior_predictive_draws: 200
+qc:
+  mirror_check: true
+  mirror_points: 5
+  mirror_tolerance: 1.0e-08
+  mirror_rtol: 1.0e-11
+  mirror_seed: 20260904

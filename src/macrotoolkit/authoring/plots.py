@@ -15,13 +15,13 @@ from matplotlib.figure import Figure
 from macrotoolkit.plots import _DATA_COLOR, _ZERO_COLOR, _fan_chart_ax, _plot_band, _stacked_signed_bar
 
 if TYPE_CHECKING:
-    from macrotoolkit.authoring.results import AuthoredRun, FanDraws, HDDraws, IRFDraws, PriorPredictiveDraws, StateDraws
+    from macrotoolkit.authoring.results import AuthoredRun, FanDraws, FEVDDraws, HDDraws, IRFDraws, PriorPredictiveDraws, StateDraws
 
 _PALETTE = ["tab:blue", "tab:orange", "tab:green", "tab:red", "tab:purple", "tab:brown", "tab:pink", "tab:olive", "tab:cyan"]
 
 
 def _colors(names) -> dict[str, str]:
-    out = {"init": "0.55", "exog": "tab:gray"}
+    out = {"init": "0.55", "exog": "tab:gray", "const": "0.8"}
     k = 0
     for n in names:
         if n not in out:
@@ -95,6 +95,30 @@ def plot_irf_matrix(irf: "IRFDraws", run: "AuthoredRun") -> Figure:
     return fig
 
 
+def plot_fevd(fv: "FEVDDraws", run: "AuthoredRun") -> Figure:
+    """Stacked posterior-median variance shares per target (shares are
+    renormalized to sum to one after taking medians)."""
+    h = np.arange(1, fv.horizon + 1)
+    fig, axes = plt.subplots(1, len(fv.targets), figsize=(3.6 * len(fv.targets) + 1.5, 3.6), squeeze=False)
+    colors = _colors(fv.shocks)
+    for ax, t in zip(axes[0], fv.targets):
+        med = np.array([np.nanmedian(fv.shares[t][s], axis=0) for s in fv.shocks])
+        tot = np.nansum(med, axis=0)
+        tot[tot == 0.0] = np.nan
+        ax.stackplot(h, np.nan_to_num(med / tot[None, :]), labels=list(fv.shocks), colors=[colors[s] for s in fv.shocks], alpha=0.85)
+        ax.set_title(t, fontsize=10)
+        ax.set_ylim(0.0, 1.0)
+        ax.set_xlabel("Horizon", fontsize=8)
+        ax.tick_params(labelsize=7)
+    axes[0][0].set_ylabel("share of forecast-error variance", fontsize=8)
+    axes[0][-1].legend(loc="upper right", fontsize=7)
+    fig.suptitle(f"{run.compiled.name}: FEVD (posterior medians of the structural shares at 1 s.d. shock sizes)", fontsize=11)
+    fig.text(0.5, 0.905, "Convention: each shock's share is its pointwise posterior MEDIAN; the medians are renormalized to sum to one per horizon (they need not otherwise).",
+             ha="center", fontsize=8, color="0.35")
+    fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.9))
+    return fig
+
+
 def plot_fan_charts(fans: "FanDraws", run: "AuthoredRun") -> dict[str, Figure]:
     h = np.arange(1, fans.horizon + 1)
     figs: dict[str, Figure] = {}
@@ -115,7 +139,7 @@ def plot_historical_decomposition(hdd: "HDDraws", run: "AuthoredRun") -> dict[st
 
     x = mdates.date2num(hdd.dates.to_pydatetime())
     colors = _colors(hdd.bars)
-    labels = {b: {"init": "Initial condition", "exog": "Exogenous series (data)"}.get(b, f"{b} shock") for b in hdd.bars}
+    labels = {b: {"init": "Initial condition (incl. drift)", "exog": "Exogenous series (data)", "const": "Intercept (constant column)"}.get(b, f"{b} shock") for b in hdd.bars}
     figs: dict[str, Figure] = {}
     for o, bars in hdd.obs.items():
         medians = {b: np.median(bars[b], axis=0) for b in hdd.bars}
@@ -143,14 +167,25 @@ def plot_historical_decomposition(hdd: "HDDraws", run: "AuthoredRun") -> dict[st
 
 
 def plot_prior_predictive(ppd: "PriorPredictiveDraws", run: "AuthoredRun") -> Figure:
+    """Explosive prior paths (S8: a flat-prior VAR's prior mass is mostly
+    explosive) would swamp the bands or overflow; paths that are non-finite
+    or exceed 1e3 x the data's scale are EXCLUDED and counted in the title
+    -- the figure states the rule rather than hiding it."""
     n = len(ppd.obs)
     fig, axes = plt.subplots(n, 1, figsize=(10.0, 3.5 * n), sharex=True, squeeze=False)
     for ax, (o, arr) in zip(axes[:, 0], ppd.obs.items()):
-        _plot_band(ax, ppd.dates, arr, "tab:purple", f"prior {o}")
-        for j in range(min(8, ppd.n_draws)):
-            ax.plot(ppd.dates, arr[j], color="tab:purple", alpha=0.25, linewidth=0.6)
+        scale = 1e3 * max(1.0, float(np.max(np.abs(ppd.obs_actual[o]))))
+        with np.errstate(invalid="ignore"):
+            ok = np.all(np.isfinite(arr), axis=1) & (np.nanmax(np.abs(np.where(np.isfinite(arr), arr, 0.0)), axis=1) <= scale)
+        kept = arr[ok]
+        n_excl = int(np.sum(~ok))
+        if kept.shape[0] > 0:
+            _plot_band(ax, ppd.dates, kept, "tab:purple", f"prior {o}")
+            for j in range(min(8, kept.shape[0])):
+                ax.plot(ppd.dates, kept[j], color="tab:purple", alpha=0.25, linewidth=0.6)
         ax.plot(ppd.dates, ppd.obs_actual[o], color=_DATA_COLOR, linewidth=1.2, label=f"{o} (data)")
-        ax.set_title(f"Prior-predictive check: {ppd.n_draws} {o} paths from the run's resolved priors (data overlaid)")
+        note = f"; {n_excl} explosive path(s) excluded (non-finite or > 1e3 x data scale)" if n_excl else ""
+        ax.set_title(f"Prior-predictive check: {ppd.n_draws} {o} paths from the run's resolved priors (data overlaid){note}", fontsize=10)
         ax.legend(loc="upper left", fontsize=8, ncol=2)
     axes[-1, 0].set_xlabel("Date")
     fig.text(0.01, 0.005, "Convention: parameters ~ resolved priors; xi_0 ~ N(xi00, P00); SV random walks from their anchored h_0; exogenous series at their real values.",

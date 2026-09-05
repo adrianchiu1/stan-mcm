@@ -1,0 +1,83 @@
+model:
+  family: authored
+  options:
+    family: authored
+    name: ch3_uc_trend_cycle
+    observables:
+    - Y
+    exogenous: []
+    equations:
+      measurement:
+      - Y = C + tau
+      transition:
+      - C = c0 + a1*C[-1] + a2*C[-2] + e1
+      - tau = tau[-1] + e2
+    parameters:
+      c0:
+        dist: normal
+        mu: 0.0
+        sd: 0.5
+        lower: null
+        upper: null
+      a1:
+        dist: normal
+        mu: 1.0
+        sd: 0.3
+        lower: null
+        upper: null
+      a2:
+        dist: normal
+        mu: -0.3
+        sd: 0.3
+        lower: null
+        upper: null
+      s1:
+        dist: half_normal
+        sd: 1.0
+      s2:
+        dist: half_normal
+        sd: 0.5
+    shocks:
+      e1:
+        sd: s1
+        sv: null
+      e2:
+        sd: s2
+        sv: null
+    initial_state:
+      C:
+        mean: 0.0
+        sd: 2.0
+      tau:
+        mean:
+          first_obs: Y
+        sd: 5.0
+    forecast_rules: {}
+data:
+  file: ../data/ch1_inflation.csv
+  date_column: date
+  mapping:
+    Y: inflation
+  sample:
+    start: null
+    end: null
+priors: {}
+sampler:
+  chains: 4
+  warmup: 500
+  sampling: 500
+  adapt_delta: 0.9
+  max_treedepth: 10
+  seed: 20260905
+outputs:
+  horizon: 12
+  irf_horizon: 20
+  irf_vol_reference: end_of_sample
+  smoother_draws: all
+  prior_predictive_draws: 200
+qc:
+  mirror_check: true
+  mirror_points: 5
+  mirror_tolerance: 1.0e-08
+  mirror_rtol: 1.0e-11
+  mirror_seed: 20260904

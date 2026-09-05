@@ -3,6 +3,149 @@
 One dated line per judgment call not fixed by the spec, with rationale.
 Newest first.
 
+- **2026-09-05 — S8 stage record (WP1-WP3 complete, WP4 in progress;
+  branch `claude/s8-grammar-var-extensions-o193mw`, pushed; PR #9).**
+  Baseline at stage start: fast suite **382 passed, 0 skipped** on a
+  pristine worktree of `origin/main` (a first baseline run overlapped
+  the stage's own edits and was discarded as contaminated -- recorded so
+  nobody trusts that log). WP4 status and what to resume are in
+  HANDOFF.md ("S8 IN PROGRESS"). Smoke records (short chains, stated as
+  smoke): `ch1_ar2` d2db589230ea, `ch1_ar2_ar1err` 7a486a179c3c,
+  `ch2_bivar_minnesota`, `ch2_steady_state`, `ch2_conditional`,
+  `ch3_uc_trend_cycle`, `ch2_var4_monthly_cholesky` -- run ids, mirror
+  checks and fast-tier verdicts in each example's README (the first
+  round of the last four re-ran after the `a0` prior and the
+  conditional example's prior changed; see the WP entry below). Two
+  handbook-vs-grammar facts recorded by the smoke runs: a flat N(0, 10)
+  prior on a bivariate VAR(2) has NO stationary draw in 200 attempts, so
+  the HD-identity gate FAILS (not skips) -- the conditional-forecast
+  example moved to the Minnesota prior; and the 4-variable monthly VAR
+  failed the fit-time mirror check at 1.3e-10 RELATIVE with `a0 ~ N(0,
+  10)` (the innovation Cholesky's cancellation), which is why `au.var`
+  defaults `a0_sd` to 1.0 and the record says so rather than the gate
+  moving.
+
+- **2026-09-05 — S8 WP1-WP3 landed: the grammar bundle (E0/E1/E2/E3/E5),
+  the VAR support layer and the two post-processors.** The design, the
+  five brief-vs-doctrine conflicts and the E3 proof are in
+  `plans/S8-plan.md`. What was measured (`tests/test_s8_grammar.py`,
+  `tests/test_s8_stan.py`, `tests/test_s8_var.py`,
+  `tests/test_s8_postprocess.py`, marker `authored`):
+  (1) **E0** the Chapter 1 AR(2) with the constant as a shock-free state:
+  the KF log-likelihood equals the closed-form marginal Gaussian
+  regression likelihood (the constant integrated under its N(mean, sd^2)
+  initial condition; matrix determinant lemma) at 50 prior draws to
+  < 1e-10 (asserted; the test measures the worst relative error over the 50 draws) relative; a pure regression / VAR runs with `n = 0` (the numba
+  filter reproduces the direct Gaussian likelihood to 0.0 at stage
+  start; Stan's zero-size objects render and compile).
+  (2) **E1** a parameter intercept equals the conditional regression
+  likelihood; a transition drift is the `[c, 1]` unit-state augmentation
+  (compiled F/Q/Z/xi00/P00 bit-identical to the hand construction; the
+  unit state stays exactly 1 along DK draws).
+  (3) **E2** lag-0 exogenous columns are the estimation rows; the engine
+  resolves the CURRENT value for such a series (register lags 1..depth)
+  and the zero-noise seam reproduces A'x row by row; every series without
+  a lag-0 reference keeps the S4 contract and RNG order (fan-chart pins
+  unchanged).
+  (4) **E3** the handbook §3.2 UC trend-cycle model (Y = C + tau exactly,
+  AR(2) cycle with a drift, RW trend): compiled matrices == the hand-
+  built (2.6)-(2.7) construction with the `_const` augmentation
+  bit-identically at 50 prior draws; the KF runs with R = 0 (S PD by the
+  rank([M | Z B]) = m rule, checked at a generic parameter point at
+  compile time; a shock-free row no state shock explains is rejected);
+  DK draws reproduce Y = C + tau per period to ~1e-9; HD identity ~1e-14.
+  (5) **E5** the recursive bivariate VAR: the substituted rows equal the
+  hand substitution exactly (A, M = [[1, 0], [a0, 1]], R = M D M'), the
+  structural impact matrix equals chol(R) (rtol 1e-8), the measurement
+  shocks are recovered exactly through the triangular loading, the HD
+  bars (incl. the new `const` bar) reconstruct both observables to ~1e-9;
+  the FIT ORACLE on the handbook's Chapter 2 data (US GDP growth and
+  inflation 1948Q1-2010Q4, VAR(2), N(0, 10) priors, 4 x 400/400):
+  fit-time mirror check passed (max relative diff ~3e-13 at the 5 draws); every reduced-form posterior mean within
+  0.25 posterior sd of OLS; the reduced-form Sigma = M D M' within 10% of
+  the OLS residual covariance; the engine's impact matrix within 10% of
+  chol(Sigma) with the e_pi -> y impact exactly 0.
+  (6) **Stan gates** (the S6 fixed_param mechanism at 50 prior draws,
+  `tests/test_s8_stan.py`): E0 (const state; n = 0), E1 (drift), E2, E3
+  (singular R), E5 (full R) programs all mirror the Python side --
+  max relative |diff| 3.1e-12 (the recursive VAR at a flat-prior |a0| ~ 10; every other program <= 1e-13). **A gate rule change, recorded:** the
+  flat-prior draws of the handbook models reach |loglik| ~ 1e7-1e9
+  (residuals of 1e3 at sigma ~ 0.05), where identical float64 arithmetic
+  differs by 1e-14-1e-16 RELATIVE, i.e. 1e-7-1e-6 absolute -- G1's
+  absolute 1e-8 gate cannot be met by any implementation there. The
+  mirror criterion is now per point |Stan - Python| < max(atol = 1e-8,
+  rtol * |loglik|) with rtol = 1e-11 (`qc.mirror_rtol`, outside the run
+  identity like every QC field; `diagnostics.json` records
+  `max_rel_diff`). For every hand family and every S7 gate |loglik| is
+  ~1e2-1e3, where atol stays the binding (unchanged) rule: lw_sv/ucsv's
+  observed ~1e-11 absolute are 1e-13 relative. rtol 1e-11 rather than
+  1e-12 because a recursive VAR at a flat-prior |a0| ~ 10 loses ~4 digits
+  in the innovation Cholesky's cancellation R22 - L21^2 (observed
+  3.1e-12 relative between Stan's and LAPACK's factorizations).
+  (7) **The RTS smoother** (`smoother._rts_smooth`) now handles a
+  predicted covariance with EXACTLY zero rows/columns (the deterministic
+  unit state: P00 = 0 there, no shock loads it, F P F' keeps the zero
+  exact) by the Cholesky solve on the non-deterministic sub-block with
+  zero gain columns for the deterministic slots -- the Moore-Penrose RTS
+  gain for that structure; a PD predicted covariance never enters the
+  branch (condition: an exact 0.0 diagonal), so G5a's arithmetic is
+  untouched. Found by the E1/E3 tests (LinAlgError), not by design.
+  (8) **`StateSpaceMeta.measurement_loadings`** (S5's named-metadata rule
+  extended to the measurement side): declared only when a shock loads a
+  row other than its own or a row has no shock; `None` for every hand
+  family and every S7 model, so `LW_STATE_META` / `UCSV_STATE_META` and
+  their consumers are unchanged bit for bit (the full suite's 382 tests
+  pass with the change set). The numeric loading matrix `M` travels per
+  draw (`DrawMatrices.M`) because the recursive coefficients ARE
+  parameters; `recover_shocks`, `observable_bars`, `impulse_response`,
+  `simulate_forward` take it optionally.
+  (9) **WP2**: `au.var` / `au.var_parts` (recursive VAR(p), intercept as
+  parameter / steady-state / none, exogenous blocks), `au.minnesota_priors`
+  reproducing Chapter 2 example 1's H exactly (pinned), the Villani
+  steady-state form as constant states whose KF likelihood equals the
+  closed-form marginal over the long-run means (30 points, < 1e-9
+  relative; the first draft put the intercept identity of the REDUCED
+  form into the RECURSIVE equation and was caught by this oracle at 8%),
+  and FEVD in the generic layer (`results_core.fevd`; the `fevd` output
+  module -- every authored report gains one figure, the S7 pipeline test
+  updated accordingly).
+  (10) **WP3**: `postprocess.sign_restrictions` (Haar QR with the getqr
+  sign convention -- pinned against the handbook's construction; column
+  search + flips; identified shocks first; closest-to-median variant) and
+  `postprocess.conditional_forecast` (WZ mean/covariance through the SVD
+  of R rather than pinv(RR') -- the same quantities, conditions reproduced
+  to 1e-10 on synthetic draws and 1e-8 on posterior draws where the
+  RR' route left 2e-7). Tests on synthetic draws: Sigma invariant under
+  every retained rotation, restrictions satisfied, contradictory
+  restrictions reject everything; the conditioned path exact; with no
+  conditions the same standard normals through the engine give the same
+  path (the zero-noise-seam doctrine) and the draw mean converges to the
+  unconditional path.
+  (11) **Judgment calls:** the Const column is x column 0 (conflict 5);
+  the `_const` state is invisible to the user (not in `initial_state`,
+  not plotted, but in the state-vector comment and the HD `init` bar,
+  whose label now says "incl. drift"); explosive prior-predictive paths
+  are excluded from the figure and COUNTED in its title rather than
+  clipped silently (a flat-prior VAR's prior mass is mostly explosive);
+  `nothing is stochastic` (no shock anywhere) is rejected; two shocks in
+  one equation stay rejected (the second reaches a row only through
+  another observable's equation).
+  **Numerics-reviewer pass over WP1** (all eight items traced by hand, the
+  E3 condition re-derived -- the code's rank([M | Z B]) = m over ALL
+  rows is the cleaner sufficient condition, holding for every t >= 1 and
+  every SV realization since it depends on coefficient rank, not variance
+  magnitude): NO must-fix. SHOULD-FIX, all applied: a dead `R_numeric`
+  render-context key removed; the `ExogForecastRule` protocol docstring
+  now states that a lag-0-referenced series' rule returns the CURRENT
+  value; the FEVD figure states its median-renormalization convention on
+  the figure (ENGINEERING.md's figure rule). NOTE applied: `stan_data`
+  omits `xi00`/`P00` when n = 0, in lockstep with the template. NOTE
+  accepted as a correctly caught latent gap: the old `exog_lag_depth > 0`
+  rule for "needs a forecast rule" would have let a purely contemporaneous
+  exogenous series reach the engine with no rule; `exog_is_referenced`
+  replaces it at both call sites.
+
+
 - **2026-09-04 — S7 COMPLETE (stage-end entry).** Everything in
   `plans/S7-plan.md` is delivered and green on
   `claude/s7-equation-dsl-og1xvc` (pushed; not merged, no PR opened, per

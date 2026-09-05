@@ -1,0 +1,1247 @@
+model:
+  family: authored
+  options:
+    family: authored
+    name: ch3_dfm_uk_panel
+    observables:
+    - s01_consumption
+    - s02_govt_consumption
+    - s03_construction
+    - s04_exports
+    - s05_imports
+    - s06_capital
+    - s07_gdp
+    - s08_manufacturing
+    - s09_transport_storage_communication
+    - s10_total_output
+    - s11_distribution_hotels_catering
+    - s12_all_production_industries
+    - s13_electricity_gas_and_water_supply
+    - s14_manuf_of_food_drink_tobacco
+    - s15_manuf_coke_petroleum_prod_nuclear_fuels
+    - s16_manuf_of_chemicals_man_made_fibres
+    - s17_total_production
+    - s18_rpi_total_food
+    - s19_rpi_total_non_food
+    - s20_rpi_all_items_other_than_seasonal_food
+    - s21_cpi
+    - s22_gdp_deflator
+    - s23_wages
+    - s24_rpix
+    - s25_rpi
+    - s26_m4_total
+    - s27_m4_households
+    - s28_m4_pnfcs
+    - s29_m4_ofcs
+    - s30_m0
+    - s31_m4_lending
+    - s32_m4l_households
+    - s33_m4l_pnfcs
+    - s34_house_prices
+    - s35_dividend_yield
+    - s36_pe_ratio
+    - s37_ftse_all_share_index
+    - s38_pounds_dollar
+    - s39_pounds_euro
+    - s40_pounds_yen
+    exogenous: []
+    equations:
+      measurement:
+      - s01_consumption = f1 + e_s01_consumption
+      - s02_govt_consumption = f2 + e_s02_govt_consumption
+      - s03_construction = f3 + e_s03_construction
+      - s04_exports = l_s04_exports_f1*f1 + l_s04_exports_f2*f2 + l_s04_exports_f3*f3
+        + e_s04_exports
+      - s05_imports = l_s05_imports_f1*f1 + l_s05_imports_f2*f2 + l_s05_imports_f3*f3
+        + e_s05_imports
+      - s06_capital = l_s06_capital_f1*f1 + l_s06_capital_f2*f2 + l_s06_capital_f3*f3
+        + e_s06_capital
+      - s07_gdp = l_s07_gdp_f1*f1 + l_s07_gdp_f2*f2 + l_s07_gdp_f3*f3 + e_s07_gdp
+      - s08_manufacturing = l_s08_manufacturing_f1*f1 + l_s08_manufacturing_f2*f2
+        + l_s08_manufacturing_f3*f3 + e_s08_manufacturing
+      - s09_transport_storage_communication = l_s09_transport_storage_communication_f1*f1
+        + l_s09_transport_storage_communication_f2*f2 + l_s09_transport_storage_communication_f3*f3
+        + e_s09_transport_storage_communication
+      - s10_total_output = l_s10_total_output_f1*f1 + l_s10_total_output_f2*f2 + l_s10_total_output_f3*f3
+        + e_s10_total_output
+      - s11_distribution_hotels_catering = l_s11_distribution_hotels_catering_f1*f1
+        + l_s11_distribution_hotels_catering_f2*f2 + l_s11_distribution_hotels_catering_f3*f3
+        + e_s11_distribution_hotels_catering
+      - s12_all_production_industries = l_s12_all_production_industries_f1*f1 + l_s12_all_production_industries_f2*f2
+        + l_s12_all_production_industries_f3*f3 + e_s12_all_production_industries
+      - s13_electricity_gas_and_water_supply = l_s13_electricity_gas_and_water_supply_f1*f1
+        + l_s13_electricity_gas_and_water_supply_f2*f2 + l_s13_electricity_gas_and_water_supply_f3*f3
+        + e_s13_electricity_gas_and_water_supply
+      - s14_manuf_of_food_drink_tobacco = l_s14_manuf_of_food_drink_tobacco_f1*f1
+        + l_s14_manuf_of_food_drink_tobacco_f2*f2 + l_s14_manuf_of_food_drink_tobacco_f3*f3
+        + e_s14_manuf_of_food_drink_tobacco
+      - s15_manuf_coke_petroleum_prod_nuclear_fuels = l_s15_manuf_coke_petroleum_prod_nuclear_fuels_f1*f1
+        + l_s15_manuf_coke_petroleum_prod_nuclear_fuels_f2*f2 + l_s15_manuf_coke_petroleum_prod_nuclear_fuels_f3*f3
+        + e_s15_manuf_coke_petroleum_prod_nuclear_fuels
+      - s16_manuf_of_chemicals_man_made_fibres = l_s16_manuf_of_chemicals_man_made_fibres_f1*f1
+        + l_s16_manuf_of_chemicals_man_made_fibres_f2*f2 + l_s16_manuf_of_chemicals_man_made_fibres_f3*f3
+        + e_s16_manuf_of_chemicals_man_made_fibres
+      - s17_total_production = l_s17_total_production_f1*f1 + l_s17_total_production_f2*f2
+        + l_s17_total_production_f3*f3 + e_s17_total_production
+      - s18_rpi_total_food = l_s18_rpi_total_food_f1*f1 + l_s18_rpi_total_food_f2*f2
+        + l_s18_rpi_total_food_f3*f3 + e_s18_rpi_total_food
+      - s19_rpi_total_non_food = l_s19_rpi_total_non_food_f1*f1 + l_s19_rpi_total_non_food_f2*f2
+        + l_s19_rpi_total_non_food_f3*f3 + e_s19_rpi_total_non_food
+      - s20_rpi_all_items_other_than_seasonal_food = l_s20_rpi_all_items_other_than_seasonal_food_f1*f1
+        + l_s20_rpi_all_items_other_than_seasonal_food_f2*f2 + l_s20_rpi_all_items_other_than_seasonal_food_f3*f3
+        + e_s20_rpi_all_items_other_than_seasonal_food
+      - s21_cpi = l_s21_cpi_f1*f1 + l_s21_cpi_f2*f2 + l_s21_cpi_f3*f3 + e_s21_cpi
+      - s22_gdp_deflator = l_s22_gdp_deflator_f1*f1 + l_s22_gdp_deflator_f2*f2 + l_s22_gdp_deflator_f3*f3
+        + e_s22_gdp_deflator
+      - s23_wages = l_s23_wages_f1*f1 + l_s23_wages_f2*f2 + l_s23_wages_f3*f3 + e_s23_wages
+      - s24_rpix = l_s24_rpix_f1*f1 + l_s24_rpix_f2*f2 + l_s24_rpix_f3*f3 + e_s24_rpix
+      - s25_rpi = l_s25_rpi_f1*f1 + l_s25_rpi_f2*f2 + l_s25_rpi_f3*f3 + e_s25_rpi
+      - s26_m4_total = l_s26_m4_total_f1*f1 + l_s26_m4_total_f2*f2 + l_s26_m4_total_f3*f3
+        + e_s26_m4_total
+      - s27_m4_households = l_s27_m4_households_f1*f1 + l_s27_m4_households_f2*f2
+        + l_s27_m4_households_f3*f3 + e_s27_m4_households
+      - s28_m4_pnfcs = l_s28_m4_pnfcs_f1*f1 + l_s28_m4_pnfcs_f2*f2 + l_s28_m4_pnfcs_f3*f3
+        + e_s28_m4_pnfcs
+      - s29_m4_ofcs = l_s29_m4_ofcs_f1*f1 + l_s29_m4_ofcs_f2*f2 + l_s29_m4_ofcs_f3*f3
+        + e_s29_m4_ofcs
+      - s30_m0 = l_s30_m0_f1*f1 + l_s30_m0_f2*f2 + l_s30_m0_f3*f3 + e_s30_m0
+      - s31_m4_lending = l_s31_m4_lending_f1*f1 + l_s31_m4_lending_f2*f2 + l_s31_m4_lending_f3*f3
+        + e_s31_m4_lending
+      - s32_m4l_households = l_s32_m4l_households_f1*f1 + l_s32_m4l_households_f2*f2
+        + l_s32_m4l_households_f3*f3 + e_s32_m4l_households
+      - s33_m4l_pnfcs = l_s33_m4l_pnfcs_f1*f1 + l_s33_m4l_pnfcs_f2*f2 + l_s33_m4l_pnfcs_f3*f3
+        + e_s33_m4l_pnfcs
+      - s34_house_prices = l_s34_house_prices_f1*f1 + l_s34_house_prices_f2*f2 + l_s34_house_prices_f3*f3
+        + e_s34_house_prices
+      - s35_dividend_yield = l_s35_dividend_yield_f1*f1 + l_s35_dividend_yield_f2*f2
+        + l_s35_dividend_yield_f3*f3 + e_s35_dividend_yield
+      - s36_pe_ratio = l_s36_pe_ratio_f1*f1 + l_s36_pe_ratio_f2*f2 + l_s36_pe_ratio_f3*f3
+        + e_s36_pe_ratio
+      - s37_ftse_all_share_index = l_s37_ftse_all_share_index_f1*f1 + l_s37_ftse_all_share_index_f2*f2
+        + l_s37_ftse_all_share_index_f3*f3 + e_s37_ftse_all_share_index
+      - s38_pounds_dollar = l_s38_pounds_dollar_f1*f1 + l_s38_pounds_dollar_f2*f2
+        + l_s38_pounds_dollar_f3*f3 + e_s38_pounds_dollar
+      - s39_pounds_euro = l_s39_pounds_euro_f1*f1 + l_s39_pounds_euro_f2*f2 + l_s39_pounds_euro_f3*f3
+        + e_s39_pounds_euro
+      - s40_pounds_yen = l_s40_pounds_yen_f1*f1 + l_s40_pounds_yen_f2*f2 + l_s40_pounds_yen_f3*f3
+        + e_s40_pounds_yen
+      transition:
+      - f1 = b_f1_f1_1*f1[-1] + b_f1_f2_1*f2[-1] + b_f1_f3_1*f3[-1] + b_f1_f1_2*f1[-2]
+        + b_f1_f2_2*f2[-2] + b_f1_f3_2*f3[-2] + eta_f1
+      - f2 = b_f2_f1_1*f1[-1] + b_f2_f2_1*f2[-1] + b_f2_f3_1*f3[-1] + b_f2_f1_2*f1[-2]
+        + b_f2_f2_2*f2[-2] + b_f2_f3_2*f3[-2] + eta_f2
+      - f3 = b_f3_f1_1*f1[-1] + b_f3_f2_1*f2[-1] + b_f3_f3_1*f3[-1] + b_f3_f1_2*f1[-2]
+        + b_f3_f2_2*f2[-2] + b_f3_f3_2*f3[-2] + eta_f3
+    parameters:
+      sd_s01_consumption:
+        dist: half_normal
+        sd: 1.0
+      sd_s02_govt_consumption:
+        dist: half_normal
+        sd: 1.0
+      sd_s03_construction:
+        dist: half_normal
+        sd: 1.0
+      l_s04_exports_f1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s04_exports_f2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s04_exports_f3:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      sd_s04_exports:
+        dist: half_normal
+        sd: 1.0
+      l_s05_imports_f1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s05_imports_f2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s05_imports_f3:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      sd_s05_imports:
+        dist: half_normal
+        sd: 1.0
+      l_s06_capital_f1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s06_capital_f2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s06_capital_f3:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      sd_s06_capital:
+        dist: half_normal
+        sd: 1.0
+      l_s07_gdp_f1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s07_gdp_f2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s07_gdp_f3:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      sd_s07_gdp:
+        dist: half_normal
+        sd: 1.0
+      l_s08_manufacturing_f1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s08_manufacturing_f2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s08_manufacturing_f3:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      sd_s08_manufacturing:
+        dist: half_normal
+        sd: 1.0
+      l_s09_transport_storage_communication_f1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s09_transport_storage_communication_f2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s09_transport_storage_communication_f3:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      sd_s09_transport_storage_communication:
+        dist: half_normal
+        sd: 1.0
+      l_s10_total_output_f1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s10_total_output_f2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s10_total_output_f3:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      sd_s10_total_output:
+        dist: half_normal
+        sd: 1.0
+      l_s11_distribution_hotels_catering_f1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s11_distribution_hotels_catering_f2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s11_distribution_hotels_catering_f3:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      sd_s11_distribution_hotels_catering:
+        dist: half_normal
+        sd: 1.0
+      l_s12_all_production_industries_f1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s12_all_production_industries_f2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s12_all_production_industries_f3:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      sd_s12_all_production_industries:
+        dist: half_normal
+        sd: 1.0
+      l_s13_electricity_gas_and_water_supply_f1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s13_electricity_gas_and_water_supply_f2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s13_electricity_gas_and_water_supply_f3:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      sd_s13_electricity_gas_and_water_supply:
+        dist: half_normal
+        sd: 1.0
+      l_s14_manuf_of_food_drink_tobacco_f1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s14_manuf_of_food_drink_tobacco_f2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s14_manuf_of_food_drink_tobacco_f3:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      sd_s14_manuf_of_food_drink_tobacco:
+        dist: half_normal
+        sd: 1.0
+      l_s15_manuf_coke_petroleum_prod_nuclear_fuels_f1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s15_manuf_coke_petroleum_prod_nuclear_fuels_f2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s15_manuf_coke_petroleum_prod_nuclear_fuels_f3:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      sd_s15_manuf_coke_petroleum_prod_nuclear_fuels:
+        dist: half_normal
+        sd: 1.0
+      l_s16_manuf_of_chemicals_man_made_fibres_f1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s16_manuf_of_chemicals_man_made_fibres_f2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s16_manuf_of_chemicals_man_made_fibres_f3:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      sd_s16_manuf_of_chemicals_man_made_fibres:
+        dist: half_normal
+        sd: 1.0
+      l_s17_total_production_f1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s17_total_production_f2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s17_total_production_f3:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      sd_s17_total_production:
+        dist: half_normal
+        sd: 1.0
+      l_s18_rpi_total_food_f1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s18_rpi_total_food_f2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s18_rpi_total_food_f3:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      sd_s18_rpi_total_food:
+        dist: half_normal
+        sd: 1.0
+      l_s19_rpi_total_non_food_f1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s19_rpi_total_non_food_f2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s19_rpi_total_non_food_f3:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      sd_s19_rpi_total_non_food:
+        dist: half_normal
+        sd: 1.0
+      l_s20_rpi_all_items_other_than_seasonal_food_f1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s20_rpi_all_items_other_than_seasonal_food_f2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s20_rpi_all_items_other_than_seasonal_food_f3:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      sd_s20_rpi_all_items_other_than_seasonal_food:
+        dist: half_normal
+        sd: 1.0
+      l_s21_cpi_f1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s21_cpi_f2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s21_cpi_f3:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      sd_s21_cpi:
+        dist: half_normal
+        sd: 1.0
+      l_s22_gdp_deflator_f1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s22_gdp_deflator_f2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s22_gdp_deflator_f3:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      sd_s22_gdp_deflator:
+        dist: half_normal
+        sd: 1.0
+      l_s23_wages_f1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s23_wages_f2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s23_wages_f3:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      sd_s23_wages:
+        dist: half_normal
+        sd: 1.0
+      l_s24_rpix_f1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s24_rpix_f2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s24_rpix_f3:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      sd_s24_rpix:
+        dist: half_normal
+        sd: 1.0
+      l_s25_rpi_f1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s25_rpi_f2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s25_rpi_f3:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      sd_s25_rpi:
+        dist: half_normal
+        sd: 1.0
+      l_s26_m4_total_f1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s26_m4_total_f2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s26_m4_total_f3:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      sd_s26_m4_total:
+        dist: half_normal
+        sd: 1.0
+      l_s27_m4_households_f1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s27_m4_households_f2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s27_m4_households_f3:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      sd_s27_m4_households:
+        dist: half_normal
+        sd: 1.0
+      l_s28_m4_pnfcs_f1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s28_m4_pnfcs_f2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s28_m4_pnfcs_f3:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      sd_s28_m4_pnfcs:
+        dist: half_normal
+        sd: 1.0
+      l_s29_m4_ofcs_f1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s29_m4_ofcs_f2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s29_m4_ofcs_f3:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      sd_s29_m4_ofcs:
+        dist: half_normal
+        sd: 1.0
+      l_s30_m0_f1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s30_m0_f2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s30_m0_f3:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      sd_s30_m0:
+        dist: half_normal
+        sd: 1.0
+      l_s31_m4_lending_f1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s31_m4_lending_f2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s31_m4_lending_f3:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      sd_s31_m4_lending:
+        dist: half_normal
+        sd: 1.0
+      l_s32_m4l_households_f1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s32_m4l_households_f2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s32_m4l_households_f3:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      sd_s32_m4l_households:
+        dist: half_normal
+        sd: 1.0
+      l_s33_m4l_pnfcs_f1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s33_m4l_pnfcs_f2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s33_m4l_pnfcs_f3:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      sd_s33_m4l_pnfcs:
+        dist: half_normal
+        sd: 1.0
+      l_s34_house_prices_f1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s34_house_prices_f2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s34_house_prices_f3:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      sd_s34_house_prices:
+        dist: half_normal
+        sd: 1.0
+      l_s35_dividend_yield_f1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s35_dividend_yield_f2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s35_dividend_yield_f3:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      sd_s35_dividend_yield:
+        dist: half_normal
+        sd: 1.0
+      l_s36_pe_ratio_f1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s36_pe_ratio_f2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s36_pe_ratio_f3:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      sd_s36_pe_ratio:
+        dist: half_normal
+        sd: 1.0
+      l_s37_ftse_all_share_index_f1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s37_ftse_all_share_index_f2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s37_ftse_all_share_index_f3:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      sd_s37_ftse_all_share_index:
+        dist: half_normal
+        sd: 1.0
+      l_s38_pounds_dollar_f1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s38_pounds_dollar_f2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s38_pounds_dollar_f3:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      sd_s38_pounds_dollar:
+        dist: half_normal
+        sd: 1.0
+      l_s39_pounds_euro_f1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s39_pounds_euro_f2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s39_pounds_euro_f3:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      sd_s39_pounds_euro:
+        dist: half_normal
+        sd: 1.0
+      l_s40_pounds_yen_f1:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s40_pounds_yen_f2:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_s40_pounds_yen_f3:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      sd_s40_pounds_yen:
+        dist: half_normal
+        sd: 1.0
+      b_f1_f1_1:
+        dist: normal
+        mu: 0.5
+        sd: 0.5
+        lower: null
+        upper: null
+      b_f1_f2_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.5
+        lower: null
+        upper: null
+      b_f1_f3_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.5
+        lower: null
+        upper: null
+      b_f1_f1_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.5
+        lower: null
+        upper: null
+      b_f1_f2_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.5
+        lower: null
+        upper: null
+      b_f1_f3_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.5
+        lower: null
+        upper: null
+      s_f1:
+        dist: half_normal
+        sd: 1.0
+      b_f2_f1_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.5
+        lower: null
+        upper: null
+      b_f2_f2_1:
+        dist: normal
+        mu: 0.5
+        sd: 0.5
+        lower: null
+        upper: null
+      b_f2_f3_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.5
+        lower: null
+        upper: null
+      b_f2_f1_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.5
+        lower: null
+        upper: null
+      b_f2_f2_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.5
+        lower: null
+        upper: null
+      b_f2_f3_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.5
+        lower: null
+        upper: null
+      s_f2:
+        dist: half_normal
+        sd: 1.0
+      b_f3_f1_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.5
+        lower: null
+        upper: null
+      b_f3_f2_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.5
+        lower: null
+        upper: null
+      b_f3_f3_1:
+        dist: normal
+        mu: 0.5
+        sd: 0.5
+        lower: null
+        upper: null
+      b_f3_f1_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.5
+        lower: null
+        upper: null
+      b_f3_f2_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.5
+        lower: null
+        upper: null
+      b_f3_f3_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.5
+        lower: null
+        upper: null
+      s_f3:
+        dist: half_normal
+        sd: 1.0
+    shocks:
+      e_s01_consumption:
+        sd: sd_s01_consumption
+        sv: null
+      e_s02_govt_consumption:
+        sd: sd_s02_govt_consumption
+        sv: null
+      e_s03_construction:
+        sd: sd_s03_construction
+        sv: null
+      e_s04_exports:
+        sd: sd_s04_exports
+        sv: null
+      e_s05_imports:
+        sd: sd_s05_imports
+        sv: null
+      e_s06_capital:
+        sd: sd_s06_capital
+        sv: null
+      e_s07_gdp:
+        sd: sd_s07_gdp
+        sv: null
+      e_s08_manufacturing:
+        sd: sd_s08_manufacturing
+        sv: null
+      e_s09_transport_storage_communication:
+        sd: sd_s09_transport_storage_communication
+        sv: null
+      e_s10_total_output:
+        sd: sd_s10_total_output
+        sv: null
+      e_s11_distribution_hotels_catering:
+        sd: sd_s11_distribution_hotels_catering
+        sv: null
+      e_s12_all_production_industries:
+        sd: sd_s12_all_production_industries
+        sv: null
+      e_s13_electricity_gas_and_water_supply:
+        sd: sd_s13_electricity_gas_and_water_supply
+        sv: null
+      e_s14_manuf_of_food_drink_tobacco:
+        sd: sd_s14_manuf_of_food_drink_tobacco
+        sv: null
+      e_s15_manuf_coke_petroleum_prod_nuclear_fuels:
+        sd: sd_s15_manuf_coke_petroleum_prod_nuclear_fuels
+        sv: null
+      e_s16_manuf_of_chemicals_man_made_fibres:
+        sd: sd_s16_manuf_of_chemicals_man_made_fibres
+        sv: null
+      e_s17_total_production:
+        sd: sd_s17_total_production
+        sv: null
+      e_s18_rpi_total_food:
+        sd: sd_s18_rpi_total_food
+        sv: null
+      e_s19_rpi_total_non_food:
+        sd: sd_s19_rpi_total_non_food
+        sv: null
+      e_s20_rpi_all_items_other_than_seasonal_food:
+        sd: sd_s20_rpi_all_items_other_than_seasonal_food
+        sv: null
+      e_s21_cpi:
+        sd: sd_s21_cpi
+        sv: null
+      e_s22_gdp_deflator:
+        sd: sd_s22_gdp_deflator
+        sv: null
+      e_s23_wages:
+        sd: sd_s23_wages
+        sv: null
+      e_s24_rpix:
+        sd: sd_s24_rpix
+        sv: null
+      e_s25_rpi:
+        sd: sd_s25_rpi
+        sv: null
+      e_s26_m4_total:
+        sd: sd_s26_m4_total
+        sv: null
+      e_s27_m4_households:
+        sd: sd_s27_m4_households
+        sv: null
+      e_s28_m4_pnfcs:
+        sd: sd_s28_m4_pnfcs
+        sv: null
+      e_s29_m4_ofcs:
+        sd: sd_s29_m4_ofcs
+        sv: null
+      e_s30_m0:
+        sd: sd_s30_m0
+        sv: null
+      e_s31_m4_lending:
+        sd: sd_s31_m4_lending
+        sv: null
+      e_s32_m4l_households:
+        sd: sd_s32_m4l_households
+        sv: null
+      e_s33_m4l_pnfcs:
+        sd: sd_s33_m4l_pnfcs
+        sv: null
+      e_s34_house_prices:
+        sd: sd_s34_house_prices
+        sv: null
+      e_s35_dividend_yield:
+        sd: sd_s35_dividend_yield
+        sv: null
+      e_s36_pe_ratio:
+        sd: sd_s36_pe_ratio
+        sv: null
+      e_s37_ftse_all_share_index:
+        sd: sd_s37_ftse_all_share_index
+        sv: null
+      e_s38_pounds_dollar:
+        sd: sd_s38_pounds_dollar
+        sv: null
+      e_s39_pounds_euro:
+        sd: sd_s39_pounds_euro
+        sv: null
+      e_s40_pounds_yen:
+        sd: sd_s40_pounds_yen
+        sv: null
+      eta_f1:
+        sd: s_f1
+        sv: null
+      eta_f2:
+        sd: s_f2
+        sv: null
+      eta_f3:
+        sd: s_f3
+        sv: null
+    initial_state:
+      f1:
+        mean: 0.0
+        sd: 1.0
+      f2:
+        mean: 0.0
+        sd: 1.0
+      f3:
+        mean: 0.0
+        sd: 1.0
+    forecast_rules: {}
+data:
+  file: ../data/ch3_uk_panel_dfm.csv
+  date_column: date
+  mapping:
+    s01_consumption: s01_consumption
+    s02_govt_consumption: s02_govt_consumption
+    s03_construction: s03_construction
+    s04_exports: s04_exports
+    s05_imports: s05_imports
+    s06_capital: s06_capital
+    s07_gdp: s07_gdp
+    s08_manufacturing: s08_manufacturing
+    s09_transport_storage_communication: s09_transport_storage_communication
+    s10_total_output: s10_total_output
+    s11_distribution_hotels_catering: s11_distribution_hotels_catering
+    s12_all_production_industries: s12_all_production_industries
+    s13_electricity_gas_and_water_supply: s13_electricity_gas_and_water_supply
+    s14_manuf_of_food_drink_tobacco: s14_manuf_of_food_drink_tobacco
+    s15_manuf_coke_petroleum_prod_nuclear_fuels: s15_manuf_coke_petroleum_prod_nuclear_fuels
+    s16_manuf_of_chemicals_man_made_fibres: s16_manuf_of_chemicals_man_made_fibres
+    s17_total_production: s17_total_production
+    s18_rpi_total_food: s18_rpi_total_food
+    s19_rpi_total_non_food: s19_rpi_total_non_food
+    s20_rpi_all_items_other_than_seasonal_food: s20_rpi_all_items_other_than_seasonal_food
+    s21_cpi: s21_cpi
+    s22_gdp_deflator: s22_gdp_deflator
+    s23_wages: s23_wages
+    s24_rpix: s24_rpix
+    s25_rpi: s25_rpi
+    s26_m4_total: s26_m4_total
+    s27_m4_households: s27_m4_households
+    s28_m4_pnfcs: s28_m4_pnfcs
+    s29_m4_ofcs: s29_m4_ofcs
+    s30_m0: s30_m0
+    s31_m4_lending: s31_m4_lending
+    s32_m4l_households: s32_m4l_households
+    s33_m4l_pnfcs: s33_m4l_pnfcs
+    s34_house_prices: s34_house_prices
+    s35_dividend_yield: s35_dividend_yield
+    s36_pe_ratio: s36_pe_ratio
+    s37_ftse_all_share_index: s37_ftse_all_share_index
+    s38_pounds_dollar: s38_pounds_dollar
+    s39_pounds_euro: s39_pounds_euro
+    s40_pounds_yen: s40_pounds_yen
+  sample:
+    start: null
+    end: null
+priors: {}
+sampler:
+  chains: 2
+  warmup: 150
+  sampling: 150
+  adapt_delta: 0.8
+  max_treedepth: 10
+  seed: 20260905
+outputs:
+  horizon: 4
+  irf_horizon: 16
+  irf_vol_reference: end_of_sample
+  smoother_draws:
+    thin: 5
+  prior_predictive_draws: 10
+qc:
+  mirror_check: true
+  mirror_points: 5
+  mirror_tolerance: 1.0e-08
+  mirror_rtol: 1.0e-11
+  mirror_seed: 20260904

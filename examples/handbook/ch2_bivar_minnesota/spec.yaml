@@ -1,0 +1,127 @@
+model:
+  family: authored
+  options:
+    family: authored
+    name: ch2_bivar_minnesota
+    observables:
+    - y
+    - pi
+    exogenous: []
+    equations:
+      measurement:
+      - y = c_y + b_y_y_1*y[-1] + b_y_pi_1*pi[-1] + b_y_y_2*y[-2] + b_y_pi_2*pi[-2]
+        + e_y
+      - pi = c_pi + a0_pi_y*y + b_pi_y_1*y[-1] + b_pi_pi_1*pi[-1] + b_pi_y_2*y[-2]
+        + b_pi_pi_2*pi[-2] + e_pi
+      transition: []
+    parameters:
+      c_y:
+        dist: normal
+        mu: 0.0
+        sd: 1.4130701982777312
+        lower: null
+        upper: null
+      b_y_y_1:
+        dist: normal
+        mu: 1.0
+        sd: 1.0
+        lower: null
+        upper: null
+      b_y_pi_1:
+        dist: normal
+        mu: 0.0
+        sd: 1.6247068943676586
+        lower: null
+        upper: null
+      b_y_y_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.5
+        lower: null
+        upper: null
+      b_y_pi_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.8123534471838293
+        lower: null
+        upper: null
+      sigma_y:
+        dist: half_normal
+        sd: 5.0
+      c_pi:
+        dist: normal
+        mu: 0.0
+        sd: 0.8697385375641573
+        lower: null
+        upper: null
+      a0_pi_y:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      b_pi_y_1:
+        dist: normal
+        mu: 0.0
+        sd: 0.6154956339920028
+        lower: null
+        upper: null
+      b_pi_pi_1:
+        dist: normal
+        mu: 1.0
+        sd: 1.0
+        lower: null
+        upper: null
+      b_pi_y_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.3077478169960014
+        lower: null
+        upper: null
+      b_pi_pi_2:
+        dist: normal
+        mu: 0.0
+        sd: 0.5
+        lower: null
+        upper: null
+      sigma_pi:
+        dist: half_normal
+        sd: 5.0
+    shocks:
+      e_y:
+        sd: sigma_y
+        sv: null
+      e_pi:
+        sd: sigma_pi
+        sv: null
+    initial_state: {}
+    forecast_rules: {}
+data:
+  file: ../data/ch2_datain.csv
+  date_column: date
+  mapping:
+    y: gdp_growth
+    pi: inflation
+  sample:
+    start: null
+    end: null
+priors: {}
+sampler:
+  chains: 2
+  warmup: 300
+  sampling: 300
+  adapt_delta: 0.8
+  max_treedepth: 10
+  seed: 20260905
+outputs:
+  horizon: 12
+  irf_horizon: 12
+  irf_vol_reference: end_of_sample
+  smoother_draws: all
+  prior_predictive_draws: 200
+qc:
+  mirror_check: true
+  mirror_points: 5
+  mirror_tolerance: 1.0e-08
+  mirror_rtol: 1.0e-11
+  mirror_seed: 20260904

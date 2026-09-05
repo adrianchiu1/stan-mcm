@@ -1,0 +1,41 @@
+series,name,transform,fast
+s01_consumption,Consumption,1,0
+s02_govt_consumption,Govt Consumption,1,0
+s03_construction,Construction,1,0
+s04_exports,Exports,1,0
+s05_imports,Imports,1,0
+s06_capital,Capital,1,0
+s07_gdp,GDP,1,0
+s08_manufacturing,Manufacturing,1,0
+s09_transport_storage_communication,Transport storage & communication,1,0
+s10_total_output,Total Output,1,0
+s11_distribution_hotels_catering,"Distribution, hotels & catering",1,0
+s12_all_production_industries,All production industries,1,0
+s13_electricity_gas_and_water_supply,"Electricity, gas and water supply:",1,0
+s14_manuf_of_food_drink_tobacco,"Manuf of food, drink & tobacco",1,0
+s15_manuf_coke_petroleum_prod_nuclear_fuels,Manuf coke/petroleum prod/nuclear fuels,1,0
+s16_manuf_of_chemicals_man_made_fibres,Manuf of chemicals & man-made fibres,1,0
+s17_total_production,Total Production,2,0
+s18_rpi_total_food,RPI Total Food,1,0
+s19_rpi_total_non_food,RPI Total Non-Food,1,0
+s20_rpi_all_items_other_than_seasonal_food,RPI All items other than seasonal Food,1,0
+s21_cpi,CPI,1,0
+s22_gdp_deflator,GDP Deflator,1,0
+s23_wages,Wages,1,0
+s24_rpix,RPIX,1,0
+s25_rpi,RPI,1,0
+s26_m4_total,M4 Total,1,0
+s27_m4_households,M4 Households,1,0
+s28_m4_pnfcs,M4 PNFCs,1,0
+s29_m4_ofcs,M4 OFCs,1,0
+s30_m0,M0,3,0
+s31_m4_lending,M4 Lending,1,0
+s32_m4l_households,M4L Households,1,0
+s33_m4l_pnfcs,M4L PNFCs,1,0
+s34_house_prices,House Prices,1,1
+s35_dividend_yield,Dividend Yield,1,1
+s36_pe_ratio,PE Ratio,1,1
+s37_ftse_all_share_index,FTSE ALL Share Index,1,1
+s38_pounds_dollar,pounds/dollar,1,1
+s39_pounds_euro,pounds/euro,1,1
+s40_pounds_yen,pounds/yen,1,1
