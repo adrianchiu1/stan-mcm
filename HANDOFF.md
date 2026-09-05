@@ -58,7 +58,8 @@ exogenous series (lag 0 included) -- compile and estimate:
   the 90% band at 91% of periods; smoothed RMSE 0.037 vs the handbook
   filter's 0.052 at the true parameters); (c) the TVP-AR(1)-SV recovery
   design (pre-registered constants in DECISIONS.md; a 2-dataset smoke in
-  the fast suite, the 20-dataset gate under `slow`).
+  the fast suite; the 20-dataset gate under `slow` RAN and PASSED:
+  pooled coverage 0.875, per-parameter minimum 0.70 on the SV scale).
 - **Examples** (`examples/handbook/`): `ch3_tvp_regression` (the example
   1/2 DGP simulated once by `make_data.py`), `ch5_tvp_ar1_sv` (UK
   inflation from `inflation.xlsx`, training-sample initial conditions),
@@ -307,11 +308,10 @@ check, `mtk validate`. Details in README.md's ladder table,
    (`ch2_signs_11var`, `ch3_dfm_uk_panel` -- HANDOFF's S8 section said
    how; budget an hour or more each), the FAVAR's rate block (the E5
    substitution on the STATE side), a handbook-example notebook.
-3. **The TVP-AR(1)-SV recovery gate under `slow`**
-   (`tests/test_s9_stan.py::test_oracle_c_recovery_gate_tvp_ar1_sv`,
-   pre-registered in DECISIONS.md): run it when the machine-hours exist
-   and record the verdict; an SBC design for the same model is the
-   natural next pre-registration.
+3. **An SBC design for the TVP-AR(1)-SV** (the recovery gate PASSED at
+   the pre-registered design, DECISIONS.md 2026-09-05; SBC is the next
+   rung -- `authoring.validation.sbc_design` at the same anchors, the
+   G3/G4 constants pre-registered first).
 4. The S7 list, still open: per-authored-model SBC registration + the
    promotion/production layer; `results_lw.py` migration onto
    `results_core.py`; PACF stationarity parameterization for AR blocks;
