@@ -22,10 +22,12 @@ from __future__ import annotations
 
 import importlib
 from dataclasses import dataclass
-from typing import Any, Type
+from typing import Any, Callable, Type
 
 from pydantic import BaseModel
 
+from specs.schema.authored import AuthoredOptions, AuthoredOutputs
+from specs.schema.authored import required_mapping as _authored_required_mapping
 from specs.schema.local_level import LocalLevelOptions
 from specs.schema.lw_sv import LwSvOptions, LwSvOutputs
 from specs.schema.ucsv import UcsvOptions, UcsvOutputs
@@ -78,6 +80,11 @@ class FamilyEntry:
       for ``mtk validate <family>``.
     - ``display_name``: human-readable family name for report titles
       (plain field, not a dotted path).
+    - ``dynamic_required_mapping`` (S7): for a family whose required
+      ``data.mapping`` keys depend on the MODEL DEFINITION (the authored
+      family: its observables + exogenous series), a plain callable
+      ``(options) -> tuple[str, ...]`` consulted instead of the static
+      ``required_mapping``.
     """
 
     options_model: Type[BaseModel]
@@ -95,6 +102,13 @@ class FamilyEntry:
     mirror: str | None = None
     validation_suite: str | None = None
     display_name: str | None = None
+    dynamic_required_mapping: Callable[[Any], tuple[str, ...]] | None = None
+
+    def required_mapping_for(self, options: Any) -> tuple[str, ...]:
+        """The ``data.mapping`` keys this family needs for ``options``."""
+        if self.dynamic_required_mapping is not None:
+            return tuple(self.dynamic_required_mapping(options))
+        return tuple(self.required_mapping)
 
     def resolve(self, capability: str) -> Any:
         """Resolve one of the dotted-path capability fields to the actual
@@ -189,6 +203,28 @@ FAMILY_REGISTRY: dict[str, FamilyEntry] = {
         mirror="macrotoolkit.families.ucsv:MIRROR",
         validation_suite="macrotoolkit.families.ucsv_validation:VALIDATION_SUITE",
         display_name="UCSV",
+    ),
+    # S7: models AUTHORED AS EQUATIONS in the spec. ONE registered family
+    # whose capabilities are generic over the compiled model of the spec
+    # they receive (the per-model bundle is built at load and cached --
+    # plans/S7-plan.md conflict item 3); the template is the one generic
+    # authored.stan.j2, stamped by the compiled structure.
+    "authored": FamilyEntry(
+        options_model=AuthoredOptions,
+        template="authored.stan.j2",
+        required_mapping=(),
+        outputs_model=AuthoredOutputs,
+        build_stan_data="macrotoolkit.authoring.family:build_stan_data",
+        build_render_context="macrotoolkit.authoring.family:build_render_context",
+        results_loader="macrotoolkit.authoring.results:load_authored_run",
+        report_writer="macrotoolkit.report:write_report",
+        prior_sd_table="macrotoolkit.authoring.family:prior_scalar_sds",
+        headline_series="macrotoolkit.authoring.family:headline_series",
+        output_modules="macrotoolkit.authoring.outputs:OUTPUT_MODULES",
+        mirror="macrotoolkit.authoring.family:MIRROR",
+        validation_suite="macrotoolkit.authoring.validation:suite_for",
+        display_name="Authored model",
+        dynamic_required_mapping=_authored_required_mapping,
     ),
 }
 

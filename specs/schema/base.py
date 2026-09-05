@@ -192,9 +192,10 @@ class RunSpec(BaseModel):
     @model_validator(mode="after")
     def _validate_required_mapping(self) -> "RunSpec":
         entry = get_family(self.model.family)
-        missing = [k for k in entry.required_mapping if k not in self.data.mapping]
+        required = entry.required_mapping_for(self.model.options)
+        missing = [k for k in required if k not in self.data.mapping]
         if missing:
-            example = ", ".join(f"{k}: <csv_column_name>" for k in entry.required_mapping)
+            example = ", ".join(f"{k}: <csv_column_name>" for k in required)
             raise ValueError(
                 f"data.mapping is missing required key(s) {missing} for "
                 f"model.family {self.model.family!r}. It must include: "

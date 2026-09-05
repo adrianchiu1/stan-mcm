@@ -217,6 +217,12 @@ def _render_diagnostics(diagnostics: dict) -> str:
 
 
 def _render_module(module: OutputModule, results: Any) -> str:
+    reason = module.unavailable_reason(results)
+    if reason is not None:
+        return (
+            f"<h2>{_esc(module.heading)}</h2>\n"
+            f'<p class="caption"><strong>Omitted:</strong> {_esc(reason)}</p>'
+        )
     data = module.compute(results)
     figs = module.figures(data, results)
     caption = module.caption(data, results) if module.caption is not None else None

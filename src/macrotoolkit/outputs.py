@@ -45,6 +45,10 @@ class OutputModule:
     - ``dpi``: PNG raster resolution when embedded in the report.
     - ``figure_order``: for dict-of-figures modules, the keys in display
       order (``None`` = the dict's own order).
+    - ``available`` (S7): optional ``results -> str | None``; a non-None
+      return is the REASON the module does not apply to this run (e.g. an
+      authored model's fan chart without forecast rules for its exogenous
+      series) -- the report states it, the API refuses with it.
     """
 
     name: str
@@ -55,6 +59,13 @@ class OutputModule:
     caption: Callable[[Any, Any], str] | None = None
     dpi: int = 100
     figure_order: tuple[str, ...] | None = None
+    available: Callable[[Any], str | None] | None = None
+
+    def unavailable_reason(self, results: Any) -> str | None:
+        """``None`` when the module applies to ``results``; else why not."""
+        if self.available is None:
+            return None
+        return self.available(results)
 
     def figures(self, data: Any, results: Any) -> dict[str, Any]:
         """Run ``plot`` and normalize the result to an ordered

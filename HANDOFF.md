@@ -1,156 +1,143 @@
 # Handoff
 
-Status as of 2026-09-04 (end of S6 session). **S6 is complete and green on
-branch `claude/s6-macrotoolkit-jpguf5`** (pushed; PR #7,
-https://github.com/adrianchiu1/stan-mcm/pull/7, opened by the user from
-the Claude Code UI; the stage-per-PR cadence continues). The binding scope record is `plans/S6-plan.md`
-(including the two places the brief and the repo's own docs conflicted
-and how they were resolved). Three work packages shipped in order, each
-at a clean boundary: **WP1** the notebook-first Python API, **WP2**
-family #2 (UCSV) with the one real KF extension (time-varying `Q_t`) and
-its full validation ladder, **WP3** automatic per-model QC (fit-time
-mirror check + `mtk validate`). **The natural S7 candidates are the
-equation-authoring DSL and the promotion/production layer** (see "What's
-next").
+Status as of 2026-09-04 (end of S7 session). **S7 is complete and green on
+branch `claude/s7-equation-dsl-og1xvc`** (pushed; not merged, no PR opened,
+per the brief -- the stage-per-PR cadence continues from the user's side).
+The binding scope record is `plans/S7-plan.md` (including the four places
+the brief and the repo's own doctrine conflicted and how each was
+resolved). Six milestones shipped in order, each at a clean boundary and
+each pushed: **M1** the equation IR + compiler, **M2** the generic Stan
+template + the kf_loglik equivalence gate, **M3** pipeline integration,
+**M4** auto-validation + generic outputs, **M5** the authored-model
+notebook, **M6** this stage-end docs pass. **The natural S8 candidates are
+per-authored-model SBC registration and the promotion/production layer**
+(see "What's next").
 
-## What S6 delivered (all green)
+## What S7 delivered (all green)
 
-**WP1 — notebook-first Python API** (`macrotoolkit.api`; canonical
-import `from macrotoolkit import api as mtk`):
+**Equation-level model authoring** (`macrotoolkit.authoring`, canonical
+import `from macrotoolkit import authoring as au`; the spec-side grammar
+and structural derivation in `specs/schema/equations.py`,
+`specs/schema/authored_structure.py`, `specs/schema/authored.py`):
 
-- The Pydantic spec models ARE the spec API (`mtk.spec(...)` returns a
-  validated `RunSpec`; a Python-built spec hashes identically to its YAML
-  equivalent — pinned against `examples/us_lw_sv/spec_sv.yaml`).
-- `mtk.fit(spec, data)` with `data` a CSV path or a pandas DataFrame
-  (staged to a canonical CSV: only the spec's columns, ISO dates, shortest
-  round-trip floats, fixed name `dataframe.csv`, so identity is a function
-  of content). `run.py`'s `run()` is now a wrapper over the spec-taking
-  core `run_spec(spec, base_dir=...)`.
-- `Run` handle: `hash`, `spec`, `diagnostics`, `verdict`, `mirror_check`,
-  lazy `idata`, `results()`, `outputs()` (the family's declared output
-  modules as live matplotlib Figures), `param_table()` (DataFrame),
-  `report()`; `mtk.load_run(hash_or_dir)`; `mtk.sweep(...)` returning a
-  programmatic `SweepComparison` (`.table()`, `.headline`) next to the
-  HTML; `mtk.validate(family, tier)`.
-- The report is family-generic over `FamilyEntry.output_modules`
-  (`OutputModule(name, heading, figure_title, compute, plot, caption)`;
-  lw_sv's declaration in `outputs_lw.py` reproduces the S4/S5 report
-  exactly). The CLI (`cli.py`) is a thin shell: every command delegates
-  to the API (test-pinned; no pipeline logic in it).
-- `examples/notebook_api/lw_sv_from_archive.ipynb` (committed executed:
-  the whole lw_sv output layer on `runs-archive/a00958509083`, no
-  sampling) and `ucsv_us_inflation.ipynb` (committed executed: UCSV end
-  to end, samples); `tests/test_notebooks.py` re-executes them.
+- **The authored system is DATA.** `model.family: authored` with
+  `model.options` = the model definition (observables, exogenous series,
+  measurement + transition equation STRINGS, the prior table, shock
+  declarations -- constant scale or the established non-centered SV block
+  -- explicit initial conditions, optional per-exogenous forecast rules).
+  Equations are parsed, linearized and CANONICALIZED at spec-parse time
+  (formatting never reaches the hash; term order does, deliberately --
+  plan open question 2), and the whole definition enters the run-identity
+  hash through `to_estimation_yaml`. `au.Model(...)` and the small
+  helpers (`normal`, `half_normal`, `beta`, `shock`, `sv`, `first_obs`,
+  `init`, `forecast`, `log_var_diff`) build the SAME dict a YAML spec
+  carries; `mtk.spec("authored", options=model, ...)` accepts the Model.
+- **Compiled to the EXISTING contract.** `CompiledModel` (cached per
+  canonical definition) exposes the `StateSpaceMeta` (slots with time
+  offsets derived mechanically: a lagged LHS `g[-1] = g[-2] + eta_g`
+  carries a state lagged, HLW's timing; head-slot substitution for
+  contemporaneous state references, in topological order; lag-copy rows;
+  feedback map in first-appearance order), numeric `(F, Q, A, Z, R)`
+  builders that perform the operations the template performs in the
+  same order (`Q = Σ var_s b_s b_sᵀ` accumulated in shock order; a
+  measurement shock's SV through `R_t`, a state shock's through the S6
+  `Q_t`), regressors with the feedback map's depth as pre-sample rows,
+  explicit `(xi00, P00)`, the `log_var_diff` anchor, prior resolution
+  with the hand families' override discipline, the prior sampler, and a
+  stationarity filter (spectral radius of `F` and of the feedback
+  companion ≤ 1: unit roots pass, explosive roots fail).
+- **ONE generic template** `stan/templates/authored.stan.j2`, fully
+  stamped (constant matrices in `transformed data`, parameter-dependent
+  ones in `transformed parameters`, `kf_loglik` as a transformed
+  parameter per S6's mechanism; no runtime branching). **No shared Stan
+  text and no existing family template or spec was edited**; every
+  existing example spec's rendered-source and estimation-identity hashes
+  are pinned to a fixture captured on the untouched baseline
+  (`tests/test_existing_family_hashes_pinned.py`).
+- **The oracles gate (the stage's G1-equivalent).** The three hand
+  families expressed as equations (`tests/authored_oracles.py`): compiled
+  meta == hand meta EXACTLY for ucsv and local_level and, after the
+  declared shock-label map, for lw_sv (plan conflict item 2); matrices at
+  50 prior points to <1e-15 (F bit-identical; Q/R paths bit-identical);
+  regressors/initial state/anchors bit-identical; the compiled program's
+  `kf_loglik` vs the HAND template's at 50 prior draws: **max |diff| =
+  0.0** for lw_sv no-SV and SV and ucsv no-SV and SV (identical
+  floating-point operations), and vs the Python mirror 9.1e-13 /
+  2.3e-12 / 2.1e-12 / 1.1e-13; local_level (no hand KF; plan conflict
+  item 1) vs the mirror 1.8e-12.
+- **Pipeline integration.** One registered family `authored` (plan
+  conflict item 3) with two additive registry changes:
+  `FamilyEntry.dynamic_required_mapping` (required `data.mapping` keys =
+  the model's observables + exogenous series) and `run.build_stan_data`
+  passing the spec to builders that take it (signature-inspected; hand
+  families untouched). `mtk.fit` runs the fit-time mirror check on the
+  authored program like any other; `Run.param_table`, `report`, `sweep`
+  (`prior_sd_table`/`headline_series` capabilities) all generic.
+- **Generic output layer** (`authoring/results.py`, `plots.py`,
+  `outputs.py` over `results_core` + the engine; no recursion written):
+  `prior_predictive`, `states` (every state's head slot with its offset
+  stamped, `exp(h/2)` panel for SV shocks), `irf` (every shock → every
+  observable and state), `hd` (per observable; the G6 identity holds at
+  ~1e-13 incl. the `exog` data bar), `fan` -- declared with the new
+  `OutputModule.available` predicate: omitted, with the reason stated in
+  the report and raised by the API, unless every lagged exogenous series
+  has a forecast rule (`last_value` | `constant` | `state_linear`).
+- **Auto-validation.** `mtk validate <spec.yaml> --tier fast` /
+  `mtk.validate(spec, data=df)` build the fast tier from the definition
+  (`authoring/validation.py::suite_for`: `mirror` at 25 prior draws of
+  the production render + `hd_identity` at stationary prior points);
+  `recovery_design` / `sbc_design` are one-call constructors (generic
+  structural simulator through the engine at fixed anchors) -- exposed,
+  NOT registered or run (per-model work). `run_validation_suite` runs an
+  in-memory suite; `mtk validate authored` (the family name) tells you
+  to pass the spec.
+- **The payoff notebook** `examples/notebook_api/authored_uc_gap.ipynb`
+  (built by `build_authored_notebook.py`, committed executed): a
+  bivariate UC output-gap model with an AR(2) gap STATE carrying SV on
+  the demand shock and an accelerationist Phillips curve -- a model that
+  does not exist in the codebase -- authored, estimated on the in-repo US
+  data, swept over `sigma_g`, with states/IRF/HD/fan figures, the live G6
+  check, and its fast validation tier. Run record in the notebook and in
+  DECISIONS.md.
 
-**WP2 — family #2, UCSV** (`pi_t = tau_t + eps_t`, `tau_t = tau_{t-1} +
-eta_t`, SV on both shocks; `docs/kf-capability-matrix.md` was the binding
-scope):
+## Warnings for whoever builds S8
 
-- **The ONE real KF extension, `Q_t`**, by the S3 `R_t` playbook: the
-  Stan core takes `array[] matrix Q` and `array[] matrix R` with three
-  delegating constant overloads; the Python mirror takes a constant or a
-  `(T, n, n)` path everywhere (`_as_Q_path`, `_kf_core` with `Q[t]`,
-  smoother, DK plus path). G1 extended to FIVE paths (constant, tv-R,
-  production R-SV, tv-Q, production Q-SV): max |Stan − Python| 5.5e-12 /
-  5.5e-12 / 1.8e-12 / 7.3e-12 / 7.3e-12. **Constant-Q regression pin**:
-  the Stan constant-Q values at G1's 50 points reproduce a fixture
-  captured from the untouched S5 program (`tests/fixtures/g1/pre_qt_stan_
-  loglik.csv`) with difference exactly 0.0; a `(T,n,n)` path of identical
-  Q is bit-identical to the constant Python call. **Run-hash consequence
-  taken deliberately** (DECISIONS.md 2026-09-04, plan conflict item 1):
-  every lw_sv spec re-identifies once (the rendered source inlines the
-  filter; the S3 precedent); the no-SV render pin was regenerated once
-  with the recorded decision; the archived reference runs stay valid
-  under their old names and `examples/us_lw_sv/README.md` records the
-  lineage (`spec_sv.yaml` → `8ba1420a4145`, full vintage →
-  `ec87f45d0a43`). The reference runs were NOT regenerated.
-- **Everything else is declarations**: `stan/templates/ucsv.stan.j2`
-  (+ the ucsv-only `sv_scalar_variance_path.stan`), `specs/schema/ucsv.py`,
-  `families/ucsv.py` (`UCSV_STATE_META` = `(("tau", 0),)`, EMPTY feedback
-  map, `ln(Var(Δpi)/2)` mu_h0 anchors, prior sampler, mirror declaration),
-  one registry entry, `results_ucsv.py` / `plots_ucsv.py` /
-  `outputs_ucsv.py` over the new family-generic `results_core.py`.
-  **Generic-layer residue fixed** (the full list in DECISIONS.md
-  2026-09-04 WP2b): the smoother's shock recovery (now
-  `recover_shocks` via `StateSpaceMeta.recovery_order`, bit-identical for
-  lw_sv), the engine's state noise (`StateNoise` protocol; constant case
-  = the exact pre-S6 draw), the report/param-table/figure plumbing
-  (WP1), and the loader/draw-loop/HD/IRF pieces that only existed inside
-  `results_lw.py`.
-- **Validation ladder for ucsv** (no external oracle — stated in README):
-  G1 as above; the fast tier's production-render mirror (1.8e-12) and HD
-  identity (2e-16); **G2 recovery** PASSED (pooled 90%-CI coverage 0.85, per quantity 0.85/0.85/0.75/0.95, no σ_h bias, 4 divergences over 20 fits); **SBC at the
-  pre-registered design** (100 reps × T=100, 4 ranked quantities, fixed
-  anchors, seeds 20260920+i; DECISIONS.md 2026-09-04) PASSED at exactly the registered design: χ² p = 0.596 / 0.911 / 0.760 / 0.052 on sigma_h_eps / sigma_h_eta / h0_eps / h0_eta (floor 0.001), 4 divergences over 150,000 post-warmup draws, ~1.7 h of compute (63 s/rep).
-  Slow gates: `pytest -m "slow and ucsv"` (~1.5 h total; the SBC resumes
-  from `tests/artifacts/ucsv_sbc/ranks.csv`; `scripts/run_ucsv_sbc.py`
-  is the resumable driver).
-- **Worked example** `examples/us_ucsv/` (US core PCE from the in-repo
-  HLW workbook fixture, `make_data.py`), through the notebook API with
-  `mtk run`/`mtk report` as the CLI cross-check (same hash
-  `f2b48ebc98a4`); run record in its README.
-
-**WP3 — automatic per-model QC**:
-
-- **Auto-G1 at fit time** (`macrotoolkit/qc.py`): every `fit()` / `mtk
-  run` evaluates the EXACT rendered program's `kf_loglik` (now a
-  transformed parameter in every KF family template, `target +=
-  kf_loglik`) at `qc.mirror_points` (default 5) prior draws via one
-  fixed_param CmdStan call, against the Python mirror on the same Stan
-  data, BEFORE sampling; records `diagnostics.json["mirror_check"]` and
-  the report header row; raises `MirrorCheckError` past 1e-8 and removes
-  the run dir. Spec-level toggle: the new top-level `qc:` block, outside
-  the identity hash like `outputs:` (`qc.yaml` in the run dir).
-- **`mtk validate <family> --tier fast|recovery|sbc|all`** /
-  `api.validate`: `FamilyEntry.validation_suite` → `families/<family>_
-  validation.py` declaring `Gate`s per tier; generic builders
-  (`mirror_gate`, `hd_identity_gate`, `recovery_gate`, `sbc_gate`) in
-  `macrotoolkit/validation/suite.py`; the SBC engine moved into the
-  package (`validation/sbc.py`; `tests/sbc_harness.py` is a shim) with
-  lw_sv's G4 design moved verbatim (`tests/g4_harness.py` is a shim) and
-  the G2 arithmetic lifted (`validation/recovery.py`). One report per
-  invocation: `validation/<family>/report.html` + `summary.json`. Both
-  families wired.
-- `scripts/gate-check.sh fast | family <fam> | validate <fam> [tier] |
-  slow <fam>`; markers `lw_sv`, `ucsv`, `validation`.
-
-## Warnings for whoever builds S7
-
-- **Never set `TQDM_DISABLE=1` around a fit.** It makes cmdstanpy's
-  progress handling raise inside `model.sample` (chains report retcode
-  -1 and the run fails with a misleading "Error during sampling"). Two
-  full-suite runs were lost to it this stage before the cause was
-  isolated (DECISIONS.md 2026-09-04 WP1).
-- **A notebook executed from a tmp directory must not walk parent
-  directories looking for the repo** (`Path.parent` of `/` is `/`: an
-  infinite loop that pinned a kernel at 100% CPU). Use
-  `macrotoolkit.run.REPO_ROOT`.
-- **Every lw_sv spec re-identified in S6** (Q_t + `kf_loglik`); see
-  `examples/us_lw_sv/README.md`'s lineage table. Do not "fix" a hash
-  mismatch against the archived names; regenerate when publication
-  numbers are needed.
-- **`results_lw.py` is still the validated lw_sv instantiation, not a
-  declaration over `results_core.py`.** It delegates where identical and
-  otherwise stays; migrating it onto the core is S7 backlog and needs a
-  behavior-preservation pass (bit-level pins exist for the smoother
-  recovery and the engine's state noise to start from).
-- **The identity gates evaluate at STATIONARY prior points** (lw_sv's
-  registered `hd_identity_gate` filters (a1, a2)); an explosive AR(2)
-  draw measures float64 cancellation over 230 quarters, not the
-  identity. Found on the gate's first run; documented in the gate.
-- **The mirror check's fixed_param evaluation needs every parameter of
-  the rendered program in the inits** (a family's `mirror_points` must
-  stay in sync with its template's parameter block); a missing name
-  makes CmdStan initialize it randomly and the check fail loudly (the
-  right failure, but confusing). `adapt_engaged=False` is required with
-  `iter_warmup=0`.
-- Container restarts (S5's warning) still apply; every slow gate this
-  stage is resumable (SBC ranks.csv; the recovery gate re-runs — it is
-  ~20 minutes).
+- **Term order in an authored equation is meaning.** It fixes the
+  regressor (feedback-map) column order and therefore the rendered `A`
+  and the run identity; reordering terms gives an equivalent model with a
+  different hash. Formatting does not (canonical re-emission). Do not
+  "fix" this by sorting terms -- lw_sv's hand feedback map is only
+  reproduced because first-appearance order is preserved.
+- **Shock names cannot coincide with series names** (a bare name would
+  be ambiguous); lw_sv's hand labels (`"ystar"` for the ystar shock) are
+  therefore mapped in the oracle test, not reproduced. Structure is
+  compared exactly; labels are user choices.
+- **The stationarity filter allows unit roots on both sides** (random
+  walks; lw_sv's Phillips curve has lag coefficients summing to one) and
+  rejects only explosive roots. An HD identity that "fails" on an
+  authored model with an explosive prior draw is the S6 float64 lesson,
+  not a bug -- check `CompiledModel.is_stationary` first.
+- **`mu_h0` for an authored SV shock is a number or the `log_var_diff`
+  rule.** lw_sv's HLW-regression OLS anchor is family-specific and NOT
+  expressible; the lw_sv oracle gate supplies it as data. An authored
+  model wanting a data anchor uses `au.log_var_diff(series, fraction)`.
+- **The recovery/SBC constructors fix anchors** (initial state, `mu_h0`)
+  the G3/G4/UCSV way; the generic simulator supplies pre-sample rows as
+  zeros and needs exogenous paths supplied. Pre-register the constants
+  in DECISIONS.md before running anything (ENGINEERING.md rung 3).
+- All S6 warnings still apply: never set `TQDM_DISABLE=1` around a fit;
+  a notebook must use `macrotoolkit.run.REPO_ROOT` (never walk parent
+  directories); every lw_sv spec re-identified in S6 (see
+  `examples/us_lw_sv/README.md`); `results_lw.py` is still the validated
+  lw_sv instantiation, not a declaration over `results_core.py`; the
+  mirror check needs every parameter of the rendered program in the
+  inits (`authoring/family.py::stan_inits_and_h` builds them from the
+  compiled parameter list, so a template change must update both).
 - Any change to `engine.py`, `smoother.py`, `results_core.py`, the KF
-  Stan files or a family's metadata still requires a fresh
-  numerics-reviewer pass (one ran clean over the S6 change set, findings
-  and disposition in DECISIONS.md).
+  Stan files, a family's metadata, or now `authoring/compile.py` /
+  `authored_structure.py` / `authored.stan.j2` requires a fresh
+  numerics-reviewer pass (one ran over the S7 change set; findings and
+  disposition in DECISIONS.md).
 
 ## Environment (fresh container recipe)
 
@@ -158,42 +145,47 @@ scope):
   --with pydantic --with jinja2 --with matplotlib --with pyyaml --with
   pandas --with click --with h5netcdf --with openpyxl --with scipy
   --with nbformat --with nbclient --with ipykernel --with-editable .`
-  (add `~/.local/share/uv/tools/pytest/bin` to `PATH`; the notebook
-  packages are needed by `tests/test_notebooks.py`).
+  (add `~/.local/share/uv/tools/pytest/bin` to `PATH`; use that venv's
+  `python` for scripts).
 - CmdStan **pinned 2.36.0** at `~/.cmdstan` (`python -m
   cmdstanpy.install_cmdstan --dir ~/.cmdstan --version 2.36.0`; never
-  without `--version` — `api.github.com` is blocked; ~25 min build).
-- Fast suite `pytest -m "not slow"`: **325 passed, 0 skipped** at
-  stage end (~5–7 min). Slow: `-m "slow and ucsv"` (G2 ~20 min + SBC
-  ~1–1.5 h, resumable), `-m "slow and lw_sv"` (G2 ~38 min, G3 ~3.5–7 h,
-  G4 ~3–5 h resumable).
+  without `--version` -- `api.github.com` is blocked; ~5-25 min build).
+- Fast suite `pytest -m "not slow"`: **382 passed, 0 skipped** at
+  stage end (~5-6 min; the S7 gates compile five extra programs
+  and run two tiny authored fits). Marker `authored` selects the S7
+  tests. Slow: `-m "slow and ucsv"` (G2 ~20 min + SBC ~1-1.5 h,
+  resumable), `-m "slow and lw_sv"` (G2 ~38 min, G3 ~3.5-7 h, G4 ~3-5 h
+  resumable), the sampling notebooks under `-m slow`.
 - Reference runs: `runs-archive/` (S5 fixtures) for the output layer;
   `mtk run examples/us_ucsv/spec.yaml` is a few minutes.
 
-## S1–S5 record (condensed, still green)
+## S1-S6 record (condensed, still green)
 
-lw_sv: G1 (now 5 paths), G2, G3 (200-rep no-SV SBC), G4 (100-rep full-SV
-SBC at the pre-registered design), G5a (~1e-12 vs the HLW oracle), G6, the
-DK smoother, four output modules, the HTML report, `mtk sweep` with the
-mandated σ_g/σ_z sweep, the G5b informational exhibit — details in
-README.md's ladder table, `STRESS-TESTS.md`, `examples/us_lw_sv/README.md`
-and DECISIONS.md's dated entries.
+lw_sv: G1 (5 paths), G2, G3, G4 (pre-registered SBC), G5a (~1e-12 vs the
+HLW oracle), G6, the DK smoother, output modules, the HTML report, `mtk
+sweep`, G5b. ucsv: G1, production mirror, G2 PASSED, SBC PASSED at the
+pre-registered design, G6. S6: the notebook API, the fit-time mirror
+check, `mtk validate`. Details in README.md's ladder table,
+`STRESS-TESTS.md`, the example READMEs and DECISIONS.md's dated entries.
 
-## What's next: S7 candidates
+## What's next: S8 candidates
 
-1. **Equation-authoring DSL**: economists write the measurement/state
-   equations (named series, lags, shocks) and the framework derives the
-   `StateSpaceMeta`, matrices, template and mirror declaration — UCSV
-   showed the declaration surface is small and regular (state labels,
-   shock loadings, feedback map, prior table, mu_h0 anchors), which is
-   exactly what a DSL should emit.
-2. **Promotion / production layer**: `mtk validate` gives a per-family
-   verdict; the missing piece is a promotion record (which validated
-   program+design a production run may use, with the mirror check and
-   gate verdicts attached), scheduled re-validation, and the
-   `runs-archive` → published-run workflow.
-3. Backlog carried forward: migrate `results_lw.py` onto
-   `results_core.py`; PACF stationarity parameterization for AR blocks
-   (S5 item 6); `estimate_c` (needs the c-weighted r* generalization);
-   missing observations / exact diffuse init when DFM arrives
-   (capability matrix doctrine: build with the family that needs it).
+1. **Per-authored-model SBC registration + the promotion/production
+   layer.** `authoring/validation.py` exposes `recovery_design` /
+   `sbc_design`; the missing pieces are (a) a way to REGISTER a
+   pre-registered design for an authored model (a `validation:` block in
+   the spec, or a sidecar file keyed by the canonical model id) so `mtk
+   validate <spec> --tier sbc` runs it, and (b) the promotion record S6
+   already named: which validated program + design a production run may
+   use, with the mirror check and gate verdicts attached, scheduled
+   re-validation, and the `runs-archive` → published-run workflow. The
+   notebook model is the obvious first design to pre-register.
+2. **`results_lw.py` migration onto `results_core.py`** (S6/S7 backlog;
+   the authored results module shows what a declaration over the core
+   looks like for a model with an exogenous block and lagged-carried
+   states -- the same shape lw_sv needs).
+3. Backlog carried forward: PACF stationarity parameterization for AR
+   blocks (now relevant to authored AR states too); intercepts/drifts as
+   a constant state (a small DSL extension once a model needs it);
+   `estimate_c`; missing observations / exact diffuse init when DFM
+   arrives (capability-matrix doctrine).

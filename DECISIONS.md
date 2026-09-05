@@ -3,6 +3,106 @@
 One dated line per judgment call not fixed by the spec, with rationale.
 Newest first.
 
+- **2026-09-04 — S7 COMPLETE (stage-end entry).** Everything in
+  `plans/S7-plan.md` is delivered and green on
+  `claude/s7-equation-dsl-og1xvc` (pushed; not merged, no PR opened, per
+  the brief): M1 the equation IR + compiler, M2 the generic template with
+  the exact kf_loglik gate, M3/M4 pipeline integration + generic outputs +
+  auto-validation + sweep, M5 the notebook, M6 docs. Two numerics-reviewer
+  passes (M1+M2; M3/M4) — findings and disposition in the two entries
+  below and in the M3/M4 commit message; every MUST-FIX and SHOULD-FIX
+  applied before the corresponding commit. **The M5 notebook's run
+  record** (`examples/notebook_api/authored_uc_gap.ipynb`, run
+  `ca3f85a00336`, US data 1961Q1–2019Q4, T = 236, 4 chains × 500/500,
+  adapt_delta 0.95): fit-time mirror check 3.4e-12; diagnostics **WARN**
+  — max R-hat 1.013 on one element of the T-length SV path and min tail
+  ESS 392 against the 400 line (every scalar parameter has R-hat ≤ 1.008
+  and bulk ESS ≥ 680); the record is stated as measured rather than the
+  draw count raised to pass — an economist's next step is a longer run,
+  not a framework change. Posterior medians: a1 1.40, a2 −0.43, b_pi
+  0.70, b_y 0.05, sigma_ystar 0.20, sigma_g 0.063, sigma_y 0.12,
+  sigma_pi 0.81, sigma_h_eta_gap 0.29. The sigma_g sweep (tight /
+  baseline / loose prior sd 0.015 / 0.03 / 0.06) gives posterior medians
+  0.024 / 0.063 / 0.106 with contraction ≈ 0 — the pile-up prior does
+  the identification work here exactly as lw_sv's documented sweep
+  showed. HD identity 3.4e-13 (y) / 1.9e-13 (pi); fast validation tier
+  PASS (mirror 7.3e-11 at 25 prior draws; HD identity 2.3e-13 at
+  stationary prior points). The three fits took ~80 minutes on four
+  cores (~1.3 s/iteration post-warmup). Fast suite at stage end:
+  **382 passed, 0 skipped** (from 325 at stage start; marker
+  `authored`). Not done, deliberately: registering/running an SBC design
+  for the notebook model (the constructors exist; pre-registration is
+  per-model S8 work); the `results_lw.py` migration (still backlog).
+  HANDOFF.md rewritten for S8.
+
+- **2026-09-04 — S7 M1–M4 landed: equation-level model authoring compiles
+  to the EXISTING declaration surface; the oracles gate is exact.** The
+  design and the four brief-vs-repo conflicts are in `plans/S7-plan.md`
+  (strings + IR as the surface; term order is meaning; one registered
+  `authored` family with the per-model bundle built at load; local_level
+  gated against the Python mirror because its hand template has no KF;
+  shock labels mapped, structure compared exactly). What was measured:
+  (1) **M1** — the three hand families expressed as equations
+  (`tests/authored_oracles.py`) reproduce `LW_STATE_META` exactly (HLW's
+  lagged-carried g/z via a lagged LHS `g[-1] = g[-2] + eta_g`; the
+  six-column feedback map in first-appearance order), `UCSV_STATE_META`
+  and a hand local-level meta exactly; matrices at 50 prior points to
+  <1e-15 (F bit-identical; SV Q_t/R_t paths bit-identical to the hand
+  compositions); regressors, initial state and the log_var_diff anchors
+  bit-identical. (2) **M2** — the generic template's `kf_loglik` at 50
+  prior draws on the same data vs the HAND templates: max |diff| **0.0**
+  for lw_sv no-SV, lw_sv SV, ucsv no-SV, ucsv SV (the generated program
+  performs the same floating-point operations in the same order), and vs
+  the Python mirror 9.1e-13 / 2.3e-12 / 2.1e-12 / 1.1e-13; local_level
+  vs the mirror 1.8e-12; a parameter-dependent F with state-side SV
+  renders, compiles and mirrors. (3) **M3/M4** — same equations → same
+  hash; formatting → same hash; an equation, prior or SV-flag change and
+  a term reordering → new hashes (all distinct); YAML round trip;
+  `mtk.fit` on an authored model records the mirror check (3.4e-12 on
+  the notebook model); HD identity ~1e-13 incl. the `exog` data bar; fan
+  omitted with a stated reason absent forecast rules; `mtk validate
+  <spec.yaml> --tier fast` PASS (mirror at 25 draws, HD identity at
+  stationary prior points); `mtk.sweep` over an authored prior with the
+  contraction readout. **Judgment calls:** the stationarity filter allows
+  unit roots on both the state side and the feedback side (lw_sv's
+  Phillips curve sums its lag coefficients to one) and rejects only
+  explosive roots; a state with no shock compiles (a deterministic state
+  pinned by its initial condition is a legitimate SSM construct — the
+  reviewer's note 4); `mu_h0` is a number or the `log_var_diff` rule
+  (lw_sv's HLW-regression anchor is family-specific and is supplied as
+  data in its oracle gate); one measurement shock per row at unit
+  coefficient (singular R and shared shocks are out of scope);
+  intercepts rejected (a constant state is the documented route); the
+  `validation/` output directory is now gitignored like `runs/` and
+  `sweeps/`. **Two additive registry changes**, hand families untouched:
+  `FamilyEntry.dynamic_required_mapping` and a spec-aware
+  `run.build_stan_data` (signature-inspected). **Existing family hashes
+  pinned**: every example spec's rendered source and estimation identity
+  equal a fixture captured on the untouched baseline
+  (`tests/test_existing_family_hashes_pinned.py`).
+
+- **2026-09-04 — S7 numerics-reviewer pass #1 (M1+M2: grammar,
+  structural derivation, numeric builders, template, mirror inits).**
+  The reviewer hand-traced the lw_sv head-slot substitution and the
+  `sub` toy, rendered the lw_sv-SV program and checked every matrix
+  entry against lw-sv-spec.md §1.2–1.5, and ran the M1/M2 gates itself.
+  **MUST-FIX, applied:** the coefficient printer did not parenthesize a
+  same-precedence RIGHT child of `Mul`/`Add`, so `a*(b/c)` printed as
+  `a*b/c`, which Stan (and the DSL's own parser) reads as `(a*b)/c` — a
+  different double (5.6e-17 in the reviewer's reproduction; divergent in
+  35% of random draws). No current oracle exercised the shape (the
+  unit-coefficient shortcuts collapse them), which is exactly why a
+  gate on three models is not a proof: the fix forces parentheses on
+  every same-precedence right child, and a 3000-tree fuzz test now pins
+  `evaluate(tree) == evaluate(reparse(emit(tree)))`. **SHOULD-FIX,
+  applied:** a shock written twice in one equation (`+ eta + eta`
+  silently quadrupled its variance) and a parameter that both scales a
+  shock and appears as a coefficient are rejected with messages.
+  **NOTE, accepted:** a shock-free state compiles (see above). Clean:
+  units (g/4 as 0.25, h log-variance everywhere), spec agreement term by
+  term, Q/R accumulation order, SV routing, mirror inits complete,
+  regressor construction, the scope fence.
+
 - **2026-09-04 — S6 COMPLETE (stage-end entry).** Everything in
   `plans/S6-plan.md` is delivered and green on
   `claude/s6-macrotoolkit-jpguf5` (pushed; not merged, no PR opened, per

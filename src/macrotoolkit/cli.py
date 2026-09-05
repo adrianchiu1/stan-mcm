@@ -118,7 +118,9 @@ def report_cmd(run_hash: str, runs_root: str | None) -> None:
 )
 def validate_cmd(family: str, tier: str, out_root: str | None) -> None:
     """Run FAMILY's registered validation gates (S6 WP3) and write one
-    validation report summarizing PASS/WARN/FAIL per gate."""
+    validation report summarizing PASS/WARN/FAIL per gate. FAMILY may
+    also be the path of an AUTHORED model's spec YAML (S7), whose fast
+    tier is auto-instantiated from the equations."""
     from macrotoolkit import api
 
     try:

@@ -101,7 +101,6 @@ def run_validation(family: str, tier: str = "fast", out_root: str | Path | None 
     ``recovery`` | ``sbc`` | ``all``) and write the validation report."""
     from specs.schema import get_family
 
-    from macrotoolkit.run import REPO_ROOT
 
     entry = get_family(family)
     suite = entry.resolve("validation_suite")
@@ -111,10 +110,24 @@ def run_validation(family: str, tier: str = "fast", out_root: str | Path | None 
             f"FAMILY_REGISTRY (specs/schema) -- register its gate designs in "
             f"macrotoolkit/families/{family}_validation.py first."
         )
+    if not isinstance(suite, ValidationSuite):
+        raise ValueError(
+            f"Family {family!r}'s validation suite is built per MODEL DEFINITION (S7): pass the spec path "
+            f"instead -- mtk validate <spec.yaml> --tier {tier} / api.validate(spec)."
+        )
+    return run_validation_suite(suite, tier=tier, out_root=out_root, progress=progress)
+
+
+def run_validation_suite(suite: "ValidationSuite", tier: str = "fast", out_root: str | Path | None = None, *, progress=None) -> ValidationResult:
+    """Run an in-memory suite's ``tier`` and write its report under
+    ``validation/<suite.family>/`` (a ``:`` in the name becomes ``_``)."""
+    from macrotoolkit.run import REPO_ROOT
+
+    family = suite.family
     gates = suite.for_tier(tier)
     if not gates:
         raise ValueError(f"Family {family!r} registers no gates in tier {tier!r}.")
-    out_dir = (Path(out_root).resolve() if out_root is not None else REPO_ROOT / "validation") / family
+    out_dir = (Path(out_root).resolve() if out_root is not None else REPO_ROOT / "validation") / family.replace(":", "_")
     out_dir.mkdir(parents=True, exist_ok=True)
 
     results: list[GateResult] = []
@@ -218,7 +231,7 @@ def mirror_gate(family: str, spec_builder: Callable[[], Any], df_builder: Callab
         entry = get_family(family)
         spec = spec_builder().model_copy(update={"qc": spec_builder().qc.model_copy(update={"mirror_points": n_points, "mirror_tolerance": tolerance})})
         model, _ = compile_model(render_stan_source(entry.template, build_render_context(spec)))
-        stan_data = build_stan_data(family, df_builder())
+        stan_data = build_stan_data(family, df_builder(), spec=spec)
         try:
             rec = run_mirror_check(spec, stan_data, model, entry.resolve("mirror"))
         except MirrorCheckError as exc:

@@ -10,7 +10,7 @@ families, a front-end for economists who never touch Stan) is in
 [VISION.md](VISION.md); the engineering doctrine that binds every family is
 in [ENGINEERING.md](ENGINEERING.md).
 
-**Status**: through stage S6 the toolkit has **two validated families** —
+**Status**: through stage S7 the toolkit has **two validated families** —
 the v1 vertical slice, Laubach–Williams with stochastic volatility
 (`lw_sv`, spec in [lw-sv-spec.md](lw-sv-spec.md)), and family #2,
 Stock–Watson trend inflation with SV on both shocks (`ucsv`, scoped by
@@ -21,7 +21,10 @@ sweeps, the CLI being a thin shell over it), and **automatic per-model
 QC**: every fit cross-checks the exact rendered Stan program's Kalman-
 filter log-likelihood against the Python mirror before sampling, and
 `mtk validate <family>` runs a family's registered gate suite into one
-validation report. lw_sv is deliberately a *dry run of the general
+validation report — and, since S7, **equation-level model authoring**: a
+model written as equations compiles into the same declaration surface and
+flows through all of the above unchanged (see "Authoring a model as
+equations" below). lw_sv is deliberately a *dry run of the general
 framework*: exact HLW replication is not a goal (see the G5b exhibit
 below); UCSV was the test that the shared machinery is genuinely shared
 (it needed ONE real KF extension, time-varying `Q_t`, and otherwise only
@@ -175,12 +178,82 @@ validate` pick the family up automatically. The KF's capability
 boundary (what is built, what waits for the family that needs it) is
 [docs/kf-capability-matrix.md](docs/kf-capability-matrix.md).
 
+## Authoring a model as equations (S7)
+
+Since S7 a model does not have to be a hand-written family. An economist
+writes the measurement and transition equations -- named series, lags,
+shocks, priors, explicit initial conditions -- in a notebook or a YAML
+spec, and the framework **compiles** them into exactly the declaration
+surface a hand-written family provides (named state metadata with time
+offsets, matrix builders, prior table and sampler, the fit-time mirror
+declaration, a rendered Stan program from ONE generic template, output
+modules, a validation suite). The authored model then flows through the
+entire existing machinery unchanged:
+
+```python
+from macrotoolkit import api as mtk
+from macrotoolkit import authoring as au
+
+model = au.Model(
+    "uc_gap_sv", observables=["y", "pi"],
+    measurement=["y = ystar + gap + e_y",
+                 "pi = b_pi*pi[-1] + (1 - b_pi)*mean(pi[-2], pi[-3], pi[-4]) + b_y*gap[-1] + e_pi"],
+    transition=["ystar = ystar[-1] + 0.25*g + eta_ystar", "g = g[-1] + eta_g",
+                "gap = a1*gap[-1] + a2*gap[-2] + eta_gap"],
+    parameters={"a1": au.normal(1.2, 0.3), "a2": au.normal(-0.4, 0.3), "b_pi": au.beta(8, 2),
+                "b_y": au.normal(0.15, 0.1, lower=0), "sigma_ystar": au.half_normal(0.3),
+                "sigma_g": au.half_normal(0.03), "sigma_y": au.half_normal(0.2), "sigma_pi": au.half_normal(1.0)},
+    shocks={"eta_ystar": au.shock("sigma_ystar"), "eta_g": au.shock("sigma_g"),
+            "eta_gap": au.sv(sigma_h=0.2, mu_h0=au.log_var_diff("y", 0.5)),   # SV on the demand shock
+            "e_y": au.shock("sigma_y"), "e_pi": au.shock("sigma_pi")},
+    initial_state={"ystar": au.init(au.first_obs("y"), 2.0), "g": au.init(3.0, 1.0), "gap": au.init(0.0, 2.0)},
+)
+spec = mtk.spec("authored", options=model, data={...})   # the equations are DATA: they enter the run hash
+run = mtk.fit(spec, df)              # automatic Stan-vs-Python mirror check, immutable hashed run
+run.outputs().figure("states")       # states, IRFs, HD, fan charts from the generic engine
+mtk.sweep({...}, base_spec=spec, data=df)         # prior sweeps over the authored prior table
+mtk.validate(spec, tier="fast", data=df)          # mirror gate + HD identity, auto-instantiated
+```
+
+The equation grammar (`specs/schema/equations.py`): `x[-k]` is a lag,
+`mean(pi[-2], pi[-3], pi[-4])` one regressor column, a lagged left-hand
+side (`g[-1] = g[-2] + eta_g`) carries a state lagged (HLW's timing).
+The scope is linear-Gaussian state-space models with iid Gaussian shocks,
+optional random-walk log-variance SV on any shock, explicit initial
+conditions and the templates' prior menu; anything else (nonlinearities,
+intercepts, simultaneous observables, contemporaneous exogenous
+regressors, regime switching, missing data, mixed frequency, time-varying
+loadings, exact-diffuse initialization) is rejected at spec-parse time
+with a message naming the limitation.
+
+**Where the DSL sits on the ladder.** The compiler is gated, not trusted:
+the three hand-written families expressed as equations reproduce their
+`StateSpaceMeta` exactly (lw_sv's HLW state layout included), their
+system matrices at 50 prior draws to <1e-15, and their hand templates'
+`kf_loglik` at 50 prior draws EXACTLY (max |difference| 0.0 -- the
+generated program performs the same operations) and the Python mirror to
+~2e-12 (`tests/test_authoring_compile.py`, `tests/test_authoring_stan.py`,
+`tests/authored_oracles.py`). Every authored model then gets rungs 1 and 5
+automatically (the fit-time mirror check; `mtk validate <spec.yaml>
+--tier fast` = mirror gate + HD identity at stationary prior points);
+recovery and SBC are one-call design constructors
+(`macrotoolkit.authoring.validation`) whose pre-registration and run are
+per-model work, not framework work. The end-state walkthrough is
+[examples/notebook_api/authored_uc_gap.ipynb](examples/notebook_api/authored_uc_gap.ipynb).
+
 ## Repository map
 
 - `specs/schema/` — the spec spine: Pydantic schema (`RunSpec` with
   `qc:`/`outputs:` outside the identity hash) + the family registry
 - `stan/` — shared Stan functions library (the Q_t/R_t-generalized
   Kalman filter, SV helpers) + per-family Jinja templates
+- `src/macrotoolkit/authoring/` — the equation-authoring compiler (S7):
+  `compile` (StateSpaceMeta + numeric builders), `stan` (the generic
+  template's render context), `family` (registry capabilities),
+  `results`/`plots`/`outputs` (the generic output layer), `validation`
+  (auto fast tier + design constructors), `dsl` (notebook helpers); the
+  grammar and structural derivation live spec-side in
+  `specs/schema/equations.py` / `authored_structure.py` / `authored.py`
 - `src/macrotoolkit/` — `api` (the notebook-first public API) · data →
   render → run store (`run`) → `qc` (fit-time mirror check) → `smoother`
   → `engine` → `results_core` / `results_lw` / `results_ucsv` → plots →

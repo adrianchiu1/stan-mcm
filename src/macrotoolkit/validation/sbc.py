@@ -101,13 +101,14 @@ def render_design_model(design: SbcDesign):
     options/prior-overrides, through the production spec + override path
     (the same mechanism a user's spec.yaml takes)."""
     entry = get_family(design.family)
+    options = entry.options_model.model_validate(dict(design.model_options))
     spec = RunSpec.model_validate(
         {
-            "model": {"family": design.family, "options": dict(design.model_options)},
+            "model": {"family": design.family, "options": options},
             "data": {
                 "file": "unused.csv",
                 "date_column": "date",
-                "mapping": {k: k for k in entry.required_mapping},
+                "mapping": {k: k for k in entry.required_mapping_for(options)},
             },
             "priors": dict(design.prior_overrides),
         }
