@@ -1,0 +1,937 @@
+model:
+  family: authored
+  options:
+    family: authored
+    name: ch7_dfm_sv
+    observables:
+    - c1_s1
+    - c1_s2
+    - c1_s3
+    - c1_s4
+    - c1_s5
+    - c1_s6
+    - c1_s7
+    - c1_s8
+    - c1_s9
+    - c1_s10
+    - c1_s11
+    - c1_s12
+    - c1_s13
+    - c1_s14
+    - c1_s15
+    - c1_s16
+    - c1_s17
+    - c1_s18
+    - c1_s19
+    - c1_s20
+    - c2_s1
+    - c2_s2
+    - c2_s3
+    - c2_s4
+    - c2_s5
+    - c2_s6
+    - c2_s7
+    - c2_s8
+    - c2_s9
+    - c2_s10
+    - c2_s11
+    - c2_s12
+    - c2_s13
+    - c2_s14
+    - c2_s15
+    - c2_s16
+    - c2_s17
+    - c2_s18
+    - c2_s19
+    - c2_s20
+    exogenous: []
+    equations:
+      measurement:
+      - c1_s1 = fw + e_c1_s1
+      - c1_s2 = l_c1_s2_fw*fw + l_c1_s2_fc*fc1 + e_c1_s2
+      - c1_s3 = l_c1_s3_fw*fw + l_c1_s3_fc*fc1 + e_c1_s3
+      - c1_s4 = l_c1_s4_fw*fw + l_c1_s4_fc*fc1 + e_c1_s4
+      - c1_s5 = l_c1_s5_fw*fw + l_c1_s5_fc*fc1 + e_c1_s5
+      - c1_s6 = l_c1_s6_fw*fw + l_c1_s6_fc*fc1 + e_c1_s6
+      - c1_s7 = l_c1_s7_fw*fw + l_c1_s7_fc*fc1 + e_c1_s7
+      - c1_s8 = l_c1_s8_fw*fw + l_c1_s8_fc*fc1 + e_c1_s8
+      - c1_s9 = l_c1_s9_fw*fw + l_c1_s9_fc*fc1 + e_c1_s9
+      - c1_s10 = l_c1_s10_fw*fw + l_c1_s10_fc*fc1 + e_c1_s10
+      - c1_s11 = l_c1_s11_fw*fw + l_c1_s11_fc*fc1 + e_c1_s11
+      - c1_s12 = l_c1_s12_fw*fw + l_c1_s12_fc*fc1 + e_c1_s12
+      - c1_s13 = l_c1_s13_fw*fw + l_c1_s13_fc*fc1 + e_c1_s13
+      - c1_s14 = l_c1_s14_fw*fw + l_c1_s14_fc*fc1 + e_c1_s14
+      - c1_s15 = l_c1_s15_fw*fw + l_c1_s15_fc*fc1 + e_c1_s15
+      - c1_s16 = l_c1_s16_fw*fw + l_c1_s16_fc*fc1 + e_c1_s16
+      - c1_s17 = l_c1_s17_fw*fw + l_c1_s17_fc*fc1 + e_c1_s17
+      - c1_s18 = l_c1_s18_fw*fw + l_c1_s18_fc*fc1 + e_c1_s18
+      - c1_s19 = l_c1_s19_fw*fw + l_c1_s19_fc*fc1 + e_c1_s19
+      - c1_s20 = l_c1_s20_fw*fw + l_c1_s20_fc*fc1 + e_c1_s20
+      - c2_s1 = l_c2_s1_fw*fw + fc2 + e_c2_s1
+      - c2_s2 = l_c2_s2_fw*fw + l_c2_s2_fc*fc2 + e_c2_s2
+      - c2_s3 = l_c2_s3_fw*fw + l_c2_s3_fc*fc2 + e_c2_s3
+      - c2_s4 = l_c2_s4_fw*fw + l_c2_s4_fc*fc2 + e_c2_s4
+      - c2_s5 = l_c2_s5_fw*fw + l_c2_s5_fc*fc2 + e_c2_s5
+      - c2_s6 = l_c2_s6_fw*fw + l_c2_s6_fc*fc2 + e_c2_s6
+      - c2_s7 = l_c2_s7_fw*fw + l_c2_s7_fc*fc2 + e_c2_s7
+      - c2_s8 = l_c2_s8_fw*fw + l_c2_s8_fc*fc2 + e_c2_s8
+      - c2_s9 = l_c2_s9_fw*fw + l_c2_s9_fc*fc2 + e_c2_s9
+      - c2_s10 = l_c2_s10_fw*fw + l_c2_s10_fc*fc2 + e_c2_s10
+      - c2_s11 = l_c2_s11_fw*fw + l_c2_s11_fc*fc2 + e_c2_s11
+      - c2_s12 = l_c2_s12_fw*fw + l_c2_s12_fc*fc2 + e_c2_s12
+      - c2_s13 = l_c2_s13_fw*fw + l_c2_s13_fc*fc2 + e_c2_s13
+      - c2_s14 = l_c2_s14_fw*fw + l_c2_s14_fc*fc2 + e_c2_s14
+      - c2_s15 = l_c2_s15_fw*fw + l_c2_s15_fc*fc2 + e_c2_s15
+      - c2_s16 = l_c2_s16_fw*fw + l_c2_s16_fc*fc2 + e_c2_s16
+      - c2_s17 = l_c2_s17_fw*fw + l_c2_s17_fc*fc2 + e_c2_s17
+      - c2_s18 = l_c2_s18_fw*fw + l_c2_s18_fc*fc2 + e_c2_s18
+      - c2_s19 = l_c2_s19_fw*fw + l_c2_s19_fc*fc2 + e_c2_s19
+      - c2_s20 = l_c2_s20_fw*fw + l_c2_s20_fc*fc2 + e_c2_s20
+      transition:
+      - fw = a1_fw*fw[-1] + a2_fw*fw[-2] + eta_fw
+      - fc1 = a1_fc1*fc1[-1] + a2_fc1*fc1[-2] + eta_fc1
+      - fc2 = a1_fc2*fc2[-1] + a2_fc2*fc2[-2] + eta_fc2
+    parameters:
+      se_c1_s1:
+        dist: half_normal
+        sd: 1.0
+      l_c1_s2_fw:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_c1_s2_fc:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      se_c1_s2:
+        dist: half_normal
+        sd: 1.0
+      l_c1_s3_fw:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_c1_s3_fc:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      se_c1_s3:
+        dist: half_normal
+        sd: 1.0
+      l_c1_s4_fw:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_c1_s4_fc:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      se_c1_s4:
+        dist: half_normal
+        sd: 1.0
+      l_c1_s5_fw:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_c1_s5_fc:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      se_c1_s5:
+        dist: half_normal
+        sd: 1.0
+      l_c1_s6_fw:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_c1_s6_fc:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      se_c1_s6:
+        dist: half_normal
+        sd: 1.0
+      l_c1_s7_fw:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_c1_s7_fc:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      se_c1_s7:
+        dist: half_normal
+        sd: 1.0
+      l_c1_s8_fw:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_c1_s8_fc:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      se_c1_s8:
+        dist: half_normal
+        sd: 1.0
+      l_c1_s9_fw:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_c1_s9_fc:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      se_c1_s9:
+        dist: half_normal
+        sd: 1.0
+      l_c1_s10_fw:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_c1_s10_fc:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      se_c1_s10:
+        dist: half_normal
+        sd: 1.0
+      l_c1_s11_fw:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_c1_s11_fc:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      se_c1_s11:
+        dist: half_normal
+        sd: 1.0
+      l_c1_s12_fw:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_c1_s12_fc:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      se_c1_s12:
+        dist: half_normal
+        sd: 1.0
+      l_c1_s13_fw:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_c1_s13_fc:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      se_c1_s13:
+        dist: half_normal
+        sd: 1.0
+      l_c1_s14_fw:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_c1_s14_fc:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      se_c1_s14:
+        dist: half_normal
+        sd: 1.0
+      l_c1_s15_fw:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_c1_s15_fc:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      se_c1_s15:
+        dist: half_normal
+        sd: 1.0
+      l_c1_s16_fw:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_c1_s16_fc:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      se_c1_s16:
+        dist: half_normal
+        sd: 1.0
+      l_c1_s17_fw:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_c1_s17_fc:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      se_c1_s17:
+        dist: half_normal
+        sd: 1.0
+      l_c1_s18_fw:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_c1_s18_fc:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      se_c1_s18:
+        dist: half_normal
+        sd: 1.0
+      l_c1_s19_fw:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_c1_s19_fc:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      se_c1_s19:
+        dist: half_normal
+        sd: 1.0
+      l_c1_s20_fw:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_c1_s20_fc:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      se_c1_s20:
+        dist: half_normal
+        sd: 1.0
+      l_c2_s1_fw:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      se_c2_s1:
+        dist: half_normal
+        sd: 1.0
+      l_c2_s2_fw:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_c2_s2_fc:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      se_c2_s2:
+        dist: half_normal
+        sd: 1.0
+      l_c2_s3_fw:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_c2_s3_fc:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      se_c2_s3:
+        dist: half_normal
+        sd: 1.0
+      l_c2_s4_fw:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_c2_s4_fc:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      se_c2_s4:
+        dist: half_normal
+        sd: 1.0
+      l_c2_s5_fw:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_c2_s5_fc:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      se_c2_s5:
+        dist: half_normal
+        sd: 1.0
+      l_c2_s6_fw:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_c2_s6_fc:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      se_c2_s6:
+        dist: half_normal
+        sd: 1.0
+      l_c2_s7_fw:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_c2_s7_fc:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      se_c2_s7:
+        dist: half_normal
+        sd: 1.0
+      l_c2_s8_fw:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_c2_s8_fc:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      se_c2_s8:
+        dist: half_normal
+        sd: 1.0
+      l_c2_s9_fw:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_c2_s9_fc:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      se_c2_s9:
+        dist: half_normal
+        sd: 1.0
+      l_c2_s10_fw:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_c2_s10_fc:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      se_c2_s10:
+        dist: half_normal
+        sd: 1.0
+      l_c2_s11_fw:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_c2_s11_fc:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      se_c2_s11:
+        dist: half_normal
+        sd: 1.0
+      l_c2_s12_fw:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_c2_s12_fc:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      se_c2_s12:
+        dist: half_normal
+        sd: 1.0
+      l_c2_s13_fw:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_c2_s13_fc:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      se_c2_s13:
+        dist: half_normal
+        sd: 1.0
+      l_c2_s14_fw:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_c2_s14_fc:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      se_c2_s14:
+        dist: half_normal
+        sd: 1.0
+      l_c2_s15_fw:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_c2_s15_fc:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      se_c2_s15:
+        dist: half_normal
+        sd: 1.0
+      l_c2_s16_fw:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_c2_s16_fc:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      se_c2_s16:
+        dist: half_normal
+        sd: 1.0
+      l_c2_s17_fw:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_c2_s17_fc:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      se_c2_s17:
+        dist: half_normal
+        sd: 1.0
+      l_c2_s18_fw:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_c2_s18_fc:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      se_c2_s18:
+        dist: half_normal
+        sd: 1.0
+      l_c2_s19_fw:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_c2_s19_fc:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      se_c2_s19:
+        dist: half_normal
+        sd: 1.0
+      l_c2_s20_fw:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      l_c2_s20_fc:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      se_c2_s20:
+        dist: half_normal
+        sd: 1.0
+      a1_fw:
+        dist: normal
+        mu: 0.5
+        sd: 0.3
+        lower: null
+        upper: null
+      a2_fw:
+        dist: normal
+        mu: 0.0
+        sd: 0.3
+        lower: null
+        upper: null
+      a1_fc1:
+        dist: normal
+        mu: 0.5
+        sd: 0.3
+        lower: null
+        upper: null
+      a2_fc1:
+        dist: normal
+        mu: 0.0
+        sd: 0.3
+        lower: null
+        upper: null
+      a1_fc2:
+        dist: normal
+        mu: 0.5
+        sd: 0.3
+        lower: null
+        upper: null
+      a2_fc2:
+        dist: normal
+        mu: 0.0
+        sd: 0.3
+        lower: null
+        upper: null
+    shocks:
+      e_c1_s1:
+        sd: se_c1_s1
+        sv: null
+      e_c1_s2:
+        sd: se_c1_s2
+        sv: null
+      e_c1_s3:
+        sd: se_c1_s3
+        sv: null
+      e_c1_s4:
+        sd: se_c1_s4
+        sv: null
+      e_c1_s5:
+        sd: se_c1_s5
+        sv: null
+      e_c1_s6:
+        sd: se_c1_s6
+        sv: null
+      e_c1_s7:
+        sd: se_c1_s7
+        sv: null
+      e_c1_s8:
+        sd: se_c1_s8
+        sv: null
+      e_c1_s9:
+        sd: se_c1_s9
+        sv: null
+      e_c1_s10:
+        sd: se_c1_s10
+        sv: null
+      e_c1_s11:
+        sd: se_c1_s11
+        sv: null
+      e_c1_s12:
+        sd: se_c1_s12
+        sv: null
+      e_c1_s13:
+        sd: se_c1_s13
+        sv: null
+      e_c1_s14:
+        sd: se_c1_s14
+        sv: null
+      e_c1_s15:
+        sd: se_c1_s15
+        sv: null
+      e_c1_s16:
+        sd: se_c1_s16
+        sv: null
+      e_c1_s17:
+        sd: se_c1_s17
+        sv: null
+      e_c1_s18:
+        sd: se_c1_s18
+        sv: null
+      e_c1_s19:
+        sd: se_c1_s19
+        sv: null
+      e_c1_s20:
+        sd: se_c1_s20
+        sv: null
+      e_c2_s1:
+        sd: se_c2_s1
+        sv: null
+      e_c2_s2:
+        sd: se_c2_s2
+        sv: null
+      e_c2_s3:
+        sd: se_c2_s3
+        sv: null
+      e_c2_s4:
+        sd: se_c2_s4
+        sv: null
+      e_c2_s5:
+        sd: se_c2_s5
+        sv: null
+      e_c2_s6:
+        sd: se_c2_s6
+        sv: null
+      e_c2_s7:
+        sd: se_c2_s7
+        sv: null
+      e_c2_s8:
+        sd: se_c2_s8
+        sv: null
+      e_c2_s9:
+        sd: se_c2_s9
+        sv: null
+      e_c2_s10:
+        sd: se_c2_s10
+        sv: null
+      e_c2_s11:
+        sd: se_c2_s11
+        sv: null
+      e_c2_s12:
+        sd: se_c2_s12
+        sv: null
+      e_c2_s13:
+        sd: se_c2_s13
+        sv: null
+      e_c2_s14:
+        sd: se_c2_s14
+        sv: null
+      e_c2_s15:
+        sd: se_c2_s15
+        sv: null
+      e_c2_s16:
+        sd: se_c2_s16
+        sv: null
+      e_c2_s17:
+        sd: se_c2_s17
+        sv: null
+      e_c2_s18:
+        sd: se_c2_s18
+        sv: null
+      e_c2_s19:
+        sd: se_c2_s19
+        sv: null
+      e_c2_s20:
+        sd: se_c2_s20
+        sv: null
+      eta_fw:
+        sd: null
+        sv:
+          sigma_h:
+            dist: half_normal
+            sd: 0.2
+          h0_sd: 1.0
+          mu_h0: 0.0
+      eta_fc1:
+        sd: null
+        sv:
+          sigma_h:
+            dist: half_normal
+            sd: 0.2
+          h0_sd: 1.0
+          mu_h0: 0.0
+      eta_fc2:
+        sd: null
+        sv:
+          sigma_h:
+            dist: half_normal
+            sd: 0.2
+          h0_sd: 1.0
+          mu_h0: 0.0
+    initial_state:
+      fw:
+        mean: 0.0
+        sd: 1.0
+      fc1:
+        mean: 0.0
+        sd: 1.0
+      fc2:
+        mean: 0.0
+        sd: 1.0
+    forecast_rules: {}
+data:
+  file: ../data/ch7_dfm_sim.csv
+  date_column: date
+  mapping:
+    c1_s1: c1_s1
+    c1_s2: c1_s2
+    c1_s3: c1_s3
+    c1_s4: c1_s4
+    c1_s5: c1_s5
+    c1_s6: c1_s6
+    c1_s7: c1_s7
+    c1_s8: c1_s8
+    c1_s9: c1_s9
+    c1_s10: c1_s10
+    c1_s11: c1_s11
+    c1_s12: c1_s12
+    c1_s13: c1_s13
+    c1_s14: c1_s14
+    c1_s15: c1_s15
+    c1_s16: c1_s16
+    c1_s17: c1_s17
+    c1_s18: c1_s18
+    c1_s19: c1_s19
+    c1_s20: c1_s20
+    c2_s1: c2_s1
+    c2_s2: c2_s2
+    c2_s3: c2_s3
+    c2_s4: c2_s4
+    c2_s5: c2_s5
+    c2_s6: c2_s6
+    c2_s7: c2_s7
+    c2_s8: c2_s8
+    c2_s9: c2_s9
+    c2_s10: c2_s10
+    c2_s11: c2_s11
+    c2_s12: c2_s12
+    c2_s13: c2_s13
+    c2_s14: c2_s14
+    c2_s15: c2_s15
+    c2_s16: c2_s16
+    c2_s17: c2_s17
+    c2_s18: c2_s18
+    c2_s19: c2_s19
+    c2_s20: c2_s20
+  sample:
+    start: null
+    end: null
+priors: {}
+sampler:
+  chains: 2
+  warmup: 200
+  sampling: 200
+  adapt_delta: 0.9
+  max_treedepth: 10
+  seed: 20260905
+outputs:
+  horizon: 8
+  irf_horizon: 12
+  irf_vol_reference: end_of_sample
+  irf_dates: []
+  smoother_draws:
+    thin: 4
+  prior_predictive_draws: 20
+qc:
+  mirror_check: true
+  mirror_points: 5
+  mirror_tolerance: 1.0e-08
+  mirror_rtol: 1.0e-11
+  mirror_seed: 20260904
