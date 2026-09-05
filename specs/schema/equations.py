@@ -21,6 +21,15 @@ NOT a lexical property -- :func:`linearize` takes the classification from
 the declaration (the options model knows the declared observables,
 exogenous series, states, shocks and parameters). The parser is agnostic.
 
+S9 (E4, plans/S9-plan.md): the linear form may carry PRODUCT terms -- a
+state (any lag) multiplied by a data series (a lagged observable, a
+``mean()`` of lags of one observable, or an exogenous series at any lag)
+-- the one bilinear shape that compiles to a data-dependent measurement
+loading ``Z_t``. :func:`linearize` classifies such a product when the
+caller's ``kind_of`` distinguishes ``"state"`` / ``"observable"`` /
+``"exogenous"`` / ``"shock"``; every other product of symbol-carrying
+factors keeps the S7 rejection.
+
 Canonical form (:meth:`Expr.emit`): re-emission from the tree with fixed
 spacing and float formatting, TERM ORDER PRESERVED (plans/S7-plan.md open
 question 2: term order determines regressor-column order, so it is
@@ -454,7 +463,24 @@ class MeanTerm:
     lags: tuple[int, ...]
 
 
-Term = SeriesTerm | MeanTerm
+@dataclass(frozen=True)
+class ProductTerm:
+    """S9 E4: ``state * data`` -- ``state`` a :class:`SeriesTerm` naming a
+    state at lag >= 0, ``data`` a :class:`SeriesTerm` (a lagged observable,
+    lag >= 1, or an exogenous series, lag >= 0) or a :class:`MeanTerm`.
+    Compiles to an entry of the data-dependent loading ``Zx_j`` on the
+    data factor's feedback column ``j``."""
+
+    state: SeriesTerm
+    data: "SeriesTerm | MeanTerm"
+
+
+Term = SeriesTerm | MeanTerm | ProductTerm
+
+#: The ``kind_of`` answers :func:`linearize` treats as a series/shock (a
+#: symbol-carrying factor); ``"symbol"`` is the S7 coarse answer, which may
+#: not be multiplied by another symbol.
+_SYMBOL_KINDS = frozenset({"symbol", "state", "observable", "exogenous", "shock"})
 
 
 class LinearityError(ValueError):
@@ -513,14 +539,50 @@ def _add_opt(a: Expr | None, b: Expr | None) -> Expr | None:
     return _add_coef(a, b)
 
 
+def _product_term(a: Term, b: Term, kind_of: Callable[[str], str | None]) -> ProductTerm | None:
+    """The E4 classification of ``a * b``: exactly one factor a STATE
+    (any lag) and the other a data series -- a lagged observable
+    (lag >= 1), a ``mean()`` of one observable, or an exogenous series at
+    any lag (0 included, E2). ``None`` for every other pair."""
+    def is_state(t: Term) -> bool:
+        return isinstance(t, SeriesTerm) and kind_of(t.name) == "state"
+
+    def is_data(t: Term) -> bool:
+        if isinstance(t, MeanTerm):
+            return kind_of(t.name) == "observable"
+        if isinstance(t, SeriesTerm):
+            k = kind_of(t.name)
+            return (k == "observable" and t.lag >= 1) or k == "exogenous"
+        return False
+
+    if is_state(a) and is_data(b):
+        return ProductTerm(a, b)
+    if is_state(b) and is_data(a):
+        return ProductTerm(b, a)
+    return None
+
+
+def _term_text(t: Term) -> str:
+    if isinstance(t, ProductTerm):
+        return f"{_term_text(t.state)}*{_term_text(t.data)}"
+    if isinstance(t, MeanTerm):
+        return "mean(" + ", ".join(f"{t.name}[-{k}]" for k in t.lags) + ")"
+    return t.name if t.lag == 0 else f"{t.name}[-{t.lag}]"
+
+
 def linearize(expr: Expr, kind_of: Callable[[str], str | None], *, equation: str = "") -> LinearForm:
     """Distribute ``expr`` into a :class:`LinearForm`. ``kind_of(name)``
-    returns ``"symbol"`` for a series/shock, ``"param"`` for a parameter,
-    or ``None`` for an undeclared name (a hard error naming it).
+    returns ``"symbol"`` for a series/shock (or, finer, ``"state"`` /
+    ``"observable"`` / ``"exogenous"`` / ``"shock"`` -- S9), ``"param"``
+    for a parameter, or ``None`` for an undeclared name (a hard error
+    naming it).
 
     Rejected, each with a message naming the limitation: a product of two
-    symbol-carrying factors (nonlinear), a symbol in a denominator, a
-    lagged or mean()'d name that is a parameter.
+    symbol-carrying factors (nonlinear) OTHER than the E4 shape (S9: a
+    state times a lagged observable / mean() / exogenous series, which
+    becomes a :class:`ProductTerm`; only when ``kind_of`` distinguishes
+    the kinds), a symbol in a denominator, a lagged or mean()'d name that
+    is a parameter.
     """
     where = f" in equation {equation!r}" if equation else ""
 
@@ -529,21 +591,21 @@ def linearize(expr: Expr, kind_of: Callable[[str], str | None], *, equation: str
             return LinearForm({}, node)
         if isinstance(node, Name):
             kind = kind_of(node.name)
-            if kind == "symbol":
+            if kind in _SYMBOL_KINDS:
                 return LinearForm({SeriesTerm(node.name, 0): Num(1.0)})
             if kind == "param":
                 return LinearForm({}, node)
             raise LinearityError(f"Unknown name {node.name!r}{where}: it is not a declared observable, exogenous series, state, shock or parameter.")
         if isinstance(node, LagRef):
             kind = kind_of(node.name)
-            if kind == "symbol":
+            if kind in _SYMBOL_KINDS:
                 return LinearForm({SeriesTerm(node.name, node.lag): Num(1.0)})
             if kind == "param":
                 raise LinearityError(f"{node.emit()}{where}: {node.name!r} is a parameter; parameters cannot be lagged.")
             raise LinearityError(f"Unknown name {node.name!r}{where} (referenced as {node.emit()}).")
         if isinstance(node, MeanRef):
             kind = kind_of(node.name)
-            if kind == "symbol":
+            if kind in _SYMBOL_KINDS:
                 return LinearForm({MeanTerm(node.name, node.lags): Num(1.0)})
             if kind == "param":
                 raise LinearityError(f"{node.emit()}{where}: {node.name!r} is a parameter; mean() takes lags of a series.")
@@ -564,11 +626,33 @@ def linearize(expr: Expr, kind_of: Callable[[str], str | None], *, equation: str
             left = rec(node.left)
             right = rec(node.right)
             if left.has_terms and right.has_terms:
-                raise LinearityError(
-                    f"{node.emit()}{where} multiplies two series/shock terms -- the model must be "
-                    f"LINEAR in states, observables, exogenous series and shocks (nonlinear "
-                    f"state-space models are outside this stage's scope)."
-                )
+                # S9 E4: (terms_L + c_L) * (terms_R + c_R) distributes; every
+                # term x term pair must be the one allowed bilinear shape.
+                terms: dict[Term, Expr] = {}
+                for ta, ca in left.terms.items():
+                    for tb, cb in right.terms.items():
+                        prod = _product_term(ta, tb, kind_of)
+                        if prod is None:
+                            raise LinearityError(
+                                f"{node.emit()}{where} multiplies two series/shock terms -- the model must be "
+                                f"LINEAR in states, observables, exogenous series and shocks (nonlinear "
+                                f"state-space models are outside this stage's scope). The one product allowed "
+                                f"(S9 E4, a time-varying coefficient) is a STATE times a lagged observable, a "
+                                f"mean() of one observable, or an exogenous series -- {_term_text(ta)}*{_term_text(tb)} "
+                                f"is not of that shape."
+                            )
+                        c = _simplify_mul(ca, cb)
+                        terms[prod] = _add_coef(terms[prod], c) if prod in terms else c
+                if right.const is not None:
+                    for t, c in left.terms.items():
+                        v = _simplify_mul(c, right.const)
+                        terms[t] = _add_coef(terms[t], v) if t in terms else v
+                if left.const is not None:
+                    for t, c in right.terms.items():
+                        v = _simplify_mul(left.const, c)
+                        terms[t] = _add_coef(terms[t], v) if t in terms else v
+                const = None if left.const is None or right.const is None else _simplify_mul(left.const, right.const)
+                return LinearForm(terms, const)
             if right.has_terms:
                 left, right = right, left
             if left.has_terms:
@@ -626,6 +710,13 @@ def evaluate(expr: Expr, params: dict) -> float:
     if isinstance(expr, Div):
         return evaluate(expr.left, params) / evaluate(expr.right, params)
     raise TypeError(f"Cannot evaluate {type(expr).__name__} as a coefficient (series references are not coefficients).")
+
+
+def term_names(term: Term) -> tuple[str, ...]:
+    """The series names a term references (both factors of a product)."""
+    if isinstance(term, ProductTerm):
+        return (term.state.name, term.data.name)
+    return (term.name,)
 
 
 def name_occurrences(expr: Expr) -> dict[str, int]:

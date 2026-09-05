@@ -3,6 +3,172 @@
 One dated line per judgment call not fixed by the spec, with rationale.
 Newest first.
 
+- **2026-09-05 — S9 numerics-reviewer pass over the WP1-WP3 change set
+  (before the commit): NO must-fix; two should-fix, both dispositioned.**
+  The reviewer hand-traced the eight `(Q, Z, R)` overload combinations
+  of `kalman_loglik_tv.stan` (unique resolution; constant-Z arithmetic
+  bit-identical, the exact-0.0 pin expected rather than lucky), the
+  mirror's `_as_Z_path`/`_kf_core`, the DK smoother's shared `Z_t` path
+  across the plus path and the two smooths, decision 6's induction
+  (`observable_recursion`/`observable_bars`/`impulse_response`), the E4
+  classification and its rejections, the `coefficient_shocks`
+  reachability, the entry-by-entry `Zt` operation order, the E3 generic
+  rank check over regressor columns, `is_stationary(xi_ref=)`, and the
+  hash lineage. Should-fix 1: `make_data.py`'s example-1 DGP leaves row
+  0 of `Y` at exactly 0.0 -- CONFIRMED and KEPT: that is the handbook
+  script's own behaviour (`for j=2:t` leaves `Y(1) = 0`, `Beta(1) = 0`;
+  its `e1(1)` is drawn and discarded), now stated in the converter's
+  comment; the committed fixture and the recorded run are unchanged.
+  Should-fix 2: the FEVD figure warned "All-NaN slice" on the TVP
+  regression -- traced: the state target `beta` has no response to the
+  only listed shock (`e`, a measurement shock), so its shares are NaN
+  by `fevd`'s documented contract (zero total variance); the plot now
+  computes the median under a filter for that specific warning, the
+  value unchanged. The reviewer's notes confirm the S8 test-tolerance
+  fix and the HD-identity gate's relative term as earned, not masked.
+
+- **2026-09-05 — S9 WP1-WP4 landed: time-varying parameters via
+  data-dependent measurement loadings (E4); the shared filter takes a
+  `Z_t` path; the run-hash consequence taken once more.** The design and
+  its seven decisions are in `plans/S9-plan.md`. Baseline at stage start
+  (fresh container, CmdStan 2.36.0): the fast suite on the untouched tree
+  reached **296 passed** before ONE pre-existing failure,
+  `test_s8_stan.py::test_e5_var2_posterior_means_match_ols_and_reduced_form_sigma`
+  -- the recursive VAR's Cholesky-impact check compared a near-zero
+  off-diagonal (-0.019 vs -0.023, 0.0035 in absolute terms, over a
+  thinned draw subset) with a pure relative tolerance; the comparison
+  now carries `atol = 0.05 sqrt(scale)` on chol(Sigma)'s own scale, as
+  the Sigma check next to it already did (a test-tolerance judgment, not
+  a numerics change), after which the remaining files gave **117 passed**
+  (the full pre-S9 count is 408 with the fix). The same test then failed
+  at a later assertion the baseline never reached (its first failure
+  stopped it): the Waggoner-Zha conditioned path reproduced the target
+  to 1.1e-7 on one of 480 elements against a hard 1e-8 absolute -- a
+  pseudo-inverse solve over posterior draws whose conditioning is
+  draw-dependent; now 1e-6 absolute (the post-processor's own synthetic
+  tests keep their tight tolerances). Every no-loadings code path is
+  bit-identical to S8 (the constant-Z pin, the `loadings is None`
+  branches), so both are container-dependent draw fragilities of one
+  pre-existing test. Final fast suite on the S9 tree: **450 passed, 8
+  deselected** (a full run gave 449 passed with that one assertion
+  failing; the test passes alone after the tolerance change, ~15 min
+  for the suite on a contended 4-core container). What was decided and
+  measured:
+  (1) **The hash decision (plan decision 1).** `kalman_loglik_tv.stan`'s
+  core now takes `array[] matrix Z` (`Z[t]` at step t) with seven
+  delegating `rep_array` overloads (four constant-Z signatures = every
+  pre-S9 call site, three array-Z signatures); every family inlining the
+  filter re-identifies once. Proven harmless three ways: the Stan
+  constant-Z log-likelihoods at G1's 50 points on ALL FIVE S8 paths
+  reproduce a fixture captured from the UNTOUCHED S8 program before any
+  `stan/` edit (`tests/fixtures/g1/pre_zt_stan_loglik.csv`, whose three
+  S3 columns equal `pre_qt_stan_loglik.csv` value for value) with
+  difference EXACTLY 0.0 (asserted `==`); a constant Z tiled into a
+  (T, m, n) path gives a bit-identical Python log-likelihood; G5a/G6/the
+  smoother suites unchanged. G1 now runs SEVEN paths: max |Stan - Python|
+  = 5.5e-12 (constant) / 5.5e-12 (tv-R) / 1.8e-12 (R-SV) / 7.3e-12 (tv-Q)
+  / 7.3e-12 (Q-SV) / 7.3e-12 (tv-Z, `loglik_tvz`) / 1.8e-12 (the full
+  `Z_t`+`Q_t`+`R_t` core, `loglik_tvzqr`), gate 1e-8. The two render
+  pins were regenerated ONCE (this entry is the recorded decision:
+  `tests/fixtures/render/s7_existing_family_hashes.json`,
+  `tests/fixtures/render/lw_sv_no_sv.stan`); the identity lineage is in
+  `examples/us_lw_sv/README.md` (S6 -> S9: `8ba1420a4145` ->
+  `08e472b94cda`, `ec87f45d0a43` -> `cd4a876dd00e`, `915189548222` ->
+  `5b6e46d54c88`, `7e45c3e6524c` -> `39e70ef8cf85`) and
+  `examples/us_ucsv/README.md` (`f2b48ebc98a4` -> `6f4d5d043436`;
+  full vintage `bd55f3a3f061`); the archived runs stay valid records
+  under their old identities; the S8 handbook smoke records keep their
+  S8-program run ids (re-running them buys nothing; every record says
+  "smoke"). The S8 handbook spec files gained the new `outputs.irf_dates:
+  []` line on rebuild (report options, outside the estimation identity).
+  (2) **The grammar (decisions 2-5).** `linearize` classifies a product
+  of two symbol-carrying factors when the caller distinguishes state /
+  observable / exogenous / shock kinds: exactly one factor a state (any
+  lag), the other a lagged observable, a `mean()`, or an exogenous series
+  at any lag (E2's lag 0 included), optionally times a coefficient
+  expression; `(b + 1)*u[-1]` distributes into a product and a plain
+  regressor. Everything else keeps the S7 message ("multiplies two
+  series/shock terms ...") extended by one sentence naming the E4 shape
+  (state x state, shock x data, data x data, a triple product, a state x
+  CONTEMPORANEOUS observable); a product in a transition equation is
+  rejected as E6 (a data-dependent `F_t`, S10). The product's data
+  factor IS a feedback-map column; `Z_t = Z0 + sum_j x_t[j] Zx_j`; E5
+  composes `Zx` rows with the substitution coefficient; the E3 rank rule
+  evaluates `Z_t` at generic parameter AND regressor values; the Stan
+  text `z0 + (c1) * x[t, j1] + ...` and the Python dense accumulation in
+  column order perform identical floating-point operations entry by
+  entry (`+ 0.0`, `* 1.0` exact). Measured (`tests/test_s9_grammar.py`,
+  `tests/test_s9_stan.py`, marker `authored`): the compiled `Zx` and
+  `Z_t` path equal a hand construction at prior draws to 1e-15; the
+  rendered programs mirror the Python KF at 50 prior draws -- the TVP
+  regression (numeric `Zt` in transformed data) at 4.6e-13, the
+  TVP-AR(1) with SV (`Zt` + `Rt`) at 3.6e-12, the recursive TVP-VAR
+  (parameter-dependent `Zt` in transformed parameters, E5-composed) at
+  6.6e-11 (gate max(1e-8, 1e-11 |loglik|)).
+  (3) **The engine (decision 6).** Coefficient states are STRUCTURE,
+  additive states are COMPONENTS: the forward simulation runs the full
+  bilinear system (`Z_t` from the simulated regressors, the coefficients
+  drawn as states); the HD holds the coefficients at the drawn path in
+  every bar while each bar feeds its own observables back through them,
+  so the bars sum to the observables exactly (measured 1e-9 relative on
+  the TVP-AR(1) at prior draws; the fast tier's identity gate applies
+  unchanged); IRFs are conditional on the DK-drawn coefficient state at
+  `outputs.irf_dates` (default the last row; the handbook's example 3
+  practice) and the dated IRF of a measurement shock equals the hand
+  recursion `b_tau^h` to 1e-13; a state shock whose loaded slots reach no
+  additively-loaded slot through F's pattern (`coefficient_shocks`,
+  structural) has no additive bar and no response from rest -- the HD
+  and IRF modules OMIT it and say why in the caption (the TVP regression's
+  bars are `init, e, exog`; the TVP-AR(1)'s `init, eta_c, e`). The fan's
+  omitted-with-reason rule is unchanged. The stationarity filter of the
+  identity gate takes the feedback coefficients at the initial-state
+  mean (decision 7).
+  (4) **Oracles.** (a) The TVP regression at `sigma_eta = 0`, `P00 = 0`
+  equals the E2 constant-coefficient program's likelihood at `beta =
+  xi00` EXACTLY (diff 0.0 at 50 points -- identical operations) and, with
+  `P00 > 0`, the closed-form marginal likelihood (matrix determinant
+  lemma) to 1e-9 relative. (b, i) The handbook's own `example1.m` filter
+  loop, transcribed, reproduces `kalman_smoother`'s filtered `beta_{t|t}`
+  and `P_{t|t}` on the committed DGP simulation (seed 20260905, T = 500,
+  Q = 0.001, R = 0.01) to 1e-10 / 1e-12. (b, ii) and (c) recorded below
+  once the fits finish (the example-1 fit; the TVP-AR(1)-SV recovery
+  design: T = 150, `xi00 = (0.5, 0.5)`, `P00 = diag(0.25, 0.04)`,
+  `mu_h0_e = ln 0.25`, 20 datasets, 2 chains x 500/500, seed base
+  20260919, coverage band [0.80, 0.97], per-parameter floor 0.6 --
+  pre-registered here before any run; the fast suite carries a 2-dataset
+  smoke of the same design).
+  (5) **The HD identity gate gained the mirror gate's S8 shape**: a
+  family's ``reconstruct`` may return ``(error, scale)`` with ``scale``
+  the draw's largest bar magnitude and the gate is ``error <
+  max(1e-6, 1e-12 scale)``. Cause: the TVP-AR(1)-SV example's first
+  fast tier FAILED at 3.08e-6 -- diagnosed, not tuned: on that draw the
+  DK-drawn ``b_t`` exceeded 1 for 262 of 374 periods, every bar's own
+  path reached 2.2e9, and the 3e-6 residual is 1.4e-15 of the cancelling
+  magnitude, while the four non-explosive draws reconstructed at 1e-12
+  or better (a parameter-level stationarity filter cannot see a drawn
+  coefficient PATH, and requiring a path stationary at every period
+  would reject essentially every TVP draw). 1e-12 of the largest bar is
+  far below any structural error and inert for every stationary draw
+  (the hand families return a bare error and keep the absolute gate).
+  Recorded as a gate change, like the S8 relative mirror term.
+  (6) **The TVP-VAR's drift prior** was first set at ``half_normal(0.05)``
+  per equation: the smoke run (`dcecdbe59258`) let the coefficient drift
+  absorb the innovations (the ffr shock's posterior scale 0.06 pp). The
+  handbook's ``Q0 = V0 T0 3.5e-4`` implies a per-coefficient random-walk
+  sd of ``0.118 sqrt(V0_ii)``, about 0.01 for the lag coefficients; the
+  example now uses ``half_normal(0.01)``; the re-run (`2ee4bc9e9b98`,
+  379 s, mirror 3.3e-10, fast tier PASS) still shows the ffr equation's
+  drift scale pulled to 0.05 against that prior with an innovation scale
+  of 0.09 pp: a per-equation drift scale shared by the intercept and the
+  lag coefficients lets the random-walk intercept stand in for the funds
+  rate's persistence (the handbook's tight IW Q0 and stability rejection
+  prevent it). Stated in the README record (the scale posteriors are
+  part of it), not tuned away in a smoke run; a per-coefficient or fixed
+  drift scale is the modeling response.
+  (7) One numerics-reviewer pass ran over the WP1-WP3 change set before
+  the commit; findings and disposition are recorded in the entry that
+  follows this one (kept separate so the review is auditable).
+
 - **2026-09-05 — S8 stage record (WP1-WP3 complete, WP4 in progress;
   branch `claude/s8-grammar-var-extensions-o193mw`, pushed; PR #9).**
   Baseline at stage start: fast suite **382 passed, 0 skipped** on a

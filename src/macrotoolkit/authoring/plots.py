@@ -71,12 +71,22 @@ def plot_states(sd: "StateDraws", run: "AuthoredRun") -> Figure:
 
 
 def plot_irf_matrix(irf: "IRFDraws", run: "AuthoredRun") -> Figure:
+    """For a dated IRF (S9 E4, ``irf.by_date``) the reference dates are
+    overlaid per panel (one colour per date, the band of each); the
+    omitted coefficient-only shocks are named in the figure text."""
     h = np.arange(1, irf.horizon + 1)
+    dated = irf.by_date if irf.by_date and len(irf.by_date) > 1 else None
     fig, axes = plt.subplots(len(irf.shocks), len(irf.targets), figsize=(3.0 * len(irf.targets) + 2, 2.4 * len(irf.shocks) + 1.5), sharex=True, squeeze=False)
     for i, shock in enumerate(irf.shocks):
         for j, target in enumerate(irf.targets):
             ax = axes[i][j]
-            _plot_band(ax, h, irf.responses[shock][target], "tab:blue", target)
+            if dated is None:
+                _plot_band(ax, h, irf.responses[shock][target], "tab:blue", target)
+            else:
+                for k, (lab, resp) in enumerate(dated.items()):
+                    _plot_band(ax, h, resp[shock][target], _PALETTE[k % len(_PALETTE)], f"{target} @ {lab}")
+                if i == 0 and j == 0:
+                    ax.legend(fontsize=6, loc="best")
             ax.axhline(0.0, color=_ZERO_COLOR, linewidth=0.8, linestyle="--")
             if i == 0:
                 ax.set_title(target, fontsize=10)
@@ -89,8 +99,12 @@ def plot_irf_matrix(irf: "IRFDraws", run: "AuthoredRun") -> Figure:
         f"{run.compiled.name}: IRFs -- 1 s.d. shock at irf_vol_reference={run.spec.outputs.irf_vol_reference!r} (median + 68%/90% bands)",
         fontsize=11,
     )
-    fig.text(0.5, 0.94, "Convention: responses from rest through the measurement equation as written (feedback via the declared lags); states shown at their carried slot.",
-             ha="center", fontsize=8.5, color="0.35")
+    note = "Convention: responses from rest through the measurement equation as written (feedback via the declared lags); states shown at their carried slot."
+    if irf.reference_dates:
+        note += f" Time-varying coefficients held at the DK-drawn state on {', '.join(irf.reference_dates)}."
+    if irf.omitted_shocks:
+        note += f" Omitted (coefficient-only, no response from rest): {', '.join(irf.omitted_shocks)}."
+    fig.text(0.5, 0.94, note, ha="center", fontsize=8.5, color="0.35", wrap=True)
     fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.93))
     return fig
 
@@ -102,6 +116,12 @@ def plot_fevd(fv: "FEVDDraws", run: "AuthoredRun") -> Figure:
     fig, axes = plt.subplots(1, len(fv.targets), figsize=(3.6 * len(fv.targets) + 1.5, 3.6), squeeze=False)
     colors = _colors(fv.shocks)
     for ax, t in zip(axes[0], fv.targets):
+        import warnings
+
+    with warnings.catch_warnings():
+        # A target with no variance from any listed shock (e.g. a coefficient state under a measurement shock)
+        # has NaN shares by `fevd`'s contract; the all-NaN median is the intended value, not a warning.
+        warnings.filterwarnings("ignore", message="All-NaN slice encountered", category=RuntimeWarning)
         med = np.array([np.nanmedian(fv.shares[t][s], axis=0) for s in fv.shocks])
         tot = np.nansum(med, axis=0)
         tot[tot == 0.0] = np.nan

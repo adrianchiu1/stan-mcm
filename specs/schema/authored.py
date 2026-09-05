@@ -26,9 +26,12 @@ optional drift (E1); no transition equation at all (a pure regression /
 VAR, E0); non-centered random-walk log-variance SV on any shock; explicit
 initial conditions; priors from the menu the existing templates stamp
 (normal with optional truncation bounds, half_normal, beta).
-Nonlinearities, regime switching, missing data, mixed frequency,
-data-dependent/time-varying loadings and exact-diffuse initialization are
-rejected with a message.
+A STATE multiplied by a lagged observable, a ``mean()`` of one
+observable or an exogenous series (S9 E4: a time-varying coefficient,
+compiled to a data-dependent loading ``Z_t``) is allowed in a measurement
+equation. Nonlinearities beyond that one bilinear shape, regime
+switching, missing data, mixed frequency, time-varying transitions and
+exact-diffuse initialization are rejected with a message.
 """
 from __future__ import annotations
 
@@ -360,6 +363,11 @@ class AuthoredOutputs(BaseModel):
     horizon: int = Field(default=12, ge=1)
     irf_horizon: int = Field(default=20, ge=1)
     irf_vol_reference: Literal["end_of_sample", "sample_mean"] = "end_of_sample"
+    #: S9 E4: for a model with data-dependent loadings the IRFs are
+    #: conditional on the coefficient state at a reference date; these ISO
+    #: dates (estimation rows) select them -- empty = the last estimation
+    #: row. Ignored for a model without products.
+    irf_dates: list[str] = Field(default_factory=list)
     smoother_draws: Literal["all"] | ThinSpec = "all"
     prior_predictive_draws: int = Field(default=200, ge=1)
 

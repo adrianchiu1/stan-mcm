@@ -117,7 +117,11 @@ OUTPUT_MODULES: tuple[OutputModule, ...] = (
         figure_title="IRF matrix (every shock -> every observable and state)",
         compute=_irf_compute,
         plot=_irf_plot,
-        caption=lambda irf, run: f"{len(irf.shocks)} shocks x {len(irf.targets)} responses, horizon={irf.horizon}, irf_vol_reference={run.spec.outputs.irf_vol_reference!r}.",
+        caption=lambda irf, run: (
+            f"{len(irf.shocks)} shocks x {len(irf.targets)} responses, horizon={irf.horizon}, irf_vol_reference={run.spec.outputs.irf_vol_reference!r}."
+            + (f" Conditional on the DK-drawn coefficient state at {list(irf.reference_dates)} (outputs.irf_dates)." if irf.reference_dates else "")
+            + (f" Omitted: {irf.omitted_reason}" if irf.omitted_reason else "")
+        ),
     ),
     OutputModule(
         name="fevd",
@@ -142,6 +146,14 @@ OUTPUT_MODULES: tuple[OutputModule, ...] = (
         figure_title="Historical decomposition",
         compute=_hd_compute,
         plot=_hd_plot,
-        caption=lambda hdd, run: f"Bars {list(hdd.bars)} sum to each observable per period per draw (the G6 identity).",
+        caption=lambda hdd, run: (
+            f"Bars {list(hdd.bars)} sum to each observable per period per draw (the G6 identity)."
+            + (
+                f" Time-varying coefficients ({list(run.compiled.structure.coefficient_shocks)} move them) are held at the drawn "
+                f"state path in every bar, each bar feeding its own observables back through them; those shocks have no additive "
+                f"bar (their contribution is the coefficient path itself, shown in the states figure)."
+                if run.meta.coefficient_shocks else ""
+            )
+        ),
     ),
 )

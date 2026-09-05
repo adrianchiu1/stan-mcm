@@ -12,7 +12,13 @@ written here; the family contributes only
   ``exp(h/2)`` volatility paths for SV shocks (h is log-VARIANCE);
 - the IRF shock sizes (the draw's constant scale, or ``exp(h_ref/2)`` at
   the reference point -- the established "average h, then convert once"
-  rule for ``sample_mean``);
+  rule for ``sample_mean``); for a model with data-dependent loadings
+  (S9 E4) the IRFs are conditional on the coefficient state at each of
+  ``outputs.irf_dates`` (the DK-drawn state at that row, per draw) and
+  the coefficient-only shocks are omitted with the reason stated;
+- the historical decomposition holds the time-varying coefficients at
+  the drawn path while every bar feeds its own observables back through
+  them (plans/S9-plan.md decision 6), so the G6 identity is exact;
 - the fan chart's noise models (SV shocks continue their log-variance
   random walks through the S6 ``StateNoise``/``MeasurementNoise``
   protocols) and the exogenous forecast rules declared in the model
@@ -138,11 +144,13 @@ def matrices_for_draw(compiled: CompiledModel, flat: Mapping[str, np.ndarray], i
     and ``h_<shock>`` paths."""
     params = {name: float(flat[name][i]) for name in compiled.param_names}
     h = {s: np.asarray(flat[f"h_{s}"][i], dtype=np.float64) for s in compiled.sv_shocks}
-    F, Q, A, Z, R = compiled.build_matrices(params, h=h or None, T=T)
+    F, Q, A, Z, R = compiled.build_F(params), compiled.build_Q(params, h or None, T), compiled.build_A(params), compiled.build_Z(params), compiled.build_R(params, h or None, T)
     extras: dict[str, Any] = dict(params)
     for s, path in h.items():
         extras[f"h_{s}"] = path
-    return DrawMatrices(F=F, Q=Q, A=A, Z=Z, R=R, extras=extras, M=compiled.build_M(params))
+    # S9 E4: ``Z`` is the constant part; the KF's Z_t path is built by the
+    # smoother loop from ``loadings`` and the real regressors.
+    return DrawMatrices(F=F, Q=Q, A=A, Z=Z, R=R, extras=extras, M=compiled.build_M(params), loadings=compiled.build_loadings(params))
 
 
 def _draw_loop(run: AuthoredRun, seed: int | None):
@@ -238,7 +246,7 @@ def init_obs_seeds(run_or_compiled, series: Mapping[str, np.ndarray]) -> dict[st
 
 def historical_decomposition_draw(compiled: CompiledModel, dm: DrawMatrices, xi_draw, state_shocks, meas_shocks, x, seeds):
     comps = state_components(dm.F, compiled.meta, xi_draw, state_shocks)
-    bars = observable_bars(dm.A, dm.Z, compiled.meta, comps, meas_shocks, x, seeds, M=dm.M)
+    bars = observable_bars(dm.A, dm.Z, compiled.meta, comps, meas_shocks, x, seeds, M=dm.M, loadings=dm.loadings, coef_path=xi_draw)
     return comps, bars
 
 
@@ -275,7 +283,14 @@ class IRFDraws:
     horizon: int
     shocks: tuple[str, ...]
     targets: tuple[str, ...]  # observables then states
-    responses: dict[str, dict[str, np.ndarray]]  # shock -> target -> (n_draws, H)
+    responses: dict[str, dict[str, np.ndarray]]  # shock -> target -> (n_draws, H); the LAST reference date's for a dated IRF
+    #: S9 E4: for a model with data-dependent loadings, the reference dates
+    #: (ISO) the responses condition on, ``by_date[date][shock][target]``
+    #: per date, and the shocks omitted (coefficient-only) with the reason.
+    reference_dates: tuple[str, ...] = ()
+    by_date: dict[str, dict[str, dict[str, np.ndarray]]] | None = None
+    omitted_shocks: tuple[str, ...] = ()
+    omitted_reason: str | None = None
 
 
 def irf_shock_size(compiled: CompiledModel, shock: str, dm: DrawMatrices, irf_vol_reference: str) -> float:
@@ -293,26 +308,71 @@ def irf_shock_size(compiled: CompiledModel, shock: str, dm: DrawMatrices, irf_vo
     return float(np.exp(h_ref / 2.0))
 
 
-def compute_irf_draws(run: AuthoredRun) -> IRFDraws:
+def irf_reference_rows(run: AuthoredRun) -> list[int]:
+    """The estimation-row indices of ``outputs.irf_dates`` (the last row
+    when none are given); a date outside the estimation rows is an error
+    naming the sample."""
+    dates = run.spec.outputs.irf_dates
+    if not dates:
+        return [run.T - 1]
+    rows = []
+    for d in dates:
+        ts = pd.Timestamp(d)
+        hits = np.flatnonzero(run.dates == ts)
+        if len(hits) != 1:
+            raise ValueError(
+                f"outputs.irf_dates entry {d!r} is not an estimation row of run {run.run_dir.name} "
+                f"({run.dates[0].date()} .. {run.dates[-1].date()}, {run.T} rows)."
+            )
+        rows.append(int(hits[0]))
+    return rows
+
+
+def compute_irf_draws(run: AuthoredRun, *, seed: int | None = None) -> IRFDraws:
     c = run.compiled
     meta = c.meta
-    flat = _flatten(run)
-    n_total = next(iter(flat.values())).shape[0]
-    idx = select_draw_indices(n_total, run.spec.outputs.smoother_draws)
     H = run.spec.outputs.irf_horizon
     vol_ref = run.spec.outputs.irf_vol_reference
-    shocks = tuple(meta.state_shocks) + tuple(meta.measurement_shocks)
     targets = tuple(meta.obs_names) + tuple(state_series_names(c))
-    responses = {s: {t: np.empty((len(idx), H)) for t in targets} for s in shocks}
-    for j, i in enumerate(idx):
-        dm = matrices_for_draw(c, flat, int(i), run.T)
-        for s in shocks:
-            comp, obs = impulse_response(dm.F, dm.A, dm.Z, meta, s, irf_shock_size(c, s, dm, vol_ref), H, M=dm.M)
-            for oi, o in enumerate(meta.obs_names):
-                responses[s][o][j] = obs[:, oi]
-            for st in state_series_names(c):
-                responses[s][st][j] = comp[:, _head_slot(c, st)]
-    return IRFDraws(draw_indices=idx, horizon=H, shocks=shocks, targets=targets, responses=responses)
+    if not meta.has_data_loadings:
+        flat = _flatten(run)
+        n_total = next(iter(flat.values())).shape[0]
+        idx = select_draw_indices(n_total, run.spec.outputs.smoother_draws)
+        shocks = tuple(meta.state_shocks) + tuple(meta.measurement_shocks)
+        responses = {s: {t: np.empty((len(idx), H)) for t in targets} for s in shocks}
+        for j, i in enumerate(idx):
+            dm = matrices_for_draw(c, flat, int(i), run.T)
+            for s in shocks:
+                comp, obs = impulse_response(dm.F, dm.A, dm.Z, meta, s, irf_shock_size(c, s, dm, vol_ref), H, M=dm.M)
+                for oi, o in enumerate(meta.obs_names):
+                    responses[s][o][j] = obs[:, oi]
+                for st in state_series_names(c):
+                    responses[s][st][j] = comp[:, _head_slot(c, st)]
+        return IRFDraws(draw_indices=idx, horizon=H, shocks=shocks, targets=targets, responses=responses)
+    # S9 E4: conditional on the DK-drawn coefficient state at each reference
+    # date; the coefficient-only shocks have no response from rest.
+    rows = irf_reference_rows(run)
+    labels = tuple(str(run.dates[r].date()) for r in rows)
+    shocks = tuple(meta.additive_state_shocks()) + tuple(meta.measurement_shocks)
+    _, idx, _, it = _draw_loop(run, seed)
+    by_date = {lab: {s: {t: np.empty((len(idx), H)) for t in targets} for s in shocks} for lab in labels}
+    for j, (_, dm, sim) in enumerate(it):
+        for r, lab in zip(rows, labels):
+            for s in shocks:
+                comp, obs = impulse_response(dm.F, dm.A, dm.Z, meta, s, irf_shock_size(c, s, dm, vol_ref), H, M=dm.M,
+                                             loadings=dm.loadings, coef_state=sim.xi_draw[r])
+                for oi, o in enumerate(meta.obs_names):
+                    by_date[lab][s][o][j] = obs[:, oi]
+                for st in state_series_names(c):
+                    by_date[lab][s][st][j] = comp[:, _head_slot(c, st)]
+    omitted = tuple(meta.coefficient_shocks)
+    reason = (
+        f"shocks {list(omitted)} move only time-varying coefficients (their loaded states enter the observables "
+        f"through the data-dependent loadings); a coefficient deviation from rest multiplies a zero regressor path, "
+        f"so they have no impulse response from rest and are omitted."
+    ) if omitted else None
+    return IRFDraws(draw_indices=idx, horizon=H, shocks=shocks, targets=targets, responses=by_date[labels[-1]],
+                    reference_dates=labels, by_date=by_date, omitted_shocks=omitted, omitted_reason=reason)
 
 
 @dataclass
@@ -509,7 +569,8 @@ def compute_fan_draws(run: AuthoredRun, *, seed: int | None = None) -> FanDraws:
         # constant shocks by name), so a placeholder is passed explicitly.
         Q_const = dm.Q if dm.Q.ndim == 2 else dm.Q[-1]
         out = simulate_forward(dm.F, Q_const, dm.A, dm.Z, meta, sim.xi_draw[-1], obs_seeds, exog_seeds,
-                               exog_rules_for(c, run.series, n_rows - 1), meas_noise, H, rng, state_noise=state_noise, meas_loading=dm.M)
+                               exog_rules_for(c, run.series, n_rows - 1), meas_noise, H, rng, state_noise=state_noise, meas_loading=dm.M,
+                               loadings=dm.loadings)
         for oi, o in enumerate(meta.obs_names):
             obs[o][j] = out["obs"][:, oi]
         for s in states:
@@ -554,12 +615,15 @@ def compute_prior_predictive_draws(run: AuthoredRun, *, seed: int | None = None)
         params = c.sample_prior_params(priors, rng, run.anchors)
         h0 = {s: params[f"h0_{s}"] for s in c.sv_shocks}
         dm_params = {**params, **{f"h_{s}": np.array([h0[s]]) for s in c.sv_shocks}}
-        F, Q, A, Z, R = c.build_matrices(params, h={s: np.array([h0[s]]) for s in c.sv_shocks} or None, T=1)
-        dm = DrawMatrices(F=F, Q=Q if Q.ndim == 2 else Q[0], A=A, Z=Z, R=R if R.ndim == 2 else R[0], extras=dm_params, M=c.build_M(params))
+        hh = {s: np.array([h0[s]]) for s in c.sv_shocks} or None
+        F, Q, A, Z, R = c.build_F(params), c.build_Q(params, hh, 1), c.build_A(params), c.build_Z(params), c.build_R(params, hh, 1)
+        dm = DrawMatrices(F=F, Q=Q if Q.ndim == 2 else Q[0], A=A, Z=Z, R=R if R.ndim == 2 else R[0], extras=dm_params, M=c.build_M(params),
+                          loadings=c.build_loadings(params))
         state_noise, meas_noise = _noise_models(c, dm, h_last=h0)
         rules = data_path_rules(c, run.series, T)
         xi_init = run.xi00 + sqrt_P00 @ rng.standard_normal(len(run.xi00))
-        out = simulate_forward(F, dm.Q, A, Z, meta, xi_init, obs_seeds, exog_seeds, rules, meas_noise, T, rng, state_noise=state_noise, meas_loading=dm.M)
+        out = simulate_forward(F, dm.Q, A, Z, meta, xi_init, obs_seeds, exog_seeds, rules, meas_noise, T, rng, state_noise=state_noise, meas_loading=dm.M,
+                               loadings=dm.loadings)
         for oi, o in enumerate(meta.obs_names):
             obs[o][j] = out["obs"][:, oi]
     actual = {o: run.yobs[:, i].copy() for i, o in enumerate(meta.obs_names)}
@@ -571,11 +635,14 @@ def compute_prior_predictive_draws(run: AuthoredRun, *, seed: int | None = None)
 # ---------------------------------------------------------------------------
 
 
-def hd_reconstruction_error(spec: RunSpec, df, draw_index: int, *, seed_base: int = 20260923, max_attempts: int = 200) -> float:
+def hd_reconstruction_error(spec: RunSpec, df, draw_index: int, *, seed_base: int = 20260923, max_attempts: int = 200) -> tuple[float, float]:
     """G6's shape at a STATIONARY prior point (``CompiledModel.is_stationary``,
     the S6 lesson): one simulation-smoother draw on the real data ->
-    generic bars -> max |sum of bars - observable| over observables and
-    periods."""
+    generic bars -> ``(max |sum of bars - observable| over observables and
+    periods, the largest bar magnitude)``. The scale lets the gate judge
+    a draw whose time-varying coefficients (S9) wander explosive along
+    the sample -- the bars then cancel at 1e9 and the identity is a
+    float64 measurement (``validation.suite.hd_identity_gate``)."""
     from macrotoolkit.smoother import simulate_smoother_draw, sv_rw_noncentered
 
     c = compiled_for_spec(spec)
@@ -588,15 +655,18 @@ def hd_reconstruction_error(spec: RunSpec, df, draw_index: int, *, seed_base: in
     rng = np.random.default_rng(seed_base + draw_index)
     for _ in range(max_attempts):
         params = c.sample_prior_params(priors, rng, anchors)
-        if c.is_stationary(params):
+        if c.is_stationary(params, xi_ref=xi00):
             break
     else:
         raise RuntimeError(f"No stationary prior draw in {max_attempts} attempts for authored model {c.name!r}.")
     h = {s: sv_rw_noncentered(params[f"h0_{s}"], params[f"sigma_h_{s}"], rng.standard_normal(T)) for s in c.sv_shocks}
-    F, Q, A, Z, R = c.build_matrices(params, h=h or None, T=T)
+    F, Q, A, Z, R = c.build_matrices(params, h=h or None, T=T, x=x)  # Z is the Z_t path with data loadings (S9)
     M = c.build_M(params)
+    loadings = c.build_loadings(params)
     sim = simulate_smoother_draw(yobs, x, F, Q, A, Z, R, xi00, P00, rng, meta=c.meta, M=M)
     comps = state_components(F, c.meta, sim.xi_draw, sim.state_shocks)
-    bars = observable_bars(A, Z, c.meta, comps, sim.meas_shocks, x, init_obs_seeds(c, series), M=M)
+    Z0 = Z if loadings is None else loadings.Z0
+    bars = observable_bars(A, Z0, c.meta, comps, sim.meas_shocks, x, init_obs_seeds(c, series), M=M, loadings=loadings, coef_path=sim.xi_draw)
     total = sum(bars.values())
-    return float(np.max(np.abs(total - yobs)))
+    scale = max(float(np.max(np.abs(b))) for b in bars.values())
+    return float(np.max(np.abs(total - yobs))), scale

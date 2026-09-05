@@ -185,6 +185,28 @@ what `mtk run` produces now, computed without sampling):
 | `spec.yaml` (no SV) | `24b6288dddad` (S2 record) | `915189548222` |
 | `spec_full_vintage.yaml` (no SV) | `18f32ac9793f` (S2 record) | `7e45c3e6524c` |
 
+## S9: the Z_t generalization re-identifies every lw_sv spec once more
+
+S9 generalized the shared Kalman filter to a time-varying measurement
+loading `Z_t` (the authored family's data-dependent loadings -- a state
+multiplied by a lagged observable or an exogenous series, the TVP
+regression / TVP-AR / TVP-VAR -- need it; plans/S9-plan.md decision 1,
+DECISIONS.md 2026-09-05). The filter text is inlined into every rendered
+program, so every lw_sv spec identifies differently once more --
+**numerics unchanged**: the Stan constant-Z log-likelihoods at G1's 50
+points on all five S8 paths reproduce the pre-change program's values
+EXACTLY (difference 0.0; `tests/fixtures/g1/pre_zt_stan_loglik.csv`), and
+G1 (now seven paths) / G5a / G6 are green. Identity lineage (computed
+without sampling; the archived runs stay valid records under their old
+names):
+
+| Spec | S6 identity | S9 identity |
+|---|---|---|
+| `spec_sv.yaml` | `8ba1420a4145` | `08e472b94cda` |
+| `spec_sv_full_vintage.yaml` | `ec87f45d0a43` | `cd4a876dd00e` |
+| `spec.yaml` (no SV) | `915189548222` | `5b6e46d54c88` |
+| `spec_full_vintage.yaml` (no SV) | `7e45c3e6524c` | `39e70ef8cf85` |
+
 The reference runs were NOT regenerated in S6 (the archived S5 fixtures
 carry the full diagnostics record and the output layer is exercised on
 them by the fast suite and the notebook example); regenerate with

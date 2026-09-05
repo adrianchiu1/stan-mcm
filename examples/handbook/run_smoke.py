@@ -22,7 +22,7 @@ from macrotoolkit.run import REPO_ROOT
 
 HERE = Path(__file__).resolve().parent
 ORDER = ["ch1_ar2", "ch1_ar2_ar1err", "ch2_bivar_minnesota", "ch2_var4_monthly_cholesky", "ch2_steady_state", "ch2_conditional",
-         "ch3_uc_trend_cycle", "ch2_signs_11var", "ch3_dfm_uk_panel"]
+         "ch3_uc_trend_cycle", "ch3_tvp_regression", "ch5_tvp_ar1_sv", "ch3_tvp_var", "ch2_signs_11var", "ch3_dfm_uk_panel"]
 
 
 def _postprocess(name: str, run) -> list[str]:
@@ -53,6 +53,40 @@ def _postprocess(name: str, run) -> list[str]:
     if name == "ch2_steady_state":
         sd = run.outputs().compute("states")
         lines.append("- long-run means (constant states, posterior median of the smoothed path): " + ", ".join(f"{k} {np.median(v):.3f}" for k, v in sd.states.items()) + ".")
+    if name == "ch3_tvp_regression":
+        import pandas as pd
+
+        sd = run.outputs().compute("states")
+        truth = pd.read_csv(HERE / "data" / "ch3_tvp_example1_sim.csv")["beta_true"].to_numpy()
+        beta = sd.states["beta"]
+        lo, hi = np.quantile(beta, 0.05, axis=0), np.quantile(beta, 0.95, axis=0)
+        med = np.median(beta, axis=0)
+        lines.append(f"- beta_t recovery (examples 1-2): the true path lies inside the 90% smoothed band at {np.mean((truth >= lo) & (truth <= hi)):.1%} of periods; "
+                     f"RMSE of the smoothed median vs the truth {np.sqrt(np.mean((med - truth) ** 2)):.4f} (the handbook's fixed Q = 0.001, R = 0.01 are estimated here).")
+    if name == "ch5_tvp_ar1_sv":
+        sd = run.outputs().compute("states")
+        irf = run.outputs().compute("irf")
+        d = sd.dates
+        picks = [np.argmin(np.abs(d - np.datetime64(x))) for x in ("1930-01-01", "1975-01-01", "2008-10-01")]
+        c, b = sd.states["c"], sd.states["b"]
+        lr = c / (1.0 - b)
+        lines.append("- the handbook's four panels at 1930Q1 / 1975Q1 / 2008Q4 (posterior medians): b_t " + ", ".join(f"{np.median(b[:, i]):.2f}" for i in picks)
+                     + "; c_t " + ", ".join(f"{np.median(c[:, i]):.2f}" for i in picks) + "; long-run mean c/(1-b) " + ", ".join(f"{np.median(lr[:, i]):.1f}" for i in picks)
+                     + "; volatility exp(h/2) " + ", ".join(f"{np.median(sd.vol['e'][:, i]):.2f}" for i in picks) + ".")
+        lines.append("- IRF of the e shock on pi at h = 4, conditional on the coefficient state at " + ", ".join(f"{k}: {np.median(v['e']['pi'][:, 3]):+.2f}" for k, v in irf.by_date.items())
+                     + f" (impact = 1 s.d. at the end-of-sample volatility; omitted: {list(irf.omitted_shocks)}).")
+    if name == "ch3_tvp_var":
+        irf = run.outputs().compute("irf")
+        for lab, resp in irf.by_date.items():
+            lines.append(f"- IRFs to the ffr shock at {lab} (Cholesky ordering gdp_growth -> cpi_inflation -> ffr; medians at h = 1 / 4 / 8): "
+                         + ", ".join(f"{o} {np.median(resp['e_ffr'][o][:, 0]):+.3f} / {np.median(resp['e_ffr'][o][:, 3]):+.3f} / {np.median(resp['e_ffr'][o][:, 7]):+.3f}" for o in obs_names) + ".")
+        lines.append(f"- {len(irf.omitted_shocks)} coefficient shocks omitted from the IRF/HD (no response from rest); the coefficient paths are in the states figure.")
+        post = run.idata.posterior
+        med = lambda v: float(np.median(np.asarray(post[v].values)))
+        lines.append("- posterior medians of the scales: innovations " + ", ".join(f"s_{o} {med(f's_{o}'):.3f}" for o in obs_names)
+                     + "; coefficient drift " + ", ".join(f"sq_{o} {med(f'sq_{o}'):.3f}" for o in obs_names)
+                     + " (prior half_normal(0.01)). Where a drift scale is pulled far above its prior the equation's random-walk intercept is absorbing the series' "
+                     "persistence in place of the innovation -- the handbook's tight IW Q0 and stability rejection prevent this; a per-coefficient scale or a fixed drift scale is the modeling response.")
     return lines
 
 

@@ -72,7 +72,7 @@ def python_kf_loglik(compiled: CompiledModel, params: dict, stan_data: dict, h: 
     n = compiled.meta.n_state
     xi00 = stan_data["xi00"] if "xi00" in stan_data else np.zeros(n)
     P00 = stan_data["P00"] if "P00" in stan_data else np.zeros((n, n))
-    F, Q, A, Z, R = compiled.build_matrices(params, h=h or None, T=T)
+    F, Q, A, Z, R = compiled.build_matrices(params, h=h or None, T=T, x=x)
     return kalman_loglik(stan_data["yobs"], x, F, Q, A, Z, R, xi00, P00)
 
 

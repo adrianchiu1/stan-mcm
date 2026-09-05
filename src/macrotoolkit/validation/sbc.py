@@ -115,7 +115,14 @@ def render_design_model(design: SbcDesign):
     )
     context = build_render_context(spec)
     if design.expected_priors is not None:
-        assert context["priors"] == design.expected_priors, (
+        rendered = context.get("priors")
+        if rendered is None and design.family == "authored":
+            # The authored render context stamps prior STATEMENTS (S7); the
+            # resolved table it was stamped from is the compiled model's.
+            from macrotoolkit.authoring.compile import compiled_for_spec
+
+            rendered = compiled_for_spec(spec).resolve_priors(spec.priors)
+        assert rendered == design.expected_priors, (
             f"SBC design {design.name!r}: the rendered prior differs from "
             f"the design's expected prior -- SBC exactness is exactly this "
             f"equality, so the gate must not run."

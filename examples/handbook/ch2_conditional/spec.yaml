@@ -117,6 +117,7 @@ outputs:
   horizon: 3
   irf_horizon: 12
   irf_vol_reference: end_of_sample
+  irf_dates: []
   smoother_draws: all
   prior_predictive_draws: 200
 qc:

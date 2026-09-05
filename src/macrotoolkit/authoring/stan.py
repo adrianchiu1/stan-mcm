@@ -24,6 +24,13 @@ What the template receives, and how it mirrors
 - ``n == 0`` (a pure regression / VAR, S8 E0): the zero-size state
   objects are built in ``transformed data`` (``vector[0]``,
   ``matrix[0, 0]``), never read from data.
+- ``Zt`` (S9 E4, a state multiplied by data): ``array[T] matrix[m, n]``
+  with entry ``Zt[t][i, k] = z0 + (c_1) * x[t, j_1] + (c_2) * x[t, j_2]``
+  -- the constant part first, then the products in ascending column
+  order, a unit coefficient printed as the bare column -- built in
+  ``transformed data`` when every coefficient is numeric, else in
+  ``transformed parameters``; ``CompiledModel.build_Z_path`` performs the
+  same operations in the same order.
 - ``params``: one declaration + prior statement per prior-table entry
   (normal with truncation carried by the parameter constraint;
   half_normal via ``<lower=0>``; beta), then the SV block per SV shock
@@ -72,6 +79,28 @@ def _r_entry_text(compiled: CompiledModel, terms) -> str:
         else:
             parts.append(f"({term.coef.emit()}) * {var}")
     return " + ".join(parts)
+
+
+def _zt_entries(compiled: CompiledModel) -> list[tuple[int, int, str]]:
+    """S9 E4: every ``Z_t`` entry with a constant part or a product, as
+    ``(row, slot, text)`` (1-based)."""
+    from specs.schema.equations import Num
+
+    st = compiled.structure
+    out = []
+    for (i, k) in sorted(set(st.Z) | set(st.Zx)):
+        parts = []
+        if (i, k) in st.Z:
+            z0 = st.Z[(i, k)]
+            text = z0.emit()
+            parts.append(text if z0.precedence >= 2 else f"({text})")
+        for j, coef in st.Zx.get((i, k), ()):
+            if isinstance(coef, Num) and coef.value == 1.0:
+                parts.append(f"x[t, {j + 1}]")
+            else:
+                parts.append(f"({coef.emit()}) * x[t, {j + 1}]")
+        out.append((i + 1, k + 1, " + ".join(parts)))
+    return out
 
 
 def _param_decl(name: str, entry: dict, bounds: tuple[float | None, float | None]) -> str:
@@ -134,7 +163,7 @@ def render_context(compiled: CompiledModel, priors: dict[str, dict]) -> dict[str
         "equations_transition": list(st.canonical_transition),
         "F": {"numeric": numeric["F"], "entries": _entries(st.F)},
         "A": {"numeric": numeric["A"], "entries": _entries(st.A)},
-        "Z": {"numeric": numeric["Z"], "entries": _entries(st.Z)},
+        "Z": {"numeric": numeric["Z"], "entries": _entries(st.Z), "tv": st.has_data_loadings, "tv_entries": _zt_entries(compiled) if st.has_data_loadings else []},
         "Q_entries": q_entries,
         "R_entries": r_entries,
         "sv": bool(compiled.sv_shocks),

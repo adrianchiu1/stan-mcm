@@ -9,7 +9,7 @@ validation tier and the post-processors, and appends the run record to
 the example's README.
 
 ```
-python examples/handbook/make_data.py      # .xls -> data/*.csv (xlrd)
+python examples/handbook/make_data.py      # .xls/.xlsx -> data/*.csv (xlrd, openpyxl) + the example 1 DGP simulation
 python examples/handbook/build_specs.py    # specs (+ the DFM panel transform)
 python examples/handbook/run_smoke.py      # smoke runs + records (or name the examples)
 ```
@@ -25,6 +25,9 @@ python examples/handbook/run_smoke.py      # smoke runs + records (or name the e
 | `ch2_conditional` | Ch. 2 ex. 8 | E5 + `postprocess.conditional_forecast` | no data augmentation of the conditional path |
 | `ch3_uc_trend_cycle` | Ch. 3 §2 (2.6)-(2.7) | E1 drift + E3 shock-free row (`R = 0`) | orthogonal shocks (no Q off-diagonal); applied to US inflation |
 | `ch3_dfm_uk_panel` | Ch. 3 ex. 4 (DFM part) | 40 measurement equations on 3 VAR(2) factor states | orthogonal factor shocks; the FAVAR rate block left for a follow-up |
+| `ch3_tvp_regression` | Ch. 3 ex. 1-2 (artificial DGP) | E4 + E2: `Y = beta*X + e`, `beta` a random walk (data-dependent loading `Z_t`) | the two variances estimated (half-normal) instead of fixed; the DGP simulated once at a recorded seed |
+| `ch5_tvp_ar1_sv` | Ch. 5 ex. 5 (UK inflation) | E4 + SV: `pi = c + b*pi[-1] + e`, coefficients random walks, `e` under SV; dated IRFs | half-normal random-walk scales for the IW `Q`, the established non-centered SV block for the JPR volatility step; training-sample OLS initial conditions |
+| `ch3_tvp_var` | Ch. 3 ex. 3 (US GDP/CPI/R) | E4 + E5: recursive VAR(2), every coefficient a random-walk state (21), constant Sigma; IRFs at three dates | one half-normal random-walk scale per equation for the IW `Q`; half-normal shock scales + `N(0, 1)` `a0` for the IW `Sigma`; no stability rejection; the sign-restricted policy shock not run |
 
 The data files carry reconstructed dates where the handbook gives none
 (`make_data.py` records the assumption per file). `runs/` and

@@ -1,0 +1,77 @@
+model:
+  family: authored
+  options:
+    family: authored
+    name: ch5_tvp_ar1_sv
+    observables:
+    - pi
+    exogenous: []
+    equations:
+      measurement:
+      - pi = c + b*pi[-1] + e
+      transition:
+      - c = c[-1] + eta_c
+      - b = b[-1] + eta_b
+    parameters:
+      s_c:
+        dist: half_normal
+        sd: 0.1
+      s_b:
+        dist: half_normal
+        sd: 0.05
+    shocks:
+      eta_c:
+        sd: s_c
+        sv: null
+      eta_b:
+        sd: s_b
+        sv: null
+      e:
+        sd: null
+        sv:
+          sigma_h:
+            dist: half_normal
+            sd: 0.3
+          h0_sd: 3.1622776601683795
+          mu_h0: 1.125325094371083
+    initial_state:
+      c:
+        mean: 13.985610963060175
+        sd: 13.513254448096763
+      b:
+        mean: 0.2558231025347862
+        sd: 0.746304466981708
+    forecast_rules: {}
+data:
+  file: ../data/ch5_uk_inflation.csv
+  date_column: date
+  mapping:
+    pi: infl
+  sample:
+    start: '1917-07-01'
+    end: null
+priors: {}
+sampler:
+  chains: 2
+  warmup: 300
+  sampling: 300
+  adapt_delta: 0.8
+  max_treedepth: 10
+  seed: 20260905
+outputs:
+  horizon: 8
+  irf_horizon: 12
+  irf_vol_reference: end_of_sample
+  irf_dates:
+  - '1930-01-01'
+  - '1975-01-01'
+  - '2008-10-01'
+  smoother_draws:
+    thin: 5
+  prior_predictive_draws: 20
+qc:
+  mirror_check: true
+  mirror_points: 5
+  mirror_tolerance: 1.0e-08
+  mirror_rtol: 1.0e-11
+  mirror_seed: 20260904

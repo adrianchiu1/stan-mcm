@@ -8,7 +8,10 @@ declaration surface a hand-written family provides:
 - :meth:`CompiledModel.build_matrices` -- ``(F, Q, A, Z, R)`` at a
   parameter point, ``Q``/``R`` constant or ``(T, ., .)`` paths for SV
   shocks (a measurement shock's SV through ``R_t``, a state shock's
-  through the S6 ``Q_t`` machinery), performing EXACTLY the operations the
+  through the S6 ``Q_t`` machinery), ``Z`` constant or -- S9 E4, a state
+  multiplied by data -- the ``(T, m, n)`` path ``Z_t = Z0 + sum_j x_t[j]
+  Zx_j`` from the regressor matrix (:meth:`build_loadings` /
+  :meth:`build_Z_path`), performing EXACTLY the operations the
   generic Stan template performs in the same order (see
   :mod:`macrotoolkit.authoring.stan`), so the two sides agree to G1's
   tolerance rather than approximately;
@@ -77,6 +80,9 @@ def build_meta(structure: ModelStructure) -> StateSpaceMeta:
         # pre-S8 "one own shock per row" identity, so an S7 model's meta
         # (and every consumer's code path) is unchanged.
         measurement_loadings=None if structure.meas_loading_is_identity() else {s: tuple(rows) for s, rows in structure.meas_loadings.items()},
+        # S9 E4: empty for every model without a state x data product.
+        data_loadings=structure.data_loading_pattern(),
+        coefficient_shocks=tuple(structure.coefficient_shocks),
     )
     meta.recovery_order()
     meta.meas_recovery_order()
@@ -206,7 +212,47 @@ class CompiledModel:
         return self._dense(self.structure.A, (self.structure.n_exog_cols, self.meta.n_obs), params)
 
     def build_Z(self, params: Mapping[str, float]) -> np.ndarray:
+        """The CONSTANT part of the measurement loading, ``Z0`` (m, n) --
+        the whole loading for every model without a state x data product."""
         return self._dense(self.structure.Z, (self.meta.n_obs, self.meta.n_state), params)
+
+    @property
+    def has_data_loadings(self) -> bool:
+        return self.structure.has_data_loadings
+
+    def build_Zx(self, params: Mapping[str, float]) -> dict[int, np.ndarray]:
+        """S9 E4: the data-dependent loading coefficients per x column,
+        ``{column: (m, n)}`` in ascending column order (an empty dict
+        without products)."""
+        m, n = self.meta.n_obs, self.meta.n_state
+        out: dict[int, np.ndarray] = {}
+        for (i, k), terms in self.structure.Zx.items():
+            for j, expr in terms:
+                out.setdefault(j, np.zeros((m, n)))[i, k] = evaluate(expr, params)
+        return {j: out[j] for j in sorted(out)}
+
+    def build_loadings(self, params: Mapping[str, float]):
+        """The engine's :class:`macrotoolkit.engine.DataLoadings` at a
+        parameter point (``Z0`` + the per-column ``Zx_j``), or ``None`` for
+        a model without data-dependent loadings (every consumer then keeps
+        its pre-S9 path)."""
+        if not self.has_data_loadings:
+            return None
+        from macrotoolkit.engine import DataLoadings
+
+        return DataLoadings(self.build_Z(params), tuple(self.build_Zx(params).items()))
+
+    def build_Z_path(self, params: Mapping[str, float], x: np.ndarray) -> np.ndarray:
+        """``Z_t = Z0 + sum_j x[t, j] * Zx_j`` as the (T, m, n) path the KF
+        consumes, accumulated in ascending column order -- entry by entry
+        the SAME floating-point operations the template prints
+        (``z0 + (c_1) * x[t, j_1] + (c_2) * x[t, j_2]``: ``+ 0.0`` and
+        ``* 1.0`` are exact, so the dense accumulation equals the sparse
+        text bit for bit)."""
+        loadings = self.build_loadings(params)
+        if loadings is None:
+            raise ValueError(f"authored model {self.name!r} has no data-dependent loadings; its Z is constant (build_Z).")
+        return loadings.path(np.asarray(x, dtype=np.float64))
 
     def build_M(self, params: Mapping[str, float]) -> np.ndarray | None:
         """The measurement-shock loading matrix ``(m, n_meas_shocks)``
@@ -282,10 +328,22 @@ class CompiledModel:
                 R[k, i] = acc
         return R
 
-    def build_matrices(self, params: Mapping[str, float], h: Mapping[str, np.ndarray] | None = None, T: int | None = None):
+    def build_matrices(self, params: Mapping[str, float], h: Mapping[str, np.ndarray] | None = None, T: int | None = None, x: np.ndarray | None = None):
         """``(F, Q, A, Z, R)`` at ``params`` (scales in sd units); ``h``
-        supplies the log-variance path of every SV shock."""
-        return self.build_F(params), self.build_Q(params, h, T), self.build_A(params), self.build_Z(params), self.build_R(params, h, T)
+        supplies the log-variance path of every SV shock. For a model with
+        data-dependent loadings (S9 E4) ``x`` (the regressor matrix) is
+        required and ``Z`` is returned as the (T, m, n) path; otherwise
+        ``x`` is ignored and ``Z`` is the constant matrix."""
+        if self.has_data_loadings:
+            if x is None:
+                raise ValueError(
+                    f"authored model {self.name!r} has data-dependent loadings (a state multiplied by data): "
+                    f"build_matrices needs the regressor matrix x to build the Z_t path."
+                )
+            Z = self.build_Z_path(params, x)
+        else:
+            Z = self.build_Z(params)
+        return self.build_F(params), self.build_Q(params, h, T), self.build_A(params), Z, self.build_R(params, h, T)
 
     # --- data side ----------------------------------------------------
     def series_arrays(self, df) -> dict[str, np.ndarray]:
@@ -437,18 +495,25 @@ class CompiledModel:
         return out
 
     # --- stationarity (the identity gate's prior-point filter) ---------
-    def is_stationary(self, params: Mapping[str, float], tol: float = 1e-9) -> bool:
+    def is_stationary(self, params: Mapping[str, float], tol: float = 1e-9, xi_ref: np.ndarray | None = None) -> bool:
         """Spectral radius of ``F`` <= 1 AND of the endogenous feedback's
         companion matrix <= 1: unit roots are the norm (random-walk trends;
         lw_sv's accelerationist Phillips curve, whose inflation-lag
         coefficients sum to one) and pass; EXPLOSIVE roots fail (an
         explosive draw measures float64 cancellation over the sample, not
         an identity -- the S6 lesson behind the stationary-prior-points
-        gate)."""
+        gate). With data-dependent loadings (S9 E4) the feedback
+        coefficients include the coefficient states at ``xi_ref`` (the
+        initial-state mean, the gate's reference; zeros by default)."""
         F = self.build_F(params)
         if F.size and np.max(np.abs(np.linalg.eigvals(F))) > 1.0 + tol:
             return False
         A = self.build_A(params)
+        if self.has_data_loadings:
+            ref = np.zeros(self.meta.n_state) if xi_ref is None else np.asarray(xi_ref, dtype=np.float64)
+            A = A.copy()
+            for j, Zx in self.build_Zx(params).items():
+                A[j, :] += Zx @ ref
         m = self.meta.n_obs
         depth = max((self.meta.obs_lag_depth(o) for o in self.meta.obs_names), default=0)
         if depth == 0:

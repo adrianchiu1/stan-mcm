@@ -39,7 +39,7 @@ from typing import Any, Callable, Iterator, Mapping
 import numpy as np
 import pandas as pd
 
-from macrotoolkit.engine import observable_recursion, propagate_state_shock
+from macrotoolkit.engine import DataLoadings, observable_recursion, propagate_state_shock
 from macrotoolkit.families.base import ExogLag, StateSpaceMeta
 from specs.schema.base import RunSpec
 
@@ -163,6 +163,10 @@ class DrawMatrices:
     #: S8 E5: the measurement-shock loading matrix ``(m, n_meas_shocks)``
     #: when it is not the identity (``None`` = each shock is its own row).
     M: np.ndarray | None = None
+    #: S9 E4: the data-dependent loadings (``Z`` is then the constant part
+    #: ``Z0``; the KF's ``Z_t`` path is ``loadings.path(x)``); ``None`` =
+    #: a constant loading (every consumer keeps its pre-S9 path).
+    loadings: DataLoadings | None = None
 
 
 MatricesForDraw = Callable[[Mapping[str, np.ndarray], int], DrawMatrices]
@@ -188,7 +192,8 @@ def smoother_draws(
 
     for i in idx:
         dm = matrices_for_draw(flat, int(i))
-        sim = simulate_smoother_draw(yobs, x, dm.F, dm.Q, dm.A, dm.Z, dm.R, xi00, P00, rng, meta=meta, M=dm.M)
+        Z = dm.Z if dm.loadings is None else dm.loadings.path(np.asarray(x, dtype=np.float64))
+        sim = simulate_smoother_draw(yobs, x, dm.F, dm.Q, dm.A, Z, dm.R, xi00, P00, rng, meta=meta, M=dm.M)
         yield int(i), dm, sim
 
 
@@ -218,8 +223,10 @@ def hd_bar_names(meta: StateSpaceMeta) -> tuple[str, ...]:
     shock, each measurement shock, ``const`` iff the feedback map has an
     intercept column (S8 E1: the deterministic intercept path through
     the feedback loop), and ``exog`` iff it has genuinely exogenous
-    columns."""
-    bars = ["init", *meta.state_shocks, *meta.measurement_shocks]
+    columns. A coefficient-only state shock (S9 E4) has no observable
+    bar: its state component multiplies the regressors through the
+    loading, which is held at the drawn path (``observable_bars``)."""
+    bars = ["init", *meta.additive_state_shocks(), *meta.measurement_shocks]
     if meta.has_const_column():
         bars.append("const")
     if any(isinstance(t, ExogLag) for t in meta.feedback_map):
@@ -236,6 +243,8 @@ def observable_bars(
     x: np.ndarray | None = None,
     init_obs_seeds: Mapping[str, Mapping[int, float]] | None = None,
     M: np.ndarray | None = None,
+    loadings: DataLoadings | None = None,
+    coef_path: np.ndarray | None = None,
 ) -> dict[str, np.ndarray]:
     """Each bar's own OBSERVABLE path (T, m) via the generic engine's
     observation recursion: state bars carry their state component, a
@@ -244,8 +253,11 @@ def observable_bars(
     loads, ``M[:, j] * eps_j``), the ``exog`` bar carries the real
     exogenous regressor columns, the ``const`` bar the intercept column
     (S8 E1), the ``init`` bar its state component plus the real
-    pre-sample observable seeds; everything else runs from rest. By
-    linearity the bars sum to the observables -- the G6 identity."""
+    pre-sample observable seeds; everything else runs from rest. With
+    ``loadings`` (S9 E4) every bar feeds its own observables back through
+    the time-varying coefficients held at ``coef_path`` (the full drawn
+    state path); ``Z`` is the constant part ``Z0``. By linearity the bars
+    sum to the observables -- the G6 identity."""
     T = next(iter(components.values())).shape[0]
     zeros_state = np.zeros((T, meta.n_state))
     bars: dict[str, np.ndarray] = {}
@@ -259,7 +271,7 @@ def observable_bars(
                 meas = np.outer(meas_shocks[k], M[:, meta.measurement_shocks.index(k)])
         exog = x if k == "exog" else None
         seeds = init_obs_seeds if k == "init" else None
-        bars[k] = observable_recursion(A, Z, meta, state_path, meas, exog, seeds, const_on=(k == "const"))
+        bars[k] = observable_recursion(A, Z, meta, state_path, meas, exog, seeds, const_on=(k == "const"), loadings=loadings, coef_path=coef_path)
     return bars
 
 
@@ -271,13 +283,26 @@ def observable_bars(
 def impulse_response(
     F: np.ndarray, A: np.ndarray, Z: np.ndarray, meta: StateSpaceMeta, shock: str, size: float, horizon: int,
     M: np.ndarray | None = None,
+    loadings: DataLoadings | None = None,
+    coef_state: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """One shock's theoretical impulse response from rest: returns the
     state path ``(horizon, n)`` and the observable path ``(horizon, m)``
     -- exactly one HD bar with a synthetic one-off impulse. A measurement
     shock with a loading matrix ``M`` (S8 E5) impacts every row it loads
     (``M[:, j] * size``): under a recursive ordering these ARE the
-    Cholesky IRFs."""
+    Cholesky IRFs. With ``loadings`` (S9 E4) the response is CONDITIONAL
+    on a coefficient state ``coef_state`` (n,) -- the drawn state at a
+    reference date, held fixed over the horizon -- and a coefficient-only
+    shock (``meta.coefficient_shocks``) has no response from rest (raised)."""
+    if loadings is not None:
+        if coef_state is None or np.shape(coef_state) != (meta.n_state,):
+            raise ValueError(f"impulse_response: data-dependent loadings need the reference coefficient state coef_state of shape ({meta.n_state},).")
+        if shock in meta.coefficient_shocks:
+            raise ValueError(
+                f"impulse_response: {shock!r} moves only time-varying coefficients (its response from rest is identically "
+                f"zero -- a coefficient deviation multiplies a zero regressor path); the IRF module omits it."
+            )
     impulse = np.zeros(horizon)
     impulse[0] = size
     meas = np.zeros((horizon, meta.n_obs))
@@ -294,7 +319,8 @@ def impulse_response(
             f"Unknown shock {shock!r}; declared state shocks {list(meta.state_shocks)}, "
             f"measurement shocks {list(meta.measurement_shocks)}."
         )
-    obs = observable_recursion(A, Z, meta, comp, meas)
+    coef_path = None if loadings is None else np.repeat(np.asarray(coef_state, dtype=np.float64)[None, :], horizon, axis=0)
+    obs = observable_recursion(A, Z, meta, comp, meas, loadings=loadings, coef_path=coef_path)
     return comp, obs
 
 

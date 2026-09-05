@@ -49,6 +49,21 @@ S8 extensions (plans/S8-plan.md, WP1) -- the same derivation, widened:
   therefore parameter-dependent coefficient expressions (unit on the own
   row) and ``R = M diag(var) M'`` is no longer diagonal in general.
 
+S9 extension (plans/S9-plan.md, E4 -- time-varying coefficients):
+
+- **E4** a measurement row may multiply a STATE (any lag) by a DATA
+  series (a lagged observable, a ``mean()`` of one observable, or an
+  exogenous series at any lag): the product is a data-dependent
+  measurement loading, ``Z_t = Z0 + sum_j x_t[j] * Zx_j`` with ``j`` the
+  data factor's feedback-map column (declared exactly as a plain data
+  term's column is) and ``Zx_j[row, slot]`` the coefficient expression.
+  E5 composes ``Zx`` rows as it composes ``Z``/``A``/``M`` rows. A product
+  in a transition equation is a time-varying transition (E6, the next
+  stage) and is rejected. A state shock whose loaded slots can reach no
+  additively-loaded (``Z0``) slot through ``F``'s pattern moves only
+  coefficients (``coefficient_shocks``): it has no additive observable
+  bar and no impulse response from rest.
+
 Everything here is a plain dataclass of plain values (labels as tuples,
 matrix entries as :class:`specs.schema.equations.Expr` trees keyed by
 index) so the numpy-side compiler (``macrotoolkit.authoring.compile``)
@@ -65,6 +80,7 @@ from specs.schema.equations import (
     LinearForm,
     MeanTerm,
     Num,
+    ProductTerm,
     SeriesTerm,
     _add_coef,
     _simplify_mul,
@@ -97,7 +113,7 @@ RESERVED_NAMES = frozenset(
     cov_matrix array data parameters model functions generated quantities transformed
     return break continue print reject fatal_error target lower upper offset multiplier
     void tuple complex profile increment_log_prob get_lp lp__ T yobs x xi00 P00 F Q A Z R
-    Qt Rt kf_loglik mean pi e sqrt exp log square rep_matrix rep_array diag_matrix cumulative_sum
+    Qt Rt Zt kf_loglik mean pi e sqrt exp log square rep_matrix rep_array diag_matrix cumulative_sum
     kalman_loglik sv_rw_noncentered sv_scalar_variance_path
     """.split()
 )
@@ -145,6 +161,12 @@ class ModelStructure:
     obs_substitution_order: tuple[str, ...] = field(default_factory=tuple)
     canonical_measurement: tuple[str, ...] = field(default_factory=tuple)
     canonical_transition: tuple[str, ...] = field(default_factory=tuple)
+    #: S9 E4: data-dependent loadings ``(observation row, state slot) ->
+    #: ((x column, coefficient), ...)`` in ascending column order, so
+    #: ``Z_t[row, slot] = Z[row, slot] + sum_j x_t[j] * coef_j``.
+    Zx: dict[tuple[int, int], tuple[tuple[int, Expr], ...]] = field(default_factory=dict)
+    #: S9 E4: state shocks that move only time-varying coefficients.
+    coefficient_shocks: tuple[str, ...] = field(default_factory=tuple)
 
     @property
     def n_state(self) -> int:
@@ -166,7 +188,25 @@ class ModelStructure:
 
     def matrix_is_numeric(self, which: str) -> bool:
         entries = {"F": self.F, "A": self.A, "Z": self.Z, "M": self.M}[which]
-        return all(is_numeric(e) for e in entries.values())
+        ok = all(is_numeric(e) for e in entries.values())
+        if which == "Z":
+            ok = ok and all(is_numeric(e) for terms in self.Zx.values() for _, e in terms)
+        return ok
+
+    @property
+    def has_data_loadings(self) -> bool:
+        """True iff some measurement row multiplies a state by data (E4)."""
+        return bool(self.Zx)
+
+    def data_loading_pattern(self) -> tuple[tuple[str, tuple[str, int], int], ...]:
+        """The sparsity pattern of ``Zx`` as ``(observable, state label,
+        x column)`` triples (the declarative form ``StateSpaceMeta``
+        carries)."""
+        out = []
+        for (i, k), terms in sorted(self.Zx.items()):
+            for j, _ in terms:
+                out.append((self.obs_names[i], self.state_labels[k], j))
+        return tuple(out)
 
     def meas_loading_is_identity(self) -> bool:
         """True iff every measurement shock loads its own row only, at
@@ -283,7 +323,7 @@ def compile_structure(
             raise ModelStructureError(
                 f"Measurement equation {i} must define observable {obs!r} (declared order; a bare LHS), got LHS {p.emit().split(' = ')[0]!r}."
             )
-    kinds = {**{n: "symbol" for n in observables}, **{n: "symbol" for n in exogenous}, **{n: "symbol" for n in states}, **{n: "symbol" for n in shocks}, **{n: "param" for n in parameters}}
+    kinds = {**{n: "observable" for n in observables}, **{n: "exogenous" for n in exogenous}, **{n: "state" for n in states}, **{n: "shock" for n in shocks}, **{n: "param" for n in parameters}}
     kind_of = kinds.get
 
     meas_forms: list[LinearForm] = [linearize(p.rhs, kind_of, equation=text) for text, p in zip(measurement, parsed_meas)]
@@ -390,18 +430,36 @@ def compile_structure(
         feedback.append(("const",))
     lag_depth = 0
     obs_deps: dict[int, dict[int, Expr]] = {i: {} for i in range(len(observables))}  # row -> {row of the contemporaneous observable: coef}
+
+    def data_column(t, text: str) -> FeedbackTuple:
+        """Register the feedback column of a DATA term (a mean(), a lagged
+        observable, or an exogenous series at any lag) and return it."""
+        nonlocal lag_depth
+        if isinstance(t, MeanTerm):
+            if t.name not in obs_set:
+                raise ModelStructureError(
+                    f"Equation {text!r}: mean() is only supported over lags of an OBSERVABLE (it becomes one "
+                    f"ObsLagMean regressor column); {t.name!r} is not an observable."
+                )
+            fb = ("obs_lag_mean", t.name, tuple(t.lags))
+            lag_depth = max(lag_depth, max(t.lags))
+        elif t.name in obs_set:
+            fb = ("obs_lag", t.name, t.lag)
+            lag_depth = max(lag_depth, t.lag)
+        else:
+            fb = ("exog_lag", t.name, t.lag)  # lag 0 = contemporaneous (E2)
+            lag_depth = max(lag_depth, t.lag)
+        if fb not in feedback:
+            feedback.append(fb)
+        return fb
+
     for i, (text, lf) in enumerate(zip(measurement, meas_forms)):
         for t, coef in lf.terms.items():
-            if isinstance(t, MeanTerm):
-                if t.name not in obs_set:
-                    raise ModelStructureError(
-                        f"Equation {text!r}: mean() is only supported over lags of an OBSERVABLE (it becomes one "
-                        f"ObsLagMean regressor column); {t.name!r} is not an observable."
-                    )
-                fb = ("obs_lag_mean", t.name, tuple(t.lags))
-                if fb not in feedback:
-                    feedback.append(fb)
-                lag_depth = max(lag_depth, max(t.lags))
+            if isinstance(t, ProductTerm):  # S9 E4: state x data -> a data-dependent loading
+                need_meas(t.state.name, t.state.lag, text)
+                data_column(t.data, text)
+            elif isinstance(t, MeanTerm):
+                data_column(t, text)
             elif t.name in state_set:
                 need_meas(t.name, t.lag, text)
             elif t.name in obs_set:
@@ -410,15 +468,9 @@ def compile_structure(
                         raise ModelStructureError(f"Equation {text!r}: observable {t.name!r} references itself contemporaneously.")
                     obs_deps[i][obs_index[t.name]] = coef  # E5: substituted below
                     continue
-                fb = ("obs_lag", t.name, t.lag)
-                if fb not in feedback:
-                    feedback.append(fb)
-                lag_depth = max(lag_depth, t.lag)
+                data_column(t, text)
             elif t.name in exog_set:
-                fb = ("exog_lag", t.name, t.lag)  # lag 0 = contemporaneous (E2)
-                if fb not in feedback:
-                    feedback.append(fb)
-                lag_depth = max(lag_depth, t.lag)
+                data_column(t, text)
             elif t.name in shock_set:
                 pass
             else:  # pragma: no cover -- linearize rejects unknown names
@@ -428,6 +480,12 @@ def compile_structure(
     for text, lf, p in zip(transition, trans_forms, parsed_trans):
         kinds_here: dict[SeriesTerm, str] = {}
         for t in lf.terms:
+            if isinstance(t, ProductTerm):
+                raise ModelStructureError(
+                    f"Equation {text!r}: {t.state.name}'s transition multiplies a state by data ({t.data.name}) -- a "
+                    f"time-varying TRANSITION (a data-dependent F_t) is outside this stage's scope (S10, E6); a "
+                    f"time-varying coefficient (S9, E4) is a state multiplied by data in a MEASUREMENT equation."
+                )
             if isinstance(t, MeanTerm) or t.name in obs_set or t.name in exog_set:
                 what = "mean()" if isinstance(t, MeanTerm) else ("observable" if t.name in obs_set else "exogenous series")
                 raise ModelStructureError(
@@ -537,13 +595,24 @@ def compile_structure(
     own_Z: list[dict[int, Expr]] = [{} for _ in observables]
     own_A: list[dict[int, Expr]] = [{} for _ in observables]
     own_M: list[dict[int, Expr]] = [{} for _ in observables]
+    own_Zx: list[dict[tuple[int, int], Expr]] = [{} for _ in observables]  # (x column, slot) -> coef (S9 E4)
+
+    def fb_of(t) -> FeedbackTuple:
+        if isinstance(t, MeanTerm):
+            return ("obs_lag_mean", t.name, tuple(t.lags))
+        if t.name in obs_set:
+            return ("obs_lag", t.name, t.lag)
+        return ("exog_lag", t.name, t.lag)
+
     for i, lf in enumerate(meas_forms):
         if lf.const is not None:
             add_entry(own_A[i], col_index[("const",)], lf.const)
         if i in own_shock:
             own_M[i][shock_col[own_shock[i]]] = Num(1.0)
         for t, coef in lf.terms.items():
-            if isinstance(t, MeanTerm):
+            if isinstance(t, ProductTerm):
+                add_entry(own_Zx[i], (col_index[fb_of(t.data)], slot_index[(t.state.name, -t.state.lag)]), coef)
+            elif isinstance(t, MeanTerm):
                 add_entry(own_A[i], col_index[("obs_lag_mean", t.name, tuple(t.lags))], coef)
             elif t.name in state_set:
                 add_entry(own_Z[i], slot_index[(t.name, -t.lag)], coef)
@@ -573,12 +642,20 @@ def compile_structure(
     rows_Z: list[dict[int, Expr]] = [dict(r) for r in own_Z]
     rows_A: list[dict[int, Expr]] = [dict(r) for r in own_A]
     rows_M: list[dict[int, Expr]] = [dict(r) for r in own_M]
+    rows_Zx: list[dict[tuple[int, int], Expr]] = [dict(r) for r in own_Zx]
     for i in sub_order:
         for j, coef in obs_deps[i].items():  # rows_*[j] are already fully composed
-            for store_i, store_j in ((rows_Z[i], rows_Z[j]), (rows_A[i], rows_A[j]), (rows_M[i], rows_M[j])):
+            for store_i, store_j in ((rows_Z[i], rows_Z[j]), (rows_A[i], rows_A[j]), (rows_M[i], rows_M[j]), (rows_Zx[i], rows_Zx[j])):
                 for k, val in store_j.items():
                     add_entry(store_i, k, _simplify_mul(coef, val))
     Z: dict[tuple[int, int], Expr] = {(i, k): v for i, row in enumerate(rows_Z) for k, v in row.items()}
+    Zx: dict[tuple[int, int], tuple[tuple[int, Expr], ...]] = {}
+    for i, row in enumerate(rows_Zx):
+        by_slot: dict[int, list[tuple[int, Expr]]] = {}
+        for (j, k), v in row.items():
+            by_slot.setdefault(k, []).append((j, v))
+        for k, terms in by_slot.items():
+            Zx[(i, k)] = tuple(sorted(terms, key=lambda jt: jt[0]))
     A: dict[tuple[int, int], Expr] = {(k, i): v for i, row in enumerate(rows_A) for k, v in row.items()}
     M: dict[tuple[int, int], Expr] = {(i, j): v for i, row in enumerate(rows_M) for j, v in row.items()}
     meas_loadings: dict[str, tuple[str, ...]] = {}
@@ -601,13 +678,17 @@ def compile_structure(
     # --- E3: shock-free rows keep the innovation covariance PD ---------
     free_rows = [i for i in range(len(observables)) if i not in {r for (r, _) in M}]
     if free_rows:
-        point = _generic_point(tuple(parameters))
+        point = _generic_point(tuple(parameters) + tuple(f"__x{j}" for j in range(len(feedback))))
+        xg = [point[f"__x{j}"] for j in range(len(feedback))]  # generic regressor values (S9 E4)
         n_state = len(labels)
         B_cols = [[float(numeric_loadings[sh].get(lab, 0.0)) for lab in labels] for sh in state_shocks]  # per shock: n-vector
         rows = []
         for i in range(len(observables)):
             m_part = [evaluate(M[(i, j)], point) if (i, j) in M else 0.0 for j in range(len(meas_shocks))]
             z_row = [evaluate(Z[(i, k)], point) if (i, k) in Z else 0.0 for k in range(n_state)]
+            for k in range(n_state):
+                for j, e in Zx.get((i, k), ()):
+                    z_row[k] += xg[j] * evaluate(e, point)
             zb_part = [sum(z_row[k] * b[k] for k in range(n_state)) for b in B_cols]
             rows.append(m_part + zb_part)
         if _rank(rows) < len(observables):
@@ -623,6 +704,9 @@ def compile_structure(
     for store in (F, A, Z, M):
         for e in store.values():
             used |= parameters_in(e)
+    for terms in Zx.values():
+        for _, e in terms:
+            used |= parameters_in(e)
     doubled = sorted(used & set(scale_param.values()))
     if doubled:
         raise ModelStructureError(
@@ -636,6 +720,27 @@ def compile_structure(
             f"Parameter(s) {unused} are declared but appear in no equation and scale no shock -- an unused parameter "
             f"would be sampled from its prior alone; remove it or use it."
         )
+
+    # --- S9 E4: coefficient-only shocks (structural reachability) --------
+    coefficient_shocks: list[str] = []
+    if Zx:
+        additive_slots = {k for (_, k) in Z}
+        coef_slots = {k for (_, k) in Zx}
+        succ: dict[int, set[int]] = {}
+        for (r, c) in F:  # slot c at t-1 feeds slot r at t
+            succ.setdefault(c, set()).add(r)
+        for sh in state_shocks:
+            start = {slot_index[lab] for lab in numeric_loadings[sh]}
+            reach = set(start)
+            frontier = list(start)
+            while frontier:
+                s = frontier.pop()
+                for r in succ.get(s, ()):
+                    if r not in reach:
+                        reach.add(r)
+                        frontier.append(r)
+            if not (reach & additive_slots) and (reach & coef_slots):
+                coefficient_shocks.append(sh)
 
     return ModelStructure(
         name=name,
@@ -662,4 +767,6 @@ def compile_structure(
         obs_substitution_order=tuple(observables[i] for i in sub_order),
         canonical_measurement=tuple(p.emit() for p in parsed_meas),
         canonical_transition=tuple(p.emit() for p in parsed_trans),
+        Zx=Zx,
+        coefficient_shocks=tuple(coefficient_shocks),
     )

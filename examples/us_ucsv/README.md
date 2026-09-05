@@ -29,6 +29,15 @@ same hash (the notebook is committed executed).
 Every fit records the automatic Stan-vs-Python Kalman-filter mirror check
 (S6 WP3) in `diagnostics.json` and the report header.
 
+**S9 identity note.** The shared filter gained a time-varying loading
+`Z_t` in S9 (plans/S9-plan.md decision 1; DECISIONS.md 2026-09-05), and
+the filter text is inlined into the rendered program, so `mtk run
+examples/us_ucsv/spec.yaml` now produces run `6f4d5d043436`
+(`spec_full_vintage.yaml`: `bd55f3a3f061`) -- numerics unchanged (the
+constant-Z regression pin is exact; the mirror check and G6 are green).
+The run record below (`f2b48ebc98a4`) is the S6-program run and remains
+a valid immutable record under that identity.
+
 ## Run record (2026-09-04, run `f2b48ebc98a4`, 1960Q1–2019Q4, T = 240)
 
 Estimated through the notebook API first (`mtk.fit`), then `mtk run

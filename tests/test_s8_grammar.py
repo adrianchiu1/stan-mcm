@@ -319,7 +319,7 @@ def test_e3_uc_trend_cycle_matches_hand_built_matrices_and_the_measurement_ident
     spec = mtk.spec("authored", options=uc_trend_cycle(), data={"file": "x.csv", "date_column": "date", "mapping": {"Y": "inflation"}})
     df = REPO_DATA.iloc[:80].rename(columns={"inflation": "Y"})
     df["date"] = pd.to_datetime(df["date"])
-    assert hd_reconstruction_error(spec, df, 0) < 1e-6
+    assert hd_reconstruction_error(spec, df, 0)[0] < 1e-6
 
 
 def test_e3_rank_rule_rejects_an_unexplained_shock_free_row_and_accepts_an_explained_one() -> None:

@@ -39,6 +39,19 @@ operations relative to the old gap-space recursions, so outputs agree to
 headroom. Structural exact zeros that follow from genuine sparsity (a
 zero row of A, a zero state path, zero injections) remain EXACTLY zero.
 
+S9 E4 (data-dependent loadings, plans/S9-plan.md decision 6): a
+measurement loading may carry the regressors -- ``Z_t = Z0 + sum_j x_t[j]
+Zx_j`` (:class:`DataLoadings`) -- so the measurement equation is BILINEAR
+in the observable path and the coefficient states. The forward simulation
+runs the full bilinear system (``Z_t`` from the SIMULATED regressors, the
+coefficient states drawn like any state). The additive-component runs
+(HD bars, IRFs) keep the G6 identity exact by treating the coefficient
+path as GIVEN -- the same drawn path for every component, ``coef_path``
+-- while every component feeds its OWN observables back through it:
+``y^k_t = A' x^k_t + sum_j x^k_t[j] (Zx_j xi_t) + Z0 comp^k_t + e^k_t``,
+which sums to ``y_t`` by induction on the (linear, time-varying)
+feedback.
+
 Timing convention for :func:`simulate_forward` (the S4 fan-chart lessons,
 now structural): the state row drawn at step t carries offset ``-1`` slots
 describing period t-1, so an exogenous forecast rule that needs the
@@ -84,6 +97,42 @@ def propagate_state_shock(F: np.ndarray, b: np.ndarray, eps: np.ndarray) -> np.n
         xi[t] = cur
         prev = cur
     return xi
+
+
+@dataclass(frozen=True)
+class DataLoadings:
+    """S9 E4: ``Z_t = Z0 + sum_j x_t[j] * Zx[j]`` -- the constant loading
+    ``Z0`` (m, n) plus one coefficient matrix per regressor column that
+    carries a state x data product, in ASCENDING column order (the
+    accumulation order is part of the contract: it is the order the Stan
+    template prints, so :meth:`path` mirrors ``Zt`` bit for bit)."""
+
+    Z0: np.ndarray
+    Zx: tuple[tuple[int, np.ndarray], ...]
+
+    def data_part(self, x_t: np.ndarray) -> np.ndarray:
+        """``sum_j x_t[j] * Zx_j`` (m, n) -- the data-dependent part alone."""
+        out = None
+        for j, M in self.Zx:
+            term = x_t[j] * M
+            out = term if out is None else out + term
+        return np.zeros_like(self.Z0) if out is None else out
+
+    def at(self, x_t: np.ndarray) -> np.ndarray:
+        """``Z_t`` for one period's regressor row."""
+        Z = self.Z0
+        for j, M in self.Zx:
+            Z = Z + x_t[j] * M
+        return Z
+
+    def path(self, x: np.ndarray) -> np.ndarray:
+        """The (T, m, n) path for a (T, k) regressor matrix, accumulated in
+        column order (``Z0 + x[:, j1] Zx_j1 + x[:, j2] Zx_j2 + ...``)."""
+        T = x.shape[0]
+        Z = np.repeat(self.Z0[None, :, :], T, axis=0)
+        for j, M in self.Zx:
+            Z = Z + x[:, j, None, None] * M[None, :, :]
+        return Z
 
 
 class _Registers:
@@ -152,10 +201,13 @@ def observable_recursion(
     exog_x: np.ndarray | None = None,
     obs_seeds: Mapping[str, Mapping[int, float]] | None = None,
     const_on: bool = False,
+    loadings: "DataLoadings | None" = None,
+    coef_path: np.ndarray | None = None,
 ) -> np.ndarray:
     """The deterministic observation recursion for ONE additive component:
 
         y_t = A' x_t + Z @ state_path[t] + meas_inject[t]
+             [+ (sum_j x_t[j] Zx_j) @ coef_path[t]         (S9 E4)]
 
     with x_t's endogenous columns fed back from this component's OWN past
     observables (per the feedback map, seeded by ``obs_seeds`` -- pre-
@@ -164,7 +216,12 @@ def observable_recursion(
     columns are consulted; ``None`` means all-zero exogenous input -- the
     convention for every component except a data-injection bar); the
     ``Const`` column is 1 iff ``const_on`` (S8 E1: a component is a
-    DEVIATION path unless it is the intercept's own bar).
+    DEVIATION path unless it is the intercept's own bar). With
+    ``loadings`` (S9 E4) the data-dependent part of the loading multiplies
+    the GIVEN coefficient path ``coef_path`` (T, n) -- the full drawn
+    state path, the same for every component (module docstring) -- while
+    ``Z`` is the constant part ``Z0`` applied to this component's own
+    state path.
 
     Returns the (T, m) observable path. By linearity, components computed
     this way sum to the full model's observables -- the identity gate G6
@@ -180,12 +237,19 @@ def observable_recursion(
         raise ValueError(
             f"exog_x has {exog_x.shape[0]} rows but state_path has T={T}."
         )
+    if loadings is not None and (coef_path is None or coef_path.shape != (T, meta.n_state)):
+        raise ValueError(
+            f"observable_recursion: data-dependent loadings need the coefficient path coef_path of shape "
+            f"({T}, {meta.n_state}); got {None if coef_path is None else coef_path.shape}."
+        )
     obs_reg = _Registers(meta.obs_names, meta.obs_lag_depth, obs_seeds)
 
     obs = np.zeros((T, meta.n_obs))
     for t in range(T):
         x_t = _build_x_row(meta, obs_reg, exog_x[t] if exog_x is not None else None, const_on)
         y_t = A.T @ x_t + Z @ state_path[t] + meas_inject[t]
+        if loadings is not None:
+            y_t = y_t + loadings.data_part(x_t) @ coef_path[t]
         obs[t] = y_t
         for name in meta.obs_names:
             obs_reg.push(name, float(y_t[meta.obs_index(name)]))
@@ -400,6 +464,7 @@ def simulate_forward(
     rng: np.random.Generator,
     state_noise: StateNoise | None = None,
     meas_loading: np.ndarray | None = None,
+    loadings: "DataLoadings | None" = None,
 ) -> dict[str, np.ndarray | dict[str, np.ndarray]]:
     """ONE stochastic forward realization, ``horizon`` periods ahead of the
     terminal state ``xi_last``. Per period, in this exact order (RNG
@@ -425,9 +490,11 @@ def simulate_forward(
        matrix ``M``) the row-space error is ``M @ eps``, else ``eps`` is
        already in row space (the pre-S8 identity);
     4. build x from the feedback registers (the ``Const`` column is 1: a
-       forward path is a LEVEL path), apply the measurement equation,
-       push the new observables (and the resolved exogenous values) into
-       their registers.
+       forward path is a LEVEL path), apply the measurement equation --
+       with ``loadings`` (S9 E4) at ``Z_t = loadings.at(x_t)``, the
+       time-varying coefficients drawn as states and the regressors from
+       the simulated path (the full bilinear system) -- and push the new
+       observables (and the resolved exogenous values) into their registers.
 
     After the loop, ONE extra noise draw + F step produces a final state
     row, so callers can align reported series defined on offset ``-1``
@@ -509,7 +576,8 @@ def simulate_forward(
                 lo = first_lag[term.name]
                 x_t[j] = resolved[term.name] if term.lag == lo - 1 else exog_hist[term.name][term.lag - lo]
 
-        y_t = A.T @ x_t + Z @ xi_t + e_row
+        Z_t = Z if loadings is None else loadings.at(x_t)
+        y_t = A.T @ x_t + Z_t @ xi_t + e_row
         obs[t] = y_t
 
         for name in meta.obs_names:
