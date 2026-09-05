@@ -136,7 +136,14 @@ Newest first.
   `mu_h0_e = ln 0.25`, 20 datasets, 2 chains x 500/500, seed base
   20260919, coverage band [0.80, 0.97], per-parameter floor 0.6 --
   pre-registered here before any run; the fast suite carries a 2-dataset
-  smoke of the same design).
+  smoke of the same design). **(c) RAN after the WP1-WP5 commit: PASS**
+  -- pooled 90%-CI coverage 0.875 (band [0.80, 0.97]); per parameter
+  s_c 0.95, s_b 0.90, sigma_h_e 0.70 (floor 0.6), h0_e 0.95; bias |t|
+  0.87 / 0.32 / 1.24 (limit 3); 3 divergences over the 20 fits; 33 min
+  on the contended container. The 0.70 on sigma_h_e is the usual
+  weakly-identified SV-scale coverage at T = 150 (the same parameter is
+  the marginal one in UCSV's G2 record), inside the pre-registered
+  floor, not re-tuned.
   (5) **The HD identity gate gained the mirror gate's S8 shape**: a
   family's ``reconstruct`` may return ``(error, scale)`` with ``scale``
   the draw's largest bar magnitude and the gate is ``error <

@@ -332,8 +332,9 @@ before the WP1 commit and before the WP3 commit.
   handbook filter loop at 1e-10; (b, ii) the fitted DGP recovers beta_t
   (91% inside the 90% band; smoothed RMSE 0.037 < the filter's 0.052);
   (c) the recovery design pre-registered (DECISIONS) with a 2-dataset
-  smoke in the fast suite and the 20-dataset gate under `slow` (not run
-  this stage).
+  smoke in the fast suite and the 20-dataset gate under `slow`, run
+  after the main commit: PASS (pooled coverage 0.875; per-parameter
+  minimum 0.70; bias |t| max 1.24; DECISIONS).
 - **WP5 executed** -- the three examples with smoke records (each README);
   the TVP-VAR's drift prior tightened to the handbook's magnitude after
   the first smoke (DECISIONS (6)).
