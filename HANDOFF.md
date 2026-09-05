@@ -2,7 +2,7 @@
 
 Status as of 2026-09-05 (end of the S8 session). **S8 WP1-WP3 are
 complete and green on branch `claude/s8-grammar-var-extensions-o193mw`
-(pushed; not merged, no PR opened, per the brief); WP4 is IN PROGRESS --
+(pushed; PR https://github.com/adrianchiu1/stan-mcm/pull/9 opened from the Claude Code UI, not merged); WP4 is IN PROGRESS --
 see the section right below.** The binding scope record is
 `plans/S8-plan.md` (its five brief-vs-doctrine conflicts, the E3 proof,
 and the progress record at its end); the measured gate results and the

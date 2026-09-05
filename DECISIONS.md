@@ -4,7 +4,7 @@ One dated line per judgment call not fixed by the spec, with rationale.
 Newest first.
 
 - **2026-09-05 — S8 stage record (WP1-WP3 complete, WP4 in progress;
-  branch `claude/s8-grammar-var-extensions-o193mw`, pushed, no PR).**
+  branch `claude/s8-grammar-var-extensions-o193mw`, pushed; PR #9).**
   Baseline at stage start: fast suite **382 passed, 0 skipped** on a
   pristine worktree of `origin/main` (a first baseline run overlapped
   the stage's own edits and was discarded as contaminated -- recorded so
