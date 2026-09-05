@@ -52,6 +52,18 @@ def _irf_plot(irf, run):
     return plot_irf_matrix(irf, run)
 
 
+def _fevd_compute(run):
+    from macrotoolkit.authoring.results import compute_fevd_draws
+
+    return compute_fevd_draws(run)
+
+
+def _fevd_plot(fv, run):
+    from macrotoolkit.authoring.plots import plot_fevd
+
+    return plot_fevd(fv, run)
+
+
 def _fan_compute(run):
     from macrotoolkit.authoring.results import compute_fan_draws
 
@@ -106,6 +118,14 @@ OUTPUT_MODULES: tuple[OutputModule, ...] = (
         compute=_irf_compute,
         plot=_irf_plot,
         caption=lambda irf, run: f"{len(irf.shocks)} shocks x {len(irf.targets)} responses, horizon={irf.horizon}, irf_vol_reference={run.spec.outputs.irf_vol_reference!r}.",
+    ),
+    OutputModule(
+        name="fevd",
+        heading="Forecast-error variance decomposition",
+        figure_title="FEVD (structural shocks, 1 s.d. sizes)",
+        compute=_fevd_compute,
+        plot=_fevd_plot,
+        caption=lambda fv, run: f"Share of each target's h-step forecast-error variance due to each structural shock (from the IRFs; horizon={fv.horizon}). Under a recursive ordering these are the Cholesky FEVDs.",
     ),
     OutputModule(
         name="fan",

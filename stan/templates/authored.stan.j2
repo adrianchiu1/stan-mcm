@@ -20,6 +20,9 @@
 //   obs   (m={{ m }}): [{{ obs_names | join(', ') }}]
 //   exog  (k={{ k }}): [{{ exog_cols | join(', ') }}]
 //   xi_t = F xi_{t-1} + w_t (w ~ N(0, Q{% if sv_state %}_t{% endif %}));  yobs_t = A' x_t + Z xi_t + e_t (e ~ N(0, R{% if sv_meas %}_t{% endif %}))
+{% if no_state_shocks %}
+// No stochastic state shock (S8 E0): Q = 0 (a deterministic / empty state).
+{% endif %}
 {% if sv %}
 // SV shocks ({{ sv_shocks | join(', ') }}): non-centered log-variance random
 // walks; h is log-VARIANCE (sd = exp(h/2)). A measurement shock's SV enters
@@ -42,14 +45,20 @@ data {
 {% if k > 0 %}
   matrix[T, {{ k }}] x;
 {% endif %}
+{% if n > 0 %}
   vector[{{ n }}] xi00;              // initial state mean xi_{0|0} (explicit)
   matrix[{{ n }}, {{ n }}] P00;       // initial state covariance P_{0|0}
+{% endif %}
 {% for s in sv_shocks %}
   real mu_h0_{{ s }};                 // h_0 prior mean for shock {{ s }} (anchor)
 {% endfor %}
 }
 
 transformed data {
+{% if n == 0 %}
+  vector[0] xi00 = rep_vector(0, 0);      // no state (S8 E0): a pure regression
+  matrix[0, 0] P00 = rep_matrix(0, 0, 0);
+{% endif %}
 {% if k == 0 %}
   matrix[T, 0] x = rep_matrix(0, T, 0);   // no exogenous regressors
   matrix[0, {{ m }}] A = rep_matrix(0, 0, {{ m }});
@@ -70,6 +79,9 @@ transformed data {
 {% for i, j, e in Z.entries %}
   Z[{{ i }}, {{ j }}] = {{ e }};
 {% endfor %}
+{% endif %}
+{% if no_state_shocks %}
+  matrix[{{ n }}, {{ n }}] Q = rep_matrix(0, {{ n }}, {{ n }});   // Q = 0: no state shock
 {% endif %}
 }
 
@@ -118,7 +130,7 @@ transformed parameters {
 {% endif %}
 {% endfor %}
   }
-{% else %}
+{% elif not no_state_shocks %}
   matrix[{{ n }}, {{ n }}] Q = rep_matrix(0, {{ n }}, {{ n }});   // Q = sum_s var_s b_s b_s'
 {% for i, j, e in Q_entries %}
   Q[{{ i }}, {{ j }}] = {{ e }};
@@ -128,17 +140,23 @@ transformed parameters {
 {% endfor %}
 {% endif %}
 {% if sv_meas %}
-  array[T] matrix[{{ m }}, {{ m }}] Rt;   // R_t = diag(var_j(t))
+  array[T] matrix[{{ m }}, {{ m }}] Rt;   // R_t = sum_s var_s(t) m_s m_s'
   for (t in 1:T) {
     Rt[t] = rep_matrix(0, {{ m }}, {{ m }});
-{% for i, e in R_entries %}
-    Rt[t][{{ i }}, {{ i }}] = {{ e }};
+{% for i, k, e in R_entries %}
+    Rt[t][{{ i }}, {{ k }}] = {{ e }};
+{% if i != k %}
+    Rt[t][{{ k }}, {{ i }}] = Rt[t][{{ i }}, {{ k }}];
+{% endif %}
 {% endfor %}
   }
 {% else %}
-  matrix[{{ m }}, {{ m }}] R = rep_matrix(0, {{ m }}, {{ m }});   // R = diag(var_j)
-{% for i, e in R_entries %}
-  R[{{ i }}, {{ i }}] = {{ e }};
+  matrix[{{ m }}, {{ m }}] R = rep_matrix(0, {{ m }}, {{ m }});   // R = sum_s var_s m_s m_s'
+{% for i, k, e in R_entries %}
+  R[{{ i }}, {{ k }}] = {{ e }};
+{% if i != k %}
+  R[{{ k }}, {{ i }}] = R[{{ i }}, {{ k }}];
+{% endif %}
 {% endfor %}
 {% endif %}
   // The Kalman-filter marginal log-likelihood (the shared filter; states

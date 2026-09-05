@@ -38,10 +38,10 @@ from typing import Any, Mapping
 
 import numpy as np
 
-from macrotoolkit.families.base import ExogLag, ObsLag, ObsLagMean, StateSpaceMeta
+from macrotoolkit.families.base import Const, ExogLag, ObsLag, ObsLagMean, StateSpaceMeta
 from specs.schema.authored import AuthoredOptions, FirstObs, LogVarDiffAnchor
-from specs.schema.authored_structure import ModelStructure
-from specs.schema.equations import Expr, evaluate
+from specs.schema.authored_structure import CONST_STATE, ModelStructure
+from specs.schema.equations import Expr, Num, evaluate
 
 
 def feedback_terms(structure: ModelStructure):
@@ -49,7 +49,9 @@ def feedback_terms(structure: ModelStructure):
     out = []
     for term in structure.feedback_map:
         kind = term[0]
-        if kind == "obs_lag":
+        if kind == "const":
+            out.append(Const())
+        elif kind == "obs_lag":
             out.append(ObsLag(term[1], term[2]))
         elif kind == "obs_lag_mean":
             out.append(ObsLagMean(term[1], tuple(term[2])))
@@ -71,8 +73,13 @@ def build_meta(structure: ModelStructure) -> StateSpaceMeta:
         obs_names=tuple(structure.obs_names),
         exog_names=tuple(structure.exog_names),
         feedback_map=feedback_terms(structure),
+        # S8 E3/E5: declared only when the measurement side is NOT the
+        # pre-S8 "one own shock per row" identity, so an S7 model's meta
+        # (and every consumer's code path) is unchanged.
+        measurement_loadings=None if structure.meas_loading_is_identity() else {s: tuple(rows) for s, rows in structure.meas_loadings.items()},
     )
     meta.recovery_order()
+    meta.meas_recovery_order()
     return meta
 
 
@@ -104,6 +111,39 @@ def _q_terms(meta: StateSpaceMeta) -> dict[tuple[int, int], tuple[_QTerm, ...]]:
     return out
 
 
+@dataclass(frozen=True)
+class _RTerm:
+    """One ``coef * var_shock`` term of an R entry (S8 E5): ``coef`` is the
+    coefficient TREE ``M[i,s]*M[k,s]`` (unit factors dropped), evaluated
+    in Python and printed into Stan from the same tree."""
+
+    coef: Expr
+    shock: str
+
+
+def _r_terms(structure: ModelStructure) -> dict[tuple[int, int], tuple[_RTerm, ...]]:
+    """``R = sum_s var_s m_s m_s'`` entry by entry (upper triangle), shocks
+    in declared order -- the measurement-side twin of :func:`_q_terms`.
+    For the pre-S8 identity loading every entry is the diagonal
+    ``var_s`` alone (coefficient ``1.0``, printed as the bare variance,
+    so an S7 program's text is unchanged)."""
+    from specs.schema.equations import _simplify_mul
+
+    m = structure.n_obs
+    out: dict[tuple[int, int], tuple[_RTerm, ...]] = {}
+    for i in range(m):
+        for k in range(i, m):
+            terms = []
+            for j, s in enumerate(structure.measurement_shocks):
+                a, b = structure.M.get((i, j)), structure.M.get((k, j))
+                if a is None or b is None:
+                    continue
+                terms.append(_RTerm(_simplify_mul(a, b), s))
+            if terms:
+                out[(i, k)] = tuple(terms)
+    return out
+
+
 @dataclass
 class CompiledModel:
     """The compiled bundle for one authored model (see module doc)."""
@@ -115,6 +155,7 @@ class CompiledModel:
     bounds: dict[str, tuple[float | None, float | None]]
     q_terms: dict[tuple[int, int], tuple[_QTerm, ...]]
     canonical_id: str
+    r_terms: dict[tuple[int, int], tuple[_RTerm, ...]] = None  # type: ignore[assignment]
 
     # --- convenience --------------------------------------------------
     @property
@@ -167,6 +208,14 @@ class CompiledModel:
     def build_Z(self, params: Mapping[str, float]) -> np.ndarray:
         return self._dense(self.structure.Z, (self.meta.n_obs, self.meta.n_state), params)
 
+    def build_M(self, params: Mapping[str, float]) -> np.ndarray | None:
+        """The measurement-shock loading matrix ``(m, n_meas_shocks)``
+        (S8 E5) at a parameter point, or ``None`` when it is the pre-S8
+        identity (every consumer then keeps its bit-identical path)."""
+        if self.structure.meas_loading_is_identity():
+            return None
+        return self._dense(self.structure.M, (self.meta.n_obs, self.meta.n_meas_shocks), params)
+
     def _shock_variance(self, shock: str, params: Mapping[str, float], h: Mapping[str, np.ndarray] | None):
         if shock in self.sv_shocks:
             if h is None or shock not in h:
@@ -202,18 +251,35 @@ class CompiledModel:
         return Q
 
     def build_R(self, params: Mapping[str, float], h: Mapping[str, np.ndarray] | None = None, T: int | None = None) -> np.ndarray:
+        """``R = sum_s var_s m_s m_s'`` (m, m), or the (T, m, m) path when a
+        measurement shock has SV; each entry accumulates ``coef * var_s``
+        in shock order exactly as the template prints it (a unit
+        coefficient is not multiplied -- ``1.0 * v == v`` exactly, and the
+        template prints the bare variance). Rows without a shock (S8 E3)
+        stay exactly zero."""
         m = self.meta.n_obs
         tv = any(s in self.sv_shocks for s in self.meta.measurement_shocks)
         if tv:
             if T is None:
                 T = len(next(iter(np.asarray(h[s]) for s in self.meta.measurement_shocks if s in self.sv_shocks)))
             R = np.zeros((T, m, m))
-            for i, s in enumerate(self.meta.measurement_shocks):
-                R[:, i, i] = self._shock_variance(s, params, h)
-            return R
-        R = np.zeros((m, m))
-        for i, s in enumerate(self.meta.measurement_shocks):
-            R[i, i] = self._shock_variance(s, params, h)
+        else:
+            R = np.zeros((m, m))
+        for (i, k), terms in self.r_terms.items():
+            acc = None
+            for term in terms:
+                var = self._shock_variance(term.shock, params, h)
+                if isinstance(term.coef, Num) and term.coef.value == 1.0:
+                    contrib = var
+                else:
+                    contrib = evaluate(term.coef, params) * var
+                acc = contrib if acc is None else acc + contrib
+            if tv:
+                R[:, i, k] = acc
+                R[:, k, i] = acc
+            else:
+                R[i, k] = acc
+                R[k, i] = acc
         return R
 
     def build_matrices(self, params: Mapping[str, float], h: Mapping[str, np.ndarray] | None = None, T: int | None = None):
@@ -234,8 +300,9 @@ class CompiledModel:
         """``(yobs, x)``: rows ``L..`` of the observables (``L`` = the
         feedback map's lag depth, the pre-sample rows) and the regressor
         matrix column by column per the feedback map -- lag ``k`` of a
-        series is its rows ``L-k .. L-k+T``; a mean column sums its lags
-        in the listed order and divides once."""
+        series is its rows ``L-k .. L-k+T`` (``k = 0``, S8 E2, the
+        estimation rows themselves); the ``Const`` column is ones; a mean
+        column sums its lags in the listed order and divides once."""
         L = self.lag_depth
         n_rows = len(next(iter(series.values())))
         T = n_rows - L
@@ -247,7 +314,9 @@ class CompiledModel:
         yobs = np.column_stack([series[name][L : L + T] for name in self.meta.obs_names])
         cols = []
         for term in self.meta.feedback_map:
-            if isinstance(term, ObsLagMean):
+            if isinstance(term, Const):
+                cols.append(np.ones(T))
+            elif isinstance(term, ObsLagMean):
                 total = None
                 for k in term.lags:
                     sl = series[term.name][L - k : L - k + T]
@@ -266,6 +335,9 @@ class CompiledModel:
         xi00 = np.zeros(self.meta.n_state)
         P00 = np.zeros((self.meta.n_state, self.meta.n_state))
         for i, (name, _) in enumerate(self.meta.state_labels):
+            if name == CONST_STATE:  # S8 E1: the deterministic unit state carrying drifts
+                xi00[i] = 1.0
+                continue
             init = self.options.initial_state[name]
             mean = float(series[init.mean.first_obs][L]) if isinstance(init.mean, FirstObs) else float(init.mean)
             xi00[i] = mean
@@ -298,7 +370,9 @@ class CompiledModel:
         series = self.series_arrays(df)
         yobs, x = self.regressors(series)
         xi00, P00 = self.initial_state(series)
-        data = {"T": int(yobs.shape[0]), "yobs": yobs, "xi00": xi00, "P00": P00}
+        data = {"T": int(yobs.shape[0]), "yobs": yobs}
+        if self.meta.n_state > 0:  # n == 0 (S8 E0): the template builds the zero-size objects in transformed data
+            data["xi00"], data["P00"] = xi00, P00
         if x.shape[1] > 0:
             data["x"] = x
         data.update(self.anchors(series))
@@ -394,7 +468,7 @@ class CompiledModel:
 
     # --- symbolic inspection helpers (used by the Stan emitter) --------
     def numeric_matrices(self) -> dict[str, bool]:
-        return {k: self.structure.matrix_is_numeric(k) for k in ("F", "A", "Z")}
+        return {k: self.structure.matrix_is_numeric(k) for k in ("F", "A", "Z", "M")}
 
 
 def canonical_model_id(options: AuthoredOptions) -> str:
@@ -426,6 +500,7 @@ def compile_model(options: AuthoredOptions | Mapping[str, Any]) -> CompiledModel
         bounds=options.bounds(),
         q_terms=_q_terms(meta),
         canonical_id=key,
+        r_terms=_r_terms(structure),
     )
     _CACHE[key] = compiled
     return compiled

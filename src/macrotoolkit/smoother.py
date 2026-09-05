@@ -436,8 +436,46 @@ def _rts_smooth(xi_pred, P_pred, xi_filt, P_filt, F):  # pragma: no cover -- num
         # J_t = P_{t|t} F' P_{t+1|t}^-1 via the Cholesky factor of the
         # (symmetric PD) predicted covariance -- same numerics doctrine as
         # the filter: factor once, triangular-shaped solves, no raw inverse.
-        L = np.linalg.cholesky(P_pred[t + 1])
-        J = np.linalg.solve(L.T, np.linalg.solve(L, F @ P_filt[t])).T
+        Pp = P_pred[t + 1]
+        n_zero = 0
+        for i in range(n):
+            if Pp[i, i] == 0.0:
+                n_zero += 1
+        if n_zero == 0:
+            L = np.linalg.cholesky(Pp)
+            J = np.linalg.solve(L.T, np.linalg.solve(L, F @ P_filt[t])).T
+        else:
+            # S8 E1: a slot with EXACTLY zero predicted variance (the
+            # deterministic unit state carrying drifts: P00 = 0 there, no
+            # shock loads it, and F P F' keeps its row/column exactly zero)
+            # makes P_{t+1|t} singular. The RTS gain with the Moore-Penrose
+            # inverse of a matrix whose zero rows/columns are exact reduces
+            # to the same Cholesky solve on the non-deterministic sub-block,
+            # with J's columns for the deterministic slots zero -- their
+            # smoothing innovation xi_sm - xi_pred is exactly zero anyway.
+            # A PD predicted covariance never enters this branch, so the
+            # pre-S8 arithmetic above is untouched bit for bit.
+            m = n - n_zero
+            idx = np.empty(m, np.int64)
+            k = 0
+            for i in range(n):
+                if Pp[i, i] != 0.0:
+                    idx[k] = i
+                    k += 1
+            FP = F @ P_filt[t]
+            Pp_s = np.empty((m, m))
+            FP_s = np.empty((m, n))
+            for a in range(m):
+                for b in range(m):
+                    Pp_s[a, b] = Pp[idx[a], idx[b]]
+                for b in range(n):
+                    FP_s[a, b] = FP[idx[a], b]
+            L = np.linalg.cholesky(Pp_s)
+            J_s = np.linalg.solve(L.T, np.linalg.solve(L, FP_s)).T  # (n, m)
+            J = np.zeros((n, n))
+            for a in range(m):
+                for b in range(n):
+                    J[b, idx[a]] = J_s[b, a]
         xi_sm[t] = xi_filt[t] + J @ (xi_sm[t + 1] - xi_pred[t + 1])
         P_sm[t] = P_filt[t] + J @ (P_sm[t + 1] - P_pred[t + 1]) @ J.T
         P_sm[t] = 0.5 * (P_sm[t] + P_sm[t].T)
@@ -633,17 +671,21 @@ def recover_shocks(
     Z: np.ndarray,
     F: np.ndarray,
     meta,
+    M: np.ndarray | None = None,
 ) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
     """FAMILY-GENERIC structural-shock recovery (S6 WP2): invert a drawn
     state path into the named STATE shocks via the family's declared
     loadings (``StateSpaceMeta.recovery_order`` -- an exact triangular
     solve of ``w = B eps``, no least squares) and the named MEASUREMENT
-    shocks from the per-period residual (diagonal R: the residual's row j
-    IS measurement shock j, in ``meta.measurement_shocks`` order). Same
-    process-noise/residual algebra as :func:`_recover_structural_shocks`
-    (whose lw_sv-specific slot arithmetic this generalizes; for lw_sv the
-    two are bit-identical, pinned by tests/test_smoother_sim.py) -- see
-    that function's boundary note about w_0's lag-copy rows.
+    shocks from the per-period residual: without a loading matrix the
+    residual's OWN row IS the shock (diagonal R, the pre-S8 read); with
+    ``M`` (S8 E5, ``e = M eps``, ``M`` unit lower triangular in the
+    family's ``meas_recovery_order``) the same exact triangular solve
+    row by row. Same process-noise/residual algebra as
+    :func:`_recover_structural_shocks` (whose lw_sv-specific slot
+    arithmetic this generalizes; for lw_sv the two are bit-identical,
+    pinned by tests/test_smoother_sim.py) -- see that function's boundary
+    note about w_0's lag-copy rows.
     Returns ``({state_shock: (T,)}, {measurement_shock: (T,)})``."""
     xi_prev = np.vstack([xi00[None, :], xi_draw[:-1]])
     w = xi_draw - xi_prev @ F.T
@@ -655,7 +697,16 @@ def recover_shocks(
         eps[shock] = acc / coef
     state_shocks = {s: eps[s] for s in meta.state_shocks}
     e = yobs - x @ A - xi_draw @ Z.T
-    meas_shocks = {name: e[:, j] for j, name in enumerate(meta.measurement_shocks)}
+    if M is None:
+        meas_shocks = {name: e[:, meta.meas_shock_row(name)] for name in meta.measurement_shocks}
+    else:
+        meas_shocks = {}
+        col = {name: j for j, name in enumerate(meta.measurement_shocks)}
+        for shock, row, others in meta.meas_recovery_order():
+            acc = e[:, row]
+            for other in others:
+                acc = acc - M[row, col[other]] * meas_shocks[other]
+            meas_shocks[shock] = acc / M[row, col[shock]]
     return state_shocks, meas_shocks
 
 
@@ -761,6 +812,7 @@ def simulate_smoother_draw(
     *,
     zero_noise: bool = False,
     meta=None,
+    M: np.ndarray | None = None,
 ) -> SimSmootherDraw:
     """One Durbin & Koopman (2002) simulation-smoother draw
     (plans/S4-plan.md's resolved open question 1, the literal two-pass DK
@@ -813,7 +865,8 @@ def simulate_smoother_draw(
     (:func:`recover_shocks`) and returned in ``state_shocks``/
     ``meas_shocks``; when ``None`` (the lw_sv default, every pre-S6 call
     site) the historical lw_sv recovery runs and ALSO fills the named
-    dicts, so both interfaces are always available.
+    dicts, so both interfaces are always available. ``M`` (S8 E5): the
+    draw's measurement-shock loading matrix when it is not the identity.
 
     Returns a :class:`SimSmootherDraw` with the drawn state path and the
     recovered structural shocks (spec §2.4 point 2), each length T.
@@ -842,7 +895,7 @@ def simulate_smoother_draw(
     xi_draw = xi_smooth - xi_plus_smooth + xi_plus
 
     if meta is not None:
-        state_shocks, meas_shocks = recover_shocks(xi_draw, xi00, yobs, x, A, Z, F, meta)
+        state_shocks, meas_shocks = recover_shocks(xi_draw, xi00, yobs, x, A, Z, F, meta, M)
         return SimSmootherDraw(
             xi_draw=xi_draw,
             eps_ystar=state_shocks.get("ystar"),

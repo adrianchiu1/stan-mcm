@@ -28,6 +28,9 @@ Layers:
 - :mod:`macrotoolkit.authoring.dsl` -- the small notebook helpers
   (``Model``, ``normal``, ``half_normal``, ``beta``, ``shock``, ``sv``,
   ``first_obs``, ``init``).
+- :mod:`macrotoolkit.authoring.var` (S8) -- ``var`` (a recursive VAR(p)
+  as measurement equations), ``minnesota_priors`` (the independent-normal
+  Minnesota prior), the steady-state (Villani) form.
 """
 from __future__ import annotations
 
@@ -44,8 +47,12 @@ from macrotoolkit.authoring.dsl import (  # noqa: F401
     shock,
     sv,
 )
+from macrotoolkit.authoring.var import minnesota_priors, var, var_parts  # noqa: F401
 
 __all__ = [
+    "var",
+    "var_parts",
+    "minnesota_priors",
     "CompiledModel",
     "compile_model",
     "compiled_for_spec",

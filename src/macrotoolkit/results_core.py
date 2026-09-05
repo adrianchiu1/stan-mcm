@@ -160,6 +160,9 @@ class DrawMatrices:
     Z: np.ndarray
     R: np.ndarray
     extras: dict[str, Any] = field(default_factory=dict)
+    #: S8 E5: the measurement-shock loading matrix ``(m, n_meas_shocks)``
+    #: when it is not the identity (``None`` = each shock is its own row).
+    M: np.ndarray | None = None
 
 
 MatricesForDraw = Callable[[Mapping[str, np.ndarray], int], DrawMatrices]
@@ -185,7 +188,7 @@ def smoother_draws(
 
     for i in idx:
         dm = matrices_for_draw(flat, int(i))
-        sim = simulate_smoother_draw(yobs, x, dm.F, dm.Q, dm.A, dm.Z, dm.R, xi00, P00, rng, meta=meta)
+        sim = simulate_smoother_draw(yobs, x, dm.F, dm.Q, dm.A, dm.Z, dm.R, xi00, P00, rng, meta=meta, M=dm.M)
         yield int(i), dm, sim
 
 
@@ -212,9 +215,13 @@ def state_components(F: np.ndarray, meta: StateSpaceMeta, xi_draw: np.ndarray, s
 
 def hd_bar_names(meta: StateSpaceMeta) -> tuple[str, ...]:
     """The observable-space bars, in display order: init, each state
-    shock, each measurement shock, and ``exog`` iff the feedback map has
-    genuinely exogenous columns."""
+    shock, each measurement shock, ``const`` iff the feedback map has an
+    intercept column (S8 E1: the deterministic intercept path through
+    the feedback loop), and ``exog`` iff it has genuinely exogenous
+    columns."""
     bars = ["init", *meta.state_shocks, *meta.measurement_shocks]
+    if meta.has_const_column():
+        bars.append("const")
     if any(isinstance(t, ExogLag) for t in meta.feedback_map):
         bars.append("exog")
     return tuple(bars)
@@ -228,14 +235,17 @@ def observable_bars(
     meas_shocks: Mapping[str, np.ndarray],
     x: np.ndarray | None = None,
     init_obs_seeds: Mapping[str, Mapping[int, float]] | None = None,
+    M: np.ndarray | None = None,
 ) -> dict[str, np.ndarray]:
     """Each bar's own OBSERVABLE path (T, m) via the generic engine's
     observation recursion: state bars carry their state component, a
-    measurement bar injects its recovered shock into its observation row,
-    the ``exog`` bar carries the real exogenous regressor columns, the
-    ``init`` bar its state component plus the real pre-sample observable
-    seeds; everything else runs from rest. By linearity the bars sum to
-    the observables -- the G6 identity."""
+    measurement bar injects its recovered shock into its observation row
+    (or, with the loading matrix ``M`` -- S8 E5 -- into every row it
+    loads, ``M[:, j] * eps_j``), the ``exog`` bar carries the real
+    exogenous regressor columns, the ``const`` bar the intercept column
+    (S8 E1), the ``init`` bar its state component plus the real
+    pre-sample observable seeds; everything else runs from rest. By
+    linearity the bars sum to the observables -- the G6 identity."""
     T = next(iter(components.values())).shape[0]
     zeros_state = np.zeros((T, meta.n_state))
     bars: dict[str, np.ndarray] = {}
@@ -243,10 +253,13 @@ def observable_bars(
         state_path = components[k] if k in components else zeros_state
         meas = np.zeros((T, meta.n_obs))
         if k in meta.measurement_shocks:
-            meas[:, meta.measurement_shocks.index(k)] = meas_shocks[k]
+            if M is None:
+                meas[:, meta.meas_shock_row(k)] = meas_shocks[k]
+            else:
+                meas = np.outer(meas_shocks[k], M[:, meta.measurement_shocks.index(k)])
         exog = x if k == "exog" else None
         seeds = init_obs_seeds if k == "init" else None
-        bars[k] = observable_recursion(A, Z, meta, state_path, meas, exog, seeds)
+        bars[k] = observable_recursion(A, Z, meta, state_path, meas, exog, seeds, const_on=(k == "const"))
     return bars
 
 
@@ -256,11 +269,15 @@ def observable_bars(
 
 
 def impulse_response(
-    F: np.ndarray, A: np.ndarray, Z: np.ndarray, meta: StateSpaceMeta, shock: str, size: float, horizon: int
+    F: np.ndarray, A: np.ndarray, Z: np.ndarray, meta: StateSpaceMeta, shock: str, size: float, horizon: int,
+    M: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """One shock's theoretical impulse response from rest: returns the
     state path ``(horizon, n)`` and the observable path ``(horizon, m)``
-    -- exactly one HD bar with a synthetic one-off impulse."""
+    -- exactly one HD bar with a synthetic one-off impulse. A measurement
+    shock with a loading matrix ``M`` (S8 E5) impacts every row it loads
+    (``M[:, j] * size``): under a recursive ordering these ARE the
+    Cholesky IRFs."""
     impulse = np.zeros(horizon)
     impulse[0] = size
     meas = np.zeros((horizon, meta.n_obs))
@@ -268,7 +285,10 @@ def impulse_response(
         comp = propagate_state_shock(F, meta.injection_vector(shock), impulse)
     elif shock in meta.measurement_shocks:
         comp = np.zeros((horizon, meta.n_state))
-        meas[:, meta.measurement_shocks.index(shock)] = impulse
+        if M is None:
+            meas[:, meta.meas_shock_row(shock)] = impulse
+        else:
+            meas = np.outer(impulse, M[:, meta.measurement_shocks.index(shock)])
     else:
         raise ValueError(
             f"Unknown shock {shock!r}; declared state shocks {list(meta.state_shocks)}, "
@@ -276,3 +296,23 @@ def impulse_response(
         )
     obs = observable_recursion(A, Z, meta, comp, meas)
     return comp, obs
+
+
+# ---------------------------------------------------------------------------
+# Forecast-error variance decomposition (generic, S8 WP2)
+# ---------------------------------------------------------------------------
+
+
+def fevd(responses: Mapping[str, np.ndarray]) -> dict[str, np.ndarray]:
+    """The forecast-error variance decomposition from STRUCTURAL impulse
+    responses at one-standard-deviation shock sizes: for orthogonal shocks
+    the h-step forecast-error variance of a target is
+    ``sum_s sum_{j<=h} irf_s[j]^2`` and shock ``s``'s share at horizon h is
+    its own cumulative squared response over that total. ``responses``
+    maps shock -> ``(H,)`` response of ONE target; returns shock ->
+    ``(H,)`` shares (summing to 1 at every horizon; a horizon with zero
+    total variance -- a shock-free deterministic target -- gets NaN)."""
+    cum = {s: np.cumsum(np.asarray(r, dtype=np.float64) ** 2) for s, r in responses.items()}
+    total = sum(cum.values())
+    with np.errstate(invalid="ignore", divide="ignore"):
+        return {s: np.where(total > 0.0, c / total, np.nan) for s, c in cum.items()}

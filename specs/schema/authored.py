@@ -15,15 +15,20 @@ compile (``specs/schema/authored_structure.py``) runs so any construct
 outside the DSL's scope fails loudly with a message naming the limitation
 before anything is rendered or sampled.
 
-Scope fence (plans/S7-plan.md): linear-Gaussian state-space models only --
-measurement equations linear in states, lagged observables/exogenous
-series and one iid Gaussian measurement shock per row; transition
-equations linear in states and state shocks; non-centered random-walk
-log-variance SV on any shock; explicit initial conditions; priors from the
-menu the existing templates stamp (normal with optional truncation bounds,
-half_normal, beta). Nonlinearities, regime switching, missing data, mixed
-frequency, time-varying loadings, exact-diffuse initialization and
-intercepts are rejected with a message.
+Scope fence (plans/S7-plan.md, widened by plans/S8-plan.md WP1):
+linear-Gaussian state-space models only -- measurement equations linear
+in states, lagged AND contemporaneous observables (substituted
+recursively, S8 E5), exogenous series at any lag including 0 (E2), an
+intercept (E1) and at most one iid Gaussian measurement shock of the
+row's own (a shock-free row is allowed when a stochastic state explains
+it, E3); transition equations linear in states and state shocks with an
+optional drift (E1); no transition equation at all (a pure regression /
+VAR, E0); non-centered random-walk log-variance SV on any shock; explicit
+initial conditions; priors from the menu the existing templates stamp
+(normal with optional truncation bounds, half_normal, beta).
+Nonlinearities, regime switching, missing data, mixed frequency,
+data-dependent/time-varying loadings and exact-diffuse initialization are
+rejected with a message.
 """
 from __future__ import annotations
 
@@ -192,7 +197,7 @@ class Equations(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     measurement: list[str] = Field(min_length=1)
-    transition: list[str] = Field(min_length=1)
+    transition: list[str] = Field(default_factory=list)  # may be empty (S8 E0: a pure regression / VAR has no state)
 
 
 # ---------------------------------------------------------------------------

@@ -158,7 +158,7 @@ def test_outputs_report_and_g6_identity(authored_run: mtk.Run) -> None:
 
     res = authored_run.results()
     outs = authored_run.outputs()
-    assert outs.names == ("prior_predictive", "states", "irf", "fan", "hd")
+    assert outs.names == ("prior_predictive", "states", "irf", "fevd", "fan", "hd")
     assert all(outs.unavailable_reason(n) is None for n in outs.names)  # no exogenous series: fan applies
     sd = outs.compute("states")
     assert set(sd.states) == {"lvl", "c"} and set(sd.vol) == {"eta_c"} and sd.labels == {"lvl": "lvl", "c": "c"}
@@ -182,7 +182,9 @@ def test_outputs_report_and_g6_identity(authored_run: mtk.Run) -> None:
     plt.close("all")
     html = authored_run.report().read_text()
     assert "Authored model report" in html and "KF mirror check" in html and "PASS:" in html
-    assert html.count("<img ") == 1 + 1 + 1 + 3 + 1  # pp, states, irf, fan (y, lvl, c), hd (y)
+    fv = outs.compute("fevd")
+    np.testing.assert_allclose(sum(fv.shares["y"][s] for s in fv.shocks), 1.0, atol=1e-12)  # shares sum to one (S8 FEVD)
+    assert html.count("<img ") == 1 + 1 + 1 + 1 + 3 + 1  # pp, states, irf, fevd, fan (y, lvl, c), hd (y)
     assert "http://" not in html and "https://" not in html
 
 

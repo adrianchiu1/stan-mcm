@@ -218,13 +218,40 @@ mtk.validate(spec, tier="fast", data=df)          # mirror gate + HD identity, a
 The equation grammar (`specs/schema/equations.py`): `x[-k]` is a lag,
 `mean(pi[-2], pi[-3], pi[-4])` one regressor column, a lagged left-hand
 side (`g[-1] = g[-2] + eta_g`) carries a state lagged (HLW's timing).
-The scope is linear-Gaussian state-space models with iid Gaussian shocks,
-optional random-walk log-variance SV on any shock, explicit initial
-conditions and the templates' prior menu; anything else (nonlinearities,
-intercepts, simultaneous observables, contemporaneous exogenous
-regressors, regime switching, missing data, mixed frequency, time-varying
-loadings, exact-diffuse initialization) is rejected at spec-parse time
-with a message naming the limitation.
+Since S8 (`plans/S8-plan.md`, the CCBS handbook bundle) the grammar also
+accepts intercepts (a measurement constant as a parameter or a number --
+the x column of ones; a transition constant as a drift through an
+implicit unit state), contemporaneous exogenous regressors (`b*x`),
+shock-free measurement rows (`Y = C + tau` exactly; allowed when a
+stochastic state explains the row -- the positive-definiteness proof is
+in the plan), contemporaneous OBSERVABLES on a right-hand side
+(substituted recursively in dependency order, so a Cholesky-ordered VAR
+is a set of measurement equations with orthogonal shocks), and models
+with no stochastic state shock or no state at all (a regression / VAR
+runs through the same Kalman filter with `n = 0`). The scope stays
+linear-Gaussian state-space models with iid Gaussian shocks, optional
+random-walk log-variance SV on any shock, explicit initial conditions and
+the templates' prior menu; nonlinearities, correlated/shared shocks,
+regime switching, missing data, mixed frequency, data-dependent or
+time-varying loadings and exact-diffuse initialization are rejected at
+spec-parse time with a message naming the limitation.
+
+**VARs and post-processors (S8).** `au.var(name, observables, p, ...)`
+expands a VAR(p) into the recursive equations (the list order is the
+Cholesky ordering; the engine's structural IRFs under it are the Cholesky
+IRFs), `au.minnesota_priors(data, observables, p, lambda1..4, own_mean)`
+gives the INDEPENDENT-NORMAL Minnesota prior of Blake & Mumtaz (2017)
+Chapter 2 §2 per coefficient (not the natural-conjugate / inverse-Wishart
+or dummy-observation priors -- `macrotoolkit/authoring/var.py` states the
+correspondence), `intercept="steady_state"` gives Villani's form with the
+long-run means as constant states, and every authored run now carries a
+`fevd` output. Two post-processors over run outputs
+(`macrotoolkit.postprocess`): sign restrictions by Haar rotations of the
+structural IRFs (Rubio-Ramirez/Waggoner/Zha; the handbook's "closest to
+median" variant optional) and Waggoner-Zha conditional forecasts with
+hard conditions. The handbook's Chapter 1-3 examples are authored as
+specs under [examples/handbook/](examples/handbook/) (data conversion,
+spec generation and smoke-run records included).
 
 **Where the DSL sits on the ladder.** The compiler is gated, not trusted:
 the three hand-written families expressed as equations reproduce their

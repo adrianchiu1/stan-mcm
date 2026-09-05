@@ -239,8 +239,8 @@ def mirror_gate(family: str, spec_builder: Callable[[], Any], df_builder: Callab
         (artifact_dir / "mirror.json").write_text(json.dumps(rec, indent=2))
         return GateResult(
             "mirror", "fast", "PASS",
-            [f"max |Stan - Python| KF loglik = {rec['max_abs_diff']:.3e} over {rec['n_points']} prior draws (gate {tolerance:.0e})"],
-            {"max_abs_diff": rec["max_abs_diff"], "n_points": rec["n_points"], "tolerance": tolerance},
+            [f"max |Stan - Python| KF loglik = {rec['max_abs_diff']:.3e} (max relative {rec['max_rel_diff']:.3e}) over {rec['n_points']} prior draws (gate max({tolerance:.0e}, {rec['rtol']:.0e} * |loglik|))"],
+            {"max_abs_diff": rec["max_abs_diff"], "max_rel_diff": rec["max_rel_diff"], "n_points": rec["n_points"], "tolerance": tolerance},
         )
 
     return Gate("mirror", "fast", f"Stan-vs-Python Kalman-filter log-likelihood at {n_points} prior draws of the production render (G1's shape).", _run)

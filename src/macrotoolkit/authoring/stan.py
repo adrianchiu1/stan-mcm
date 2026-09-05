@@ -15,8 +15,15 @@ What the template receives, and how it mirrors
   (``CompiledModel.q_terms``); a variance is ``square(sigma)`` for a
   constant-scale shock or ``exp(h_<s>[t])`` for an SV shock (h is
   log-VARIANCE). Constant when no state shock has SV, else an
-  ``array[T] matrix`` path ``Qt`` (the S6 Q_t machinery); ``R`` likewise
-  (``Rt`` for measurement SV).
+  ``array[T] matrix`` path ``Qt`` (the S6 Q_t machinery); with no state
+  shock at all (S8 E0) ``Q = 0`` lands in ``transformed data``. ``R``
+  likewise (``Rt`` for measurement SV), its entries being
+  ``sum_s (M[i,s]*M[k,s]) * var_s`` term lists (``CompiledModel.r_terms``,
+  S8 E5) -- the coefficient tree printed by the same printer the Python
+  builder evaluates; a shock-free row (S8 E3) has no entry.
+- ``n == 0`` (a pure regression / VAR, S8 E0): the zero-size state
+  objects are built in ``transformed data`` (``vector[0]``,
+  ``matrix[0, 0]``), never read from data.
 - ``params``: one declaration + prior statement per prior-table entry
   (normal with truncation carried by the parameter constraint;
   half_normal via ``<lower=0>``; beta), then the SV block per SV shock
@@ -49,6 +56,21 @@ def _q_entry_text(compiled: CompiledModel, terms) -> str:
     for term in terms:
         var = _var_text(compiled, term.shock)
         parts.append(var if term.coef == 1.0 else f"{_fmt_num(term.coef)} * {var}")
+    return " + ".join(parts)
+
+
+def _r_entry_text(compiled: CompiledModel, terms) -> str:
+    """``(coef) * var`` per term, the unit coefficient dropped exactly as
+    ``CompiledModel.build_R`` drops the multiplication."""
+    from specs.schema.equations import Num
+
+    parts = []
+    for term in terms:
+        var = _var_text(compiled, term.shock)
+        if isinstance(term.coef, Num) and term.coef.value == 1.0:
+            parts.append(var)
+        else:
+            parts.append(f"({term.coef.emit()}) * {var}")
     return " + ".join(parts)
 
 
@@ -98,7 +120,7 @@ def render_context(compiled: CompiledModel, priors: dict[str, dict]) -> dict[str
             }
         )
     q_entries = [(i + 1, j + 1, _q_entry_text(compiled, terms)) for (i, j), terms in sorted(compiled.q_terms.items())]
-    r_entries = [(i + 1, _var_text(compiled, s)) for i, s in enumerate(meta.measurement_shocks)]
+    r_entries = [(i + 1, k + 1, _r_entry_text(compiled, terms)) for (i, k), terms in sorted(compiled.r_terms.items())]
 
     return {
         "name": compiled.name,
@@ -121,10 +143,13 @@ def render_context(compiled: CompiledModel, priors: dict[str, dict]) -> dict[str
         "sv_meas": sv_meas,
         "params": params,
         "sv_blocks": sv_blocks,
+        "no_state_shocks": not meta.state_shocks,
     }
 
 
 def _fb_text(term) -> str:
+    if term[0] == "const":
+        return "1"
     if term[0] == "obs_lag_mean":
         return "mean(" + ", ".join(f"{term[1]}[-{k}]" for k in term[2]) + ")"
-    return f"{term[1]}[-{term[2]}]"
+    return f"{term[1]}[-{term[2]}]" if term[2] else term[1]

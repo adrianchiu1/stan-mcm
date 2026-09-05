@@ -69,8 +69,11 @@ def python_kf_loglik(compiled: CompiledModel, params: dict, stan_data: dict, h: 
 
     T = int(stan_data["T"])
     x = stan_data["x"] if "x" in stan_data else np.zeros((T, 0))
+    n = compiled.meta.n_state
+    xi00 = stan_data["xi00"] if "xi00" in stan_data else np.zeros(n)
+    P00 = stan_data["P00"] if "P00" in stan_data else np.zeros((n, n))
     F, Q, A, Z, R = compiled.build_matrices(params, h=h or None, T=T)
-    return kalman_loglik(stan_data["yobs"], x, F, Q, A, Z, R, stan_data["xi00"], stan_data["P00"])
+    return kalman_loglik(stan_data["yobs"], x, F, Q, A, Z, R, xi00, P00)
 
 
 def mirror_points(spec, stan_data: dict, n: int, rng: np.random.Generator):

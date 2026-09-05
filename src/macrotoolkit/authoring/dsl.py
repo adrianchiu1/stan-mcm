@@ -86,10 +86,10 @@ class Model:
         *,
         observables: list[str],
         measurement: list[str],
-        transition: list[str],
+        transition: list[str] | None = None,
         parameters: Mapping[str, dict],
         shocks: Mapping[str, dict],
-        initial_state: Mapping[str, dict],
+        initial_state: Mapping[str, dict] | None = None,
         exogenous: list[str] | None = None,
         forecast_rules: Mapping[str, dict] | None = None,
     ) -> None:
@@ -97,10 +97,10 @@ class Model:
             "name": name,
             "observables": list(observables),
             "exogenous": list(exogenous or []),
-            "equations": {"measurement": list(measurement), "transition": list(transition)},
+            "equations": {"measurement": list(measurement), "transition": list(transition or [])},
             "parameters": {k: dict(v) for k, v in parameters.items()},
             "shocks": {k: dict(v) for k, v in shocks.items()},
-            "initial_state": {k: dict(v) for k, v in initial_state.items()},
+            "initial_state": {k: dict(v) for k, v in (initial_state or {}).items()},
             "forecast_rules": {k: dict(v) for k, v in (forecast_rules or {}).items()},
         }
         self.options = AuthoredOptions.model_validate(raw)
@@ -128,10 +128,12 @@ class Model:
         lines.append(f"  SV shocks: {list(st.sv_shocks)}")
         fb = []
         for t in st.feedback_map:
-            if t[0] == "obs_lag_mean":
+            if t[0] == "const":
+                fb.append("1")
+            elif t[0] == "obs_lag_mean":
                 fb.append("mean(" + ", ".join(f"{t[1]}[-{k}]" for k in t[2]) + ")")
             else:
-                fb.append(f"{t[1]}[-{t[2]}]")
+                fb.append(f"{t[1]}[-{t[2]}]" if t[2] else t[1])
         lines.append(f"  regressor columns (feedback map): {fb}   pre-sample lag rows: {st.lag_depth}")
         return "\n".join(lines)
 

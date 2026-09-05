@@ -142,7 +142,7 @@ def matrices_for_draw(compiled: CompiledModel, flat: Mapping[str, np.ndarray], i
     extras: dict[str, Any] = dict(params)
     for s, path in h.items():
         extras[f"h_{s}"] = path
-    return DrawMatrices(F=F, Q=Q, A=A, Z=Z, R=R, extras=extras)
+    return DrawMatrices(F=F, Q=Q, A=A, Z=Z, R=R, extras=extras, M=compiled.build_M(params))
 
 
 def _draw_loop(run: AuthoredRun, seed: int | None):
@@ -238,7 +238,7 @@ def init_obs_seeds(run_or_compiled, series: Mapping[str, np.ndarray]) -> dict[st
 
 def historical_decomposition_draw(compiled: CompiledModel, dm: DrawMatrices, xi_draw, state_shocks, meas_shocks, x, seeds):
     comps = state_components(dm.F, compiled.meta, xi_draw, state_shocks)
-    bars = observable_bars(dm.A, dm.Z, compiled.meta, comps, meas_shocks, x, seeds)
+    bars = observable_bars(dm.A, dm.Z, compiled.meta, comps, meas_shocks, x, seeds, M=dm.M)
     return comps, bars
 
 
@@ -307,12 +307,40 @@ def compute_irf_draws(run: AuthoredRun) -> IRFDraws:
     for j, i in enumerate(idx):
         dm = matrices_for_draw(c, flat, int(i), run.T)
         for s in shocks:
-            comp, obs = impulse_response(dm.F, dm.A, dm.Z, meta, s, irf_shock_size(c, s, dm, vol_ref), H)
+            comp, obs = impulse_response(dm.F, dm.A, dm.Z, meta, s, irf_shock_size(c, s, dm, vol_ref), H, M=dm.M)
             for oi, o in enumerate(meta.obs_names):
                 responses[s][o][j] = obs[:, oi]
             for st in state_series_names(c):
                 responses[s][st][j] = comp[:, _head_slot(c, st)]
     return IRFDraws(draw_indices=idx, horizon=H, shocks=shocks, targets=targets, responses=responses)
+
+
+@dataclass
+class FEVDDraws:
+    """``shares[target][shock]`` is ``(n_draws, H)``: shock ``shock``'s
+    share of ``target``'s h-step forecast-error variance (S8 WP2, from
+    the structural IRFs at one-sd sizes -- under a recursive ordering the
+    Cholesky FEVD)."""
+
+    draw_indices: np.ndarray
+    horizon: int
+    shocks: tuple[str, ...]
+    targets: tuple[str, ...]
+    shares: dict[str, dict[str, np.ndarray]]
+
+
+def compute_fevd_draws(run: AuthoredRun, irf: IRFDraws | None = None) -> FEVDDraws:
+    from macrotoolkit.results_core import fevd
+
+    irf = compute_irf_draws(run) if irf is None else irf
+    n = len(irf.draw_indices)
+    shares = {t: {s: np.empty((n, irf.horizon)) for s in irf.shocks} for t in irf.targets}
+    for t in irf.targets:
+        for j in range(n):
+            out = fevd({s: irf.responses[s][t][j] for s in irf.shocks})
+            for s in irf.shocks:
+                shares[t][s][j] = out[s]
+    return FEVDDraws(draw_indices=irf.draw_indices, horizon=irf.horizon, shocks=irf.shocks, targets=irf.targets, shares=shares)
 
 
 # ---------------------------------------------------------------------------
@@ -321,10 +349,12 @@ def compute_irf_draws(run: AuthoredRun) -> IRFDraws:
 
 
 class MixedMeasurementNoise:
-    """Per-row measurement shocks: SV rows continue their log-variance
-    random walk (all h innovations first in row order, then all eps draws
-    in row order -- ``RandomWalkLogVarianceNoise``'s RNG order), constant
-    rows draw at a fixed sd. h is log-VARIANCE (sd = exp(h/2))."""
+    """Per-SHOCK measurement draws (index = position in
+    ``meta.measurement_shocks``; the engine maps shocks to rows through
+    the loading matrix, S8 E5): SV shocks continue their log-variance
+    random walk (all h innovations first in shock order, then all eps
+    draws in shock order -- ``RandomWalkLogVarianceNoise``'s RNG order),
+    constant shocks draw at a fixed sd. h is log-VARIANCE (sd = exp(h/2))."""
 
     def __init__(self, sds: Mapping[int, float], h_last: Mapping[int, float], sigma_h: Mapping[int, float], m: int) -> None:
         self._m = m
@@ -338,16 +368,17 @@ class MixedMeasurementNoise:
         eps = np.empty(self._m)
         for j in range(self._m):
             # sd = sqrt(exp(h)) exactly as RandomWalkLogVarianceNoise writes it
-            # (h is log-VARIANCE); a constant row draws at its fixed sd.
+            # (h is log-VARIANCE); a constant shock draws at its fixed sd.
             sd = float(np.sqrt(np.exp(self._h[j]))) if j in self._h else self._sds[j]
             eps[j] = rng.normal(0.0, sd)
         return eps
 
 
 def fan_unavailable_reason(compiled: CompiledModel) -> str | None:
-    """``None`` when every exogenous series the feedback map lags has a
-    declared forecast rule; else the reason the fan chart is omitted."""
-    missing = [e for e in compiled.meta.exog_names if compiled.meta.exog_lag_depth(e) > 0 and e not in compiled.options.forecast_rules]
+    """``None`` when every exogenous series the feedback map references
+    has a declared forecast rule; else the reason the fan chart is
+    omitted."""
+    missing = [e for e in compiled.meta.exog_names if compiled.meta.exog_is_referenced(e) and e not in compiled.options.forecast_rules]
     if missing:
         return (
             f"fan charts need a forecast rule for every exogenous series entering the model; none declared for "
@@ -377,17 +408,17 @@ def _noise_models(compiled: CompiledModel, dm: DrawMatrices, h_last: Mapping[str
             sh[j] = float(dm.extras[f"sigma_h_{s}"])
         else:
             sds[j] = float(dm.extras[st.shock_scale_param[s]])
-    meas_noise = MixedMeasurementNoise(sds, hl, sh, meta.n_obs)
+    meas_noise = MixedMeasurementNoise(sds, hl, sh, meta.n_meas_shocks)
     return state_noise, meas_noise
 
 
 def exog_rules_for(compiled: CompiledModel, series: Mapping[str, np.ndarray], t_last: int):
-    """The engine's rule objects per lagged exogenous series from the
+    """The engine's rule objects per referenced exogenous series from the
     model's ``forecast_rules``; ``last_value`` holds the series at row
     ``t_last`` (the last trimmed row)."""
     rules = {}
     for e in compiled.meta.exog_names:
-        if compiled.meta.exog_lag_depth(e) == 0:
+        if not compiled.meta.exog_is_referenced(e):
             continue
         decl = compiled.options.forecast_rules[e]
         if decl.rule == "last_value":
@@ -405,16 +436,49 @@ def _terminal_seeds(compiled: CompiledModel, series: Mapping[str, np.ndarray]):
     ``n_rows``): lag k of any series is row ``n_rows - k``. Observables
     seed lags 1..depth; exogenous series seed lags 2..depth only -- the
     lag-1 value is always the forecast rule's resolution inside the loop
-    (the S4 timing lesson, structural in ``simulate_forward``)."""
+    (the S4 timing lesson, structural in ``simulate_forward``) -- except
+    a series referenced at lag 0 (S8 E2), whose rule resolves the CURRENT
+    value and whose register is seeded at lags 1..depth."""
     meta = compiled.meta
     n_rows = len(next(iter(series.values())))
     obs_seeds = {o: {k: float(series[o][n_rows - k]) for k in range(1, meta.obs_lag_depth(o) + 1)} for o in meta.obs_names if meta.obs_lag_depth(o)}
     exog_seeds = {}
     for e in meta.exog_names:
         depth = meta.exog_lag_depth(e)
-        if depth >= 2:
-            exog_seeds[e] = {k: float(series[e][n_rows - k]) for k in range(2, depth + 1)}
+        lo = 1 if meta.exog_contemporaneous(e) else 2
+        if depth >= lo:
+            exog_seeds[e] = {k: float(series[e][n_rows - k]) for k in range(lo, depth + 1)}
     return obs_seeds, exog_seeds
+
+
+def presample_exog_seeds(compiled: CompiledModel, series: Mapping[str, np.ndarray]) -> dict[str, dict[int, float]]:
+    """Exogenous register seeds for an IN-SAMPLE simulation starting at
+    the first estimation row ``L``: lag k is row ``L - k``, over lags
+    2..depth (1..depth for a series referenced at lag 0)."""
+    meta = compiled.meta
+    L = compiled.lag_depth
+    out: dict[str, dict[int, float]] = {}
+    for e in meta.exog_names:
+        depth = meta.exog_lag_depth(e)
+        lo = 1 if meta.exog_contemporaneous(e) else 2
+        if depth >= lo:
+            out[e] = {k: float(series[e][L - k]) for k in range(lo, depth + 1)}
+    return out
+
+
+def data_path_rules(compiled: CompiledModel, series: Mapping[str, np.ndarray], T: int) -> dict[str, DataPathExogRule]:
+    """``DataPathExogRule`` per referenced exogenous series for an
+    in-sample simulation of ``T`` steps from row ``L``: the rule supplies
+    the lag-1 value (rows ``L-1 ..``), or the current value (rows
+    ``L ..``) for a series referenced at lag 0 (S8 E2)."""
+    L = compiled.lag_depth
+    out = {}
+    for e in compiled.meta.exog_names:
+        if not compiled.meta.exog_is_referenced(e):
+            continue
+        start = L if compiled.meta.exog_contemporaneous(e) else L - 1
+        out[e] = DataPathExogRule(series[e][start : start + T])
+    return out
 
 
 @dataclass
@@ -445,7 +509,7 @@ def compute_fan_draws(run: AuthoredRun, *, seed: int | None = None) -> FanDraws:
         # constant shocks by name), so a placeholder is passed explicitly.
         Q_const = dm.Q if dm.Q.ndim == 2 else dm.Q[-1]
         out = simulate_forward(dm.F, Q_const, dm.A, dm.Z, meta, sim.xi_draw[-1], obs_seeds, exog_seeds,
-                               exog_rules_for(c, run.series, n_rows - 1), meas_noise, H, rng, state_noise=state_noise)
+                               exog_rules_for(c, run.series, n_rows - 1), meas_noise, H, rng, state_noise=state_noise, meas_loading=dm.M)
         for oi, o in enumerate(meta.obs_names):
             obs[o][j] = out["obs"][:, oi]
         for s in states:
@@ -485,21 +549,17 @@ def compute_prior_predictive_draws(run: AuthoredRun, *, seed: int | None = None)
     rng = np.random.default_rng(seed if seed is not None else run.spec.sampler.seed)
     obs = {o: np.empty((n_draws, T)) for o in meta.obs_names}
     obs_seeds = {o: {k: float(run.series[o][L - k]) for k in range(1, meta.obs_lag_depth(o) + 1)} for o in meta.obs_names if meta.obs_lag_depth(o)}
-    exog_seeds = {}
-    for e in meta.exog_names:
-        depth = meta.exog_lag_depth(e)
-        if depth >= 2:
-            exog_seeds[e] = {k: float(run.series[e][L - k]) for k in range(2, depth + 1)}
+    exog_seeds = presample_exog_seeds(c, run.series)
     for j in range(n_draws):
         params = c.sample_prior_params(priors, rng, run.anchors)
         h0 = {s: params[f"h0_{s}"] for s in c.sv_shocks}
         dm_params = {**params, **{f"h_{s}": np.array([h0[s]]) for s in c.sv_shocks}}
         F, Q, A, Z, R = c.build_matrices(params, h={s: np.array([h0[s]]) for s in c.sv_shocks} or None, T=1)
-        dm = DrawMatrices(F=F, Q=Q if Q.ndim == 2 else Q[0], A=A, Z=Z, R=R if R.ndim == 2 else R[0], extras=dm_params)
+        dm = DrawMatrices(F=F, Q=Q if Q.ndim == 2 else Q[0], A=A, Z=Z, R=R if R.ndim == 2 else R[0], extras=dm_params, M=c.build_M(params))
         state_noise, meas_noise = _noise_models(c, dm, h_last=h0)
-        rules = {e: DataPathExogRule(run.series[e][L - 1 : L - 1 + T]) for e in meta.exog_names if meta.exog_lag_depth(e)}
+        rules = data_path_rules(c, run.series, T)
         xi_init = run.xi00 + sqrt_P00 @ rng.standard_normal(len(run.xi00))
-        out = simulate_forward(F, dm.Q, A, Z, meta, xi_init, obs_seeds, exog_seeds, rules, meas_noise, T, rng, state_noise=state_noise)
+        out = simulate_forward(F, dm.Q, A, Z, meta, xi_init, obs_seeds, exog_seeds, rules, meas_noise, T, rng, state_noise=state_noise, meas_loading=dm.M)
         for oi, o in enumerate(meta.obs_names):
             obs[o][j] = out["obs"][:, oi]
     actual = {o: run.yobs[:, i].copy() for i, o in enumerate(meta.obs_names)}
@@ -534,8 +594,9 @@ def hd_reconstruction_error(spec: RunSpec, df, draw_index: int, *, seed_base: in
         raise RuntimeError(f"No stationary prior draw in {max_attempts} attempts for authored model {c.name!r}.")
     h = {s: sv_rw_noncentered(params[f"h0_{s}"], params[f"sigma_h_{s}"], rng.standard_normal(T)) for s in c.sv_shocks}
     F, Q, A, Z, R = c.build_matrices(params, h=h or None, T=T)
-    sim = simulate_smoother_draw(yobs, x, F, Q, A, Z, R, xi00, P00, rng, meta=c.meta)
+    M = c.build_M(params)
+    sim = simulate_smoother_draw(yobs, x, F, Q, A, Z, R, xi00, P00, rng, meta=c.meta, M=M)
     comps = state_components(F, c.meta, sim.xi_draw, sim.state_shocks)
-    bars = observable_bars(A, Z, c.meta, comps, sim.meas_shocks, x, init_obs_seeds(c, series))
+    bars = observable_bars(A, Z, c.meta, comps, sim.meas_shocks, x, init_obs_seeds(c, series), M=M)
     total = sum(bars.values())
     return float(np.max(np.abs(total - yobs)))
