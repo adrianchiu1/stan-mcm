@@ -33,10 +33,15 @@ Smoke records exist for `ch1_ar2`, `ch1_ar2_ar1err`, `ch2_bivar_minnesota`,
 
 **Not done -- resume here:** (1) the two large smoke runs,
 `ch2_signs_11var` (319 parameters; the sign-restriction post-processor
-call is in `run_smoke.py`) and `ch3_dfm_uk_panel` (m = 40, n = 6; the
-40x40 innovation Cholesky per period makes NUTS slow) -- run
+call is in `run_smoke.py`; one attempt at 2 chains x 200/200 was killed
+by a 40-minute cap on a busy 4-core container -- budget an hour or more,
+or lower `SMOKE_BIG` further for a first look) and `ch3_dfm_uk_panel`
+(m = 40, n = 6; the 40x40 innovation Cholesky per period makes NUTS
+slow) -- run
 `python examples/handbook/run_smoke.py ch2_signs_11var ch3_dfm_uk_panel`
-when a machine-hour is available and check the records in; if the DFM's
+when the machine-hours are available and check the records in (a killed
+attempt leaves an incomplete `runs/<id>/` without `_SUCCESS`; remove it
+before retrying); if the DFM's
 mirror check or diagnostics disappoint, that is the finding to record
 (short chains are stated as smoke, not evidence). (2) The FAVAR's rate
 block (the policy rate as an observable inside the factor VAR) needs
