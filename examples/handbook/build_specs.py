@@ -347,6 +347,181 @@ period index ending 2006Q1 (a label, not a documented sample).
 """)
 
 
+# ---------------------------------------------------------------------------
+# S9: time-varying parameters (E4)
+# ---------------------------------------------------------------------------
+
+
+def ch3_tvp_regression() -> None:
+    m = au.Model(
+        "ch3_tvp_regression", observables=["Y"], exogenous=["X"],
+        measurement=["Y = beta*X + e"], transition=["beta = beta[-1] + eta"],
+        parameters={"s_e": au.half_normal(0.5), "s_eta": au.half_normal(0.1)},
+        shocks={"e": au.shock("s_e"), "eta": au.shock("s_eta")},
+        initial_state={"beta": au.init(0.0, 1.0)},
+        forecast_rules={"X": au.forecast("last_value")},
+    )
+    spec = mtk.spec("authored", options=m, data=_data("ch3_tvp_example1_sim.csv", {"Y": "Y", "X": "X"}), sampler=SMOKE,
+                    outputs={"horizon": 8, "irf_horizon": 8, "smoother_draws": {"thin": 5}, "prior_predictive_draws": 20})
+    _write("ch3_tvp_regression", spec, """
+# Chapter 3, examples 1-2: the TVP regression on the handbook's artificial DGP
+
+Handbook: `Y_t = beta_t X_t + e_t`, `beta_t = beta_{t-1} + v_t`, with
+`R = var(e) = 0.01`, `Q = var(v) = 0.001` FIXED, `beta_0 = 0`, `P_0 = 1`,
+`T = 500`, `X ~ N(0, 1)` -- example 1 runs the Kalman filter, example 2
+adds the Carter-Kohn backward draw. The script simulates fresh data on
+every run; `make_data.py` simulates it ONCE at seed 20260905 into
+`data/ch3_tvp_example1_sim.csv` (the true `beta_t` is written alongside
+as `beta_true`; the spec does not read it).
+
+Here (S9 E4): `Y = beta*X + e` with `beta` a random-walk STATE and `X`
+an exogenous series at lag 0 (E2) -- the product compiles to the
+data-dependent loading `Z_t = X_t`; the two variances are ESTIMATED
+(`half_normal` scales) instead of fixed, `init(0, 1)` is the handbook's
+`(beta_0, P_0)`. The smoothed `beta` band (the states figure) is the
+object of interest; the test suite checks the truth lies inside the 90%
+band and that the handbook's own filter loop reproduces the KF's
+filtered path to 1e-10 (`tests/test_s9_grammar.py`,
+`tests/test_s9_stan.py`).
+""")
+
+
+def ch5_tvp_ar1_sv() -> None:
+    df = pd.read_csv(DATA / "ch5_uk_inflation.csv", parse_dates=["date"])
+    # example5.m: X = [Y(-1), 1], the first 10 observations after the lag are the
+    # training sample: B0 = OLS, VV0 = S0 inv(X0'X0) with S0 = E0'E0 (T0 = 1),
+    # mubar = ln(std(E0)^2) (the h_0 mean), sigmabar = 10 (the h_0 variance).
+    y = df["infl"].to_numpy()
+    Y0, X0 = y[1:11], np.column_stack([y[0:10], np.ones(10)])
+    B0 = np.linalg.lstsq(X0, Y0, rcond=None)[0]
+    E0 = Y0 - X0 @ B0
+    VV0 = float(E0 @ E0) * np.linalg.inv(X0.T @ X0)
+    mubar = float(np.log(np.std(E0, ddof=1) ** 2))
+    sd_b, sd_c = float(np.sqrt(VV0[0, 0])), float(np.sqrt(VV0[1, 1]))
+    m = au.Model(
+        "ch5_tvp_ar1_sv", observables=["pi"],
+        measurement=["pi = c + b*pi[-1] + e"], transition=["c = c[-1] + eta_c", "b = b[-1] + eta_b"],
+        parameters={"s_c": au.half_normal(0.1), "s_b": au.half_normal(0.05)},
+        shocks={"eta_c": au.shock("s_c"), "eta_b": au.shock("s_b"), "e": au.sv(sigma_h=0.3, h0_sd=float(np.sqrt(10.0)), mu_h0=mubar)},
+        initial_state={"c": au.init(float(B0[1]), sd_c), "b": au.init(float(B0[0]), sd_b)},
+    )
+    # The estimation sample starts after the training sample: row 11 of the
+    # inflation series (1917Q4) with its lag row 1917Q3 -> sample.start 1917Q3.
+    spec = mtk.spec("authored", options=m, data=_data("ch5_uk_inflation.csv", {"pi": "infl"}, sample={"start": "1917-07-01"}), sampler=SMOKE,
+                    outputs={"horizon": 8, "irf_horizon": 12, "irf_dates": ["1930-01-01", "1975-01-01", "2008-10-01"], "smoother_draws": {"thin": 5}, "prior_predictive_draws": 20})
+    _write("ch5_tvp_ar1_sv", spec, f"""
+# Chapter 5, example 5: a TVP-AR(1) with stochastic volatility for UK inflation
+
+Handbook: `pi_t = c_t + b_t pi_(t-1) + e_t`, `var(e_t) = h_t` a
+log-random-walk volatility (`ln h_t = ln h_(t-1) + g^(1/2) u_t`),
+`(c_t, b_t)` random walks with covariance `Q ~ IW(Q0, T0)`; a
+date-by-date independence Metropolis step for `h` (Jacquier-Polson-Rossi),
+Carter-Kohn for the coefficients, 50,000 sweeps. Data: the UK price level
+1914Q1-2011Q1 (`inflation.xlsx`), annual inflation `100 (ln P_t - ln
+P_(t-4))`, a 10-observation training sample for the initial conditions.
+
+Here (S9 E4 + the established SV block): the same equation with `c`,
+`b` random-walk STATES (`b*pi[-1]` is the data-dependent loading) and
+`e` under the non-centered random-walk log-variance SV. The handbook's
+training-sample OLS gives the initial conditions, stamped by
+`build_specs.py`: `B0 = ({B0[0]:.4f}, {B0[1]:.4f})` (slope, constant),
+`sqrt(diag(VV0)) = ({sd_b:.4f}, {sd_c:.4f})`, `mu_h0 = ln(std(E0)^2) =
+{mubar:.3f}` with `h0_sd = sqrt(10)` (the handbook's `sigmabar`). The
+handbook's `Q0 = VV0 T0 1e-4` inverse-Wishart prior is replaced by
+`half_normal(0.1)` / `half_normal(0.05)` scales on the two random walks
+and `g ~ IG(1, 0.01)` by `half_normal(0.3)` on `sigma_h`. The estimation
+sample is the handbook's (1917Q4-2011Q1, 374 rows; `data.sample.start`
+is the lag row). Outputs: the smoothed `c_t`, `b_t` and `exp(h_t/2)`
+paths (the handbook's four panels; the long-run mean `c_t/(1 - b_t)` is
+in the smoke record), IRFs conditional on the coefficient state at three
+dates (`outputs.irf_dates`; the coefficient shocks are omitted with the
+reason stated), the fan chart.
+""")
+
+
+def ch3_tvp_var() -> None:
+    df = pd.read_csv(DATA / "ch3_usdata_tvp.csv", parse_dates=["date"])
+    obs = ["gdp_growth", "cpi_inflation", "ffr"]
+    p = 2
+    # example3.m: the first T0 = 40 observations after the 2 lags are the
+    # pre-sample: b0 = OLS, sigma0 = e0'e0/T0, V0 = kron(sigma0, inv(x0'x0)),
+    # beta0 = vec(b0), P00 = V0. In per cent here (the script divides by 100).
+    Yall = df[obs].to_numpy()
+    X = np.column_stack([Yall[1:-1], Yall[:-2], np.ones(len(Yall) - 2)])  # [Y(-1), Y(-2), 1]
+    Y = Yall[2:]
+    T0 = 40
+    y0, x0 = Y[:T0], X[:T0]
+    b0 = np.linalg.lstsq(x0, y0, rcond=None)[0]  # (7, 3): rows [lag1 x3, lag2 x3, const]
+    e0 = y0 - x0 @ b0
+    sigma0 = e0.T @ e0 / T0
+    V0 = np.kron(sigma0, np.linalg.inv(x0.T @ x0))
+    sds = np.sqrt(np.diag(V0)).reshape(3, 7)  # equation-major, as vec(b0)
+    measurement, transition, params, shocks, init = [], [], {}, {}, {}
+    for i, yi in enumerate(obs):
+        terms, states = [f"c_{yi}"], [(f"c_{yi}", float(b0[6, i]), float(sds[i, 6]))]
+        for yj in obs[:i]:
+            terms.append(f"a0_{yi}_{yj}*{yj}")
+            params[f"a0_{yi}_{yj}"] = au.normal(0.0, 1.0)
+        for k in range(1, p + 1):
+            for j, yj in enumerate(obs):
+                terms.append(f"b_{yi}_{yj}_{k}*{yj}[-{k}]")
+                states.append((f"b_{yi}_{yj}_{k}", float(b0[(k - 1) * 3 + j, i]), float(sds[i, (k - 1) * 3 + j])))
+        measurement.append(f"{yi} = " + " + ".join(terms) + f" + e_{yi}")
+        params[f"s_{yi}"] = au.half_normal(2.0)
+        params[f"sq_{yi}"] = au.half_normal(0.01)
+        shocks[f"e_{yi}"] = au.shock(f"s_{yi}")
+        for s, mean, sd in states:
+            transition.append(f"{s} = {s}[-1] + eta_{s}")
+            shocks[f"eta_{s}"] = au.shock(f"sq_{yi}")
+            init[s] = au.init(mean, sd)
+    m = au.Model("ch3_tvp_var", observables=obs, measurement=measurement, transition=transition, parameters=params, shocks=shocks, initial_state=init)
+    # Estimation from the row after the pre-sample (1964Q3): sample.start = its
+    # second lag row (1964Q1).
+    spec = mtk.spec("authored", options=m, data=_data("ch3_usdata_tvp.csv", {o: o for o in obs}, sample={"start": "1964-01-01"}), sampler=SMOKE_BIG,
+                    outputs={"horizon": 8, "irf_horizon": 20, "irf_dates": ["1975-01-01", "1995-01-01", "2008-10-01"], "smoother_draws": {"thin": 10}, "prior_predictive_draws": 10})
+    _write("ch3_tvp_var", spec, f"""
+# Chapter 3, example 3: a TVP-VAR for US GDP growth, CPI inflation and the federal funds rate
+
+Handbook: a VAR(2) with a constant whose 21 coefficients are random
+walks (`beta_t = beta_(t-1) + v_t`, `Q ~ IW(Q0, T0)`), constant `Sigma ~
+IW`, Carter-Kohn for the coefficient paths with a stability rejection,
+110,000 sweeps; priors and initial conditions from a 40-quarter
+pre-sample (`P00 = V0 = kron(sigma0, inv(x0'x0))`, `beta0 = vec(b0)`,
+`Q0 = V0 T0 3.5e-4`); time-varying IRFs to a policy shock identified by
+sign restrictions.
+
+Here (S9 E4 + S8 E5): the recursive (Cholesky-ordered
+gdp_growth -> cpi_inflation -> ffr) form -- constant `Sigma` through the
+`a0` contemporaneous coefficients and constant shock scales -- with EVERY
+coefficient (intercepts and lags, 21 states) a random walk multiplying
+the lagged observables (the data-dependent loading `Z_t`; the E5
+substitution composes the loadings with `a0`). Initial conditions from
+the handbook's pre-sample OLS, stamped by `build_specs.py` (in per cent;
+`sqrt(diag(V0))` per coefficient; e.g. the gdp_growth intercept
+`{b0[6, 0]:.3f} +- {sds[0, 6]:.3f}`). The inverse-Wishart `Q0 = V0 T0
+3.5e-4` implies a per-coefficient random-walk sd of `0.118 sqrt(V0_ii)`
+-- about 0.01 for the lag coefficients here -- and is replaced by one
+`half_normal(0.01)` random-walk scale per equation (`sq_*`; a first
+smoke at `0.05` let the coefficient drift absorb the innovations,
+DECISIONS.md 2026-09-05); the IW on `Sigma` by `half_normal(2)` shock
+scales and `N(0, 1)` on `a0`.
+Estimation sample 1964Q3-2010Q2 (184 rows; `data.sample.start` is the
+second lag row). Outputs: IRFs to the three orthogonalized shocks
+CONDITIONAL on the coefficient state at 1975Q1, 1995Q1 and 2008Q4
+(`outputs.irf_dates`; the handbook's sign-restricted policy shock is a
+post-processor over these, not run here), the 21 smoothed coefficient
+paths, the HD with the coefficient shocks omitted (reason stated), the
+fan. The stability rejection is not imposed (the KF marginalizes the
+paths; explosive posterior mass is reported by the fast tier's
+stationarity filter, not truncated). The smoke run is short:
+21 states, `m = 3`, 27 sampled parameters; its record reports the scale
+posteriors because a per-equation drift scale shared by the intercept
+and the lag coefficients lets a random-walk intercept stand in for a
+persistent series' innovations (the ffr equation does this) -- stated,
+not tuned away, in a smoke run.
+""")
+
+
 if __name__ == "__main__":
     ch1_ar2()
     ch1_ar2_ar1err()
@@ -357,3 +532,6 @@ if __name__ == "__main__":
     ch2_conditional()
     ch3_uc_trend_cycle()
     ch3_dfm_uk_panel()
+    ch3_tvp_regression()
+    ch5_tvp_ar1_sv()
+    ch3_tvp_var()

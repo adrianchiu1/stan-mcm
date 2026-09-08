@@ -1,0 +1,257 @@
+model:
+  family: authored
+  options:
+    family: authored
+    name: ch3_tvp_var
+    observables:
+    - gdp_growth
+    - cpi_inflation
+    - ffr
+    exogenous: []
+    equations:
+      measurement:
+      - gdp_growth = c_gdp_growth + b_gdp_growth_gdp_growth_1*gdp_growth[-1] + b_gdp_growth_cpi_inflation_1*cpi_inflation[-1]
+        + b_gdp_growth_ffr_1*ffr[-1] + b_gdp_growth_gdp_growth_2*gdp_growth[-2] +
+        b_gdp_growth_cpi_inflation_2*cpi_inflation[-2] + b_gdp_growth_ffr_2*ffr[-2]
+        + e_gdp_growth
+      - cpi_inflation = c_cpi_inflation + a0_cpi_inflation_gdp_growth*gdp_growth +
+        b_cpi_inflation_gdp_growth_1*gdp_growth[-1] + b_cpi_inflation_cpi_inflation_1*cpi_inflation[-1]
+        + b_cpi_inflation_ffr_1*ffr[-1] + b_cpi_inflation_gdp_growth_2*gdp_growth[-2]
+        + b_cpi_inflation_cpi_inflation_2*cpi_inflation[-2] + b_cpi_inflation_ffr_2*ffr[-2]
+        + e_cpi_inflation
+      - ffr = c_ffr + a0_ffr_gdp_growth*gdp_growth + a0_ffr_cpi_inflation*cpi_inflation
+        + b_ffr_gdp_growth_1*gdp_growth[-1] + b_ffr_cpi_inflation_1*cpi_inflation[-1]
+        + b_ffr_ffr_1*ffr[-1] + b_ffr_gdp_growth_2*gdp_growth[-2] + b_ffr_cpi_inflation_2*cpi_inflation[-2]
+        + b_ffr_ffr_2*ffr[-2] + e_ffr
+      transition:
+      - c_gdp_growth = c_gdp_growth[-1] + eta_c_gdp_growth
+      - b_gdp_growth_gdp_growth_1 = b_gdp_growth_gdp_growth_1[-1] + eta_b_gdp_growth_gdp_growth_1
+      - b_gdp_growth_cpi_inflation_1 = b_gdp_growth_cpi_inflation_1[-1] + eta_b_gdp_growth_cpi_inflation_1
+      - b_gdp_growth_ffr_1 = b_gdp_growth_ffr_1[-1] + eta_b_gdp_growth_ffr_1
+      - b_gdp_growth_gdp_growth_2 = b_gdp_growth_gdp_growth_2[-1] + eta_b_gdp_growth_gdp_growth_2
+      - b_gdp_growth_cpi_inflation_2 = b_gdp_growth_cpi_inflation_2[-1] + eta_b_gdp_growth_cpi_inflation_2
+      - b_gdp_growth_ffr_2 = b_gdp_growth_ffr_2[-1] + eta_b_gdp_growth_ffr_2
+      - c_cpi_inflation = c_cpi_inflation[-1] + eta_c_cpi_inflation
+      - b_cpi_inflation_gdp_growth_1 = b_cpi_inflation_gdp_growth_1[-1] + eta_b_cpi_inflation_gdp_growth_1
+      - b_cpi_inflation_cpi_inflation_1 = b_cpi_inflation_cpi_inflation_1[-1] + eta_b_cpi_inflation_cpi_inflation_1
+      - b_cpi_inflation_ffr_1 = b_cpi_inflation_ffr_1[-1] + eta_b_cpi_inflation_ffr_1
+      - b_cpi_inflation_gdp_growth_2 = b_cpi_inflation_gdp_growth_2[-1] + eta_b_cpi_inflation_gdp_growth_2
+      - b_cpi_inflation_cpi_inflation_2 = b_cpi_inflation_cpi_inflation_2[-1] + eta_b_cpi_inflation_cpi_inflation_2
+      - b_cpi_inflation_ffr_2 = b_cpi_inflation_ffr_2[-1] + eta_b_cpi_inflation_ffr_2
+      - c_ffr = c_ffr[-1] + eta_c_ffr
+      - b_ffr_gdp_growth_1 = b_ffr_gdp_growth_1[-1] + eta_b_ffr_gdp_growth_1
+      - b_ffr_cpi_inflation_1 = b_ffr_cpi_inflation_1[-1] + eta_b_ffr_cpi_inflation_1
+      - b_ffr_ffr_1 = b_ffr_ffr_1[-1] + eta_b_ffr_ffr_1
+      - b_ffr_gdp_growth_2 = b_ffr_gdp_growth_2[-1] + eta_b_ffr_gdp_growth_2
+      - b_ffr_cpi_inflation_2 = b_ffr_cpi_inflation_2[-1] + eta_b_ffr_cpi_inflation_2
+      - b_ffr_ffr_2 = b_ffr_ffr_2[-1] + eta_b_ffr_ffr_2
+    parameters:
+      s_gdp_growth:
+        dist: half_normal
+        sd: 2.0
+      sq_gdp_growth:
+        dist: half_normal
+        sd: 0.01
+      a0_cpi_inflation_gdp_growth:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      s_cpi_inflation:
+        dist: half_normal
+        sd: 2.0
+      sq_cpi_inflation:
+        dist: half_normal
+        sd: 0.01
+      a0_ffr_gdp_growth:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      a0_ffr_cpi_inflation:
+        dist: normal
+        mu: 0.0
+        sd: 1.0
+        lower: null
+        upper: null
+      s_ffr:
+        dist: half_normal
+        sd: 2.0
+      sq_ffr:
+        dist: half_normal
+        sd: 0.01
+    shocks:
+      e_gdp_growth:
+        sd: s_gdp_growth
+        sv: null
+      eta_c_gdp_growth:
+        sd: sq_gdp_growth
+        sv: null
+      eta_b_gdp_growth_gdp_growth_1:
+        sd: sq_gdp_growth
+        sv: null
+      eta_b_gdp_growth_cpi_inflation_1:
+        sd: sq_gdp_growth
+        sv: null
+      eta_b_gdp_growth_ffr_1:
+        sd: sq_gdp_growth
+        sv: null
+      eta_b_gdp_growth_gdp_growth_2:
+        sd: sq_gdp_growth
+        sv: null
+      eta_b_gdp_growth_cpi_inflation_2:
+        sd: sq_gdp_growth
+        sv: null
+      eta_b_gdp_growth_ffr_2:
+        sd: sq_gdp_growth
+        sv: null
+      e_cpi_inflation:
+        sd: s_cpi_inflation
+        sv: null
+      eta_c_cpi_inflation:
+        sd: sq_cpi_inflation
+        sv: null
+      eta_b_cpi_inflation_gdp_growth_1:
+        sd: sq_cpi_inflation
+        sv: null
+      eta_b_cpi_inflation_cpi_inflation_1:
+        sd: sq_cpi_inflation
+        sv: null
+      eta_b_cpi_inflation_ffr_1:
+        sd: sq_cpi_inflation
+        sv: null
+      eta_b_cpi_inflation_gdp_growth_2:
+        sd: sq_cpi_inflation
+        sv: null
+      eta_b_cpi_inflation_cpi_inflation_2:
+        sd: sq_cpi_inflation
+        sv: null
+      eta_b_cpi_inflation_ffr_2:
+        sd: sq_cpi_inflation
+        sv: null
+      e_ffr:
+        sd: s_ffr
+        sv: null
+      eta_c_ffr:
+        sd: sq_ffr
+        sv: null
+      eta_b_ffr_gdp_growth_1:
+        sd: sq_ffr
+        sv: null
+      eta_b_ffr_cpi_inflation_1:
+        sd: sq_ffr
+        sv: null
+      eta_b_ffr_ffr_1:
+        sd: sq_ffr
+        sv: null
+      eta_b_ffr_gdp_growth_2:
+        sd: sq_ffr
+        sv: null
+      eta_b_ffr_cpi_inflation_2:
+        sd: sq_ffr
+        sv: null
+      eta_b_ffr_ffr_2:
+        sd: sq_ffr
+        sv: null
+    initial_state:
+      c_gdp_growth:
+        mean: 2.8540489340018524
+        sd: 2.193568433400861
+      b_gdp_growth_gdp_growth_1:
+        mean: 0.1446926577336801
+        sd: 0.159731944411928
+      b_gdp_growth_cpi_inflation_1:
+        mean: -1.1955832004293356
+        sd: 1.5512896670195027
+      b_gdp_growth_ffr_1:
+        mean: 6.1910762826053025
+        sd: 1.52956204969628
+      b_gdp_growth_gdp_growth_2:
+        mean: -0.11307756538763385
+        sd: 0.14953696827335525
+      b_gdp_growth_cpi_inflation_2:
+        mean: 0.7809622921632179
+        sd: 1.4032213507463562
+      b_gdp_growth_ffr_2:
+        mean: -5.806643255028861
+        sd: 1.4598991058794957
+      c_cpi_inflation:
+        mean: -0.1812483102875
+        sd: 0.2433246205835188
+      b_cpi_inflation_gdp_growth_1:
+        mean: -0.01374753867597603
+        sd: 0.017718487455092517
+      b_cpi_inflation_cpi_inflation_1:
+        mean: 1.09447998406965
+        sd: 0.17207895769061424
+      b_cpi_inflation_ffr_1:
+        mean: -0.027990059154753347
+        sd: 0.16966879160650425
+      b_cpi_inflation_gdp_growth_2:
+        mean: -0.003665144945450905
+        sd: 0.016587595588213197
+      b_cpi_inflation_cpi_inflation_2:
+        mean: -0.2698743671489555
+        sd: 0.1556542743622962
+      b_cpi_inflation_ffr_2:
+        mean: 0.22221756540015275
+        sd: 0.161941332952903
+      c_ffr:
+        mean: 0.7288564095871163
+        sd: 0.19005539523959616
+      b_ffr_gdp_growth_1:
+        mean: 0.0032426679283314645
+        sd: 0.01383951253370834
+      b_ffr_cpi_inflation_1:
+        mean: 0.03436206591049301
+        sd: 0.1344070083737454
+      b_ffr_ffr_1:
+        mean: 1.319683469021014
+        sd: 0.132524481785971
+      b_ffr_gdp_growth_2:
+        mean: 0.011152192325926978
+        sd: 0.012956198300164838
+      b_ffr_cpi_inflation_2:
+        mean: -0.031338805106841346
+        sd: 0.12157805718022147
+      b_ffr_ffr_2:
+        mean: -0.6058167558034451
+        sd: 0.12648873741663486
+    forecast_rules: {}
+data:
+  file: ../data/ch3_usdata_tvp.csv
+  date_column: date
+  mapping:
+    gdp_growth: gdp_growth
+    cpi_inflation: cpi_inflation
+    ffr: ffr
+  sample:
+    start: '1964-01-01'
+    end: null
+priors: {}
+sampler:
+  chains: 2
+  warmup: 200
+  sampling: 200
+  adapt_delta: 0.8
+  max_treedepth: 10
+  seed: 20260905
+outputs:
+  horizon: 8
+  irf_horizon: 20
+  irf_vol_reference: end_of_sample
+  irf_dates:
+  - '1975-01-01'
+  - '1995-01-01'
+  - '2008-10-01'
+  smoother_draws:
+    thin: 10
+  prior_predictive_draws: 10
+qc:
+  mirror_check: true
+  mirror_points: 5
+  mirror_tolerance: 1.0e-08
+  mirror_rtol: 1.0e-11
+  mirror_seed: 20260904

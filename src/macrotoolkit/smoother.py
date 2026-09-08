@@ -1,13 +1,18 @@
 """Python mirror of the Stan Kalman-filter machinery for the LW model.
 
 Scope (S2 + the S3 KF generalization, plans/S3-plan.md, + S4's simulation
-smoother, plans/S4-plan.md, + the S6 Q_t generalization, plans/S6-plan.md):
+smoother, plans/S4-plan.md, + the S6 Q_t generalization, plans/S6-plan.md,
++ the S9 Z_t generalization, plans/S9-plan.md):
 the KF log-likelihood (gate G1) with constant OR time-varying measurement
-covariance R_t AND constant OR time-varying state-innovation covariance
-Q_t (lw_sv's SV enters through R_t only -- in the marginalized LW form the
-SV shocks are measurement errors; UCSV's trend-shock SV enters through
-Q_t, the one real KF extension family #2 needed, done by the exact R_t
-playbook: array-of-matrices core + constant-case delegation), the RTS
+covariance R_t, constant OR time-varying state-innovation covariance
+Q_t AND constant OR time-varying measurement loadings Z_t (lw_sv's SV
+enters through R_t only -- in the marginalized LW form the SV shocks are
+measurement errors; UCSV's trend-shock SV enters through Q_t, the one
+real KF extension family #2 needed; an authored model with a DATA-
+DEPENDENT loading -- a state multiplied by a lagged observable or an
+exogenous series, the TVP regression / TVP-AR / TVP-VAR of S9 E4 -- routes
+the data through Z_t; every generalization done by the exact R_t playbook:
+array-of-matrices core + constant-case delegation), the RTS
 fixed-interval smoother (gate G5a), and the Durbin-Koopman *simulation*
 smoother of spec §2.4 (Python-only -- no `stan/` mirror; validated by
 tests/test_smoother_sim.py instead of a G1-style Stan comparison).
@@ -34,6 +39,8 @@ State-space form (Hamilton/HLW notation; all constants stamped, no options):
 
     xi_t    = F xi_{t-1} + w_t,        w_t ~ N(0, Q)
     yobs_t  = A' x_t + Z xi_t + e_t,   e_t ~ N(0, R_t)
+
+(the generic filter below takes Z_t as a path too; lw_sv's Z is constant).
 
 Units conventions (lw-sv-spec.md §1.1/§1.3, enforced by
 tests/test_units_conventions.py): ``g`` is ANNUALIZED everywhere in this
@@ -248,6 +255,34 @@ def _as_Q_path(Q: np.ndarray, T: int) -> np.ndarray:
     raise ValueError(f"Q must be (n, n) or (T, n, n); got shape {Q.shape}.")
 
 
+def _as_Z_path(Z: np.ndarray, T: int) -> np.ndarray:
+    """Normalize a measurement-loading argument to the (T, m, n) path
+    ``_kf_core`` consumes (S9 Z_t generalization, the exact analogue of
+    :func:`_as_R_path` / :func:`_as_Q_path`): a single (m, n) matrix (the
+    constant case) is tiled to T copies -- mirroring the Stan side's
+    ``rep_array`` overloads -- and a (T, m, n) path passes through with
+    its length validated."""
+    Z = np.asarray(Z, dtype=np.float64)
+    if Z.ndim == 2:
+        return np.ascontiguousarray(np.broadcast_to(Z, (T, Z.shape[0], Z.shape[1])))
+    if Z.ndim == 3:
+        if Z.shape[0] != T:
+            raise ValueError(
+                f"Time-varying Z has {Z.shape[0]} entries but yobs has T={T} rows."
+            )
+        return np.ascontiguousarray(Z)
+    raise ValueError(f"Z must be (m, n) or (T, m, n); got shape {Z.shape}.")
+
+
+def _obs_mean_states(Z: np.ndarray, xi: np.ndarray) -> np.ndarray:
+    """``Z_t xi_t`` for every t, (T, m): ``xi @ Z.T`` for a constant Z (the
+    pre-S9 arithmetic, unchanged) or the per-period product for a
+    (T, m, n) path."""
+    if Z.ndim == 2:
+        return xi @ Z.T
+    return np.einsum("tmn,tn->tm", Z, xi)
+
+
 @njit(cache=True)
 def _kf_core(yobs, x, F, Q, A, Z, R, xi00, P00, want_states):  # pragma: no cover -- numba
     """Shared filter recursion. Returns (loglik, xi_pred, P_pred, xi_filt,
@@ -256,11 +291,14 @@ def _kf_core(yobs, x, F, Q, A, Z, R, xi00, P00, want_states):  # pragma: no cove
     paths produce bit-identical loglik values).
 
     ``R`` is the (T, m, m) measurement-covariance PATH (S3 generalization,
-    DECISIONS.md 2026-08-31) and ``Q`` the (T, n, n) state-innovation
-    covariance PATH (S6 generalization, the same playbook); the constant
-    cases arrive as T copies, built by the public wrappers, so the
-    constant-Q arithmetic (``F P F' + Q[t]`` with every ``Q[t]`` the same
-    matrix) is bit-identical to the pre-S6 ``F P F' + Q`` -- pinned by
+    DECISIONS.md 2026-08-31), ``Q`` the (T, n, n) state-innovation
+    covariance PATH (S6 generalization, the same playbook) and ``Z`` the
+    (T, m, n) measurement-loading PATH (S9 generalization, the same
+    playbook again); the constant cases arrive as T copies, built by the
+    public wrappers, so the constant-Q arithmetic (``F P F' + Q[t]`` with
+    every ``Q[t]`` the same matrix) is bit-identical to the pre-S6
+    ``F P F' + Q`` and the constant-Z arithmetic (``Z[t] P Z[t]'`` with
+    every ``Z[t]`` the same matrix) to the pre-S9 ``Z P Z'`` -- pinned by
     tests/test_g1_mirror.py. Same operation order as the Stan mirror and
     HLW's kalman.log.likelihood.R: predict from (xi_{0|0}, P_{0|0}), then
     update, for t = 1..T. Cholesky of the innovation covariance for both
@@ -285,8 +323,8 @@ def _kf_core(yobs, x, F, Q, A, Z, R, xi00, P00, want_states):  # pragma: no cove
         P_tp = F @ P_tt @ F.T + Q[t]
         P_tp = 0.5 * (P_tp + P_tp.T)
 
-        err = yobs[t] - A.T @ x[t] - Z @ xi_tp
-        S = Z @ P_tp @ Z.T + R[t]
+        err = yobs[t] - A.T @ x[t] - Z[t] @ xi_tp
+        S = Z[t] @ P_tp @ Z[t].T + R[t]
         S = 0.5 * (S + S.T)
         L = np.linalg.cholesky(S)
 
@@ -300,7 +338,7 @@ def _kf_core(yobs, x, F, Q, A, Z, R, xi00, P00, want_states):  # pragma: no cove
         loglik += -0.5 * (m * LOG_2PI + logdet + quad)
 
         # Gain K = P Z' S^-1 via the Cholesky factor.
-        ZP = Z @ P_tp  # (m, n)
+        ZP = Z[t] @ P_tp  # (m, n)
         K = np.linalg.solve(L.T, np.linalg.solve(L, ZP)).T  # (n, m)
         xi_tt = xi_tp + K @ err
         P_tt = P_tp - K @ ZP
@@ -335,8 +373,11 @@ def kalman_loglik(
     2026-08-31 -- for lw_sv with SV, R_t = diag(exp(h_IS,t), exp(h_PC,t))).
     ``Q`` likewise may be a single (n, n) matrix or a (T, n, n) path (the
     S6 generalization -- for UCSV, Q_t = [exp(h_eta,t)], the trend-shock
-    SV). lw_sv passes a constant Q: in the marginalized LW form its SV
-    shocks are measurement errors, so time variation enters through R_t.
+    SV), and ``Z`` a single (m, n) matrix or a (T, m, n) path (the S9
+    generalization -- an authored model's data-dependent loadings
+    ``Z_t = Z0 + sum_j x_t[j] Zx_j``). lw_sv passes a constant Q: in the
+    marginalized LW form its SV shocks are measurement errors, so time
+    variation enters through R_t.
     """
     yobs = np.ascontiguousarray(yobs, dtype=np.float64)
     ll, *_ = _kf_core(
@@ -345,7 +386,7 @@ def kalman_loglik(
         np.ascontiguousarray(F, dtype=np.float64),
         _as_Q_path(Q, yobs.shape[0]),
         np.ascontiguousarray(A, dtype=np.float64),
-        np.ascontiguousarray(Z, dtype=np.float64),
+        _as_Z_path(Z, yobs.shape[0]),
         _as_R_path(R, yobs.shape[0]),
         np.ascontiguousarray(xi00, dtype=np.float64),
         np.ascontiguousarray(P00, dtype=np.float64),
@@ -497,14 +538,14 @@ def kalman_smoother(
     'xi_filt' (T,n), 'P_filt', 'xi_pred', 'P_pred', 'xi_smooth' (T,n),
     'P_smooth' -- the filtered/one-sided and smoothed/two-sided state
     paths G5a compares against the HLW oracle. ``R`` is (m, m) constant or
-    a (T, m, m) path, and ``Q`` (n, n) constant or a (T, n, n) path, as in
-    :func:`kalman_loglik`."""
+    a (T, m, m) path, ``Q`` (n, n) constant or a (T, n, n) path, and ``Z``
+    (m, n) constant or a (T, m, n) path, as in :func:`kalman_loglik`."""
     yobs = np.ascontiguousarray(yobs, dtype=np.float64)
     T = yobs.shape[0]
     x_c = np.ascontiguousarray(x, dtype=np.float64)
     F_c = np.ascontiguousarray(F, dtype=np.float64)
     A_c = np.ascontiguousarray(A, dtype=np.float64)
-    Z_c = np.ascontiguousarray(Z, dtype=np.float64)
+    Z_c = _as_Z_path(Z, T)
     tail = [
         np.ascontiguousarray(a, dtype=np.float64)
         for a in (xi00, P00)
@@ -598,8 +639,9 @@ def _simulate_plus_path(
     the given system matrices (Durbin & Koopman 2002's "plus" path, step 1
     of plans/S4-plan.md's algorithm): ``xi+_0 ~ N(xi00, P00)``,
     ``xi+_t = F @ xi+_{t-1} + w+_t`` (``w+_t ~ N(0, Q_t)``),
-    ``y+_t = A'x_t + Z @ xi+_t + e+_t`` (``e+_t ~ N(0, R_t)``) for
-    t = 1..T. ``Q`` is a constant (n, n) matrix or a (T, n, n) path (S6).
+    ``y+_t = A'x_t + Z_t @ xi+_t + e+_t`` (``e+_t ~ N(0, R_t)``) for
+    t = 1..T. ``Q`` is a constant (n, n) matrix or a (T, n, n) path (S6);
+    ``Z`` a constant (m, n) matrix or a (T, m, n) path (S9).
     Reuses the real ``x``/``A``/``Z``/``R_path``; only the noise
     draws and the resulting state/obs path are simulated. Returns
     ``(xi_plus, y_plus)``, both length T, indexed exactly like
@@ -655,7 +697,8 @@ def _simulate_plus_path(
             w_plus = sqrt_Q_path[t] @ rng.standard_normal(n)
         xi_t = F @ xi_prev + w_plus
         e_plus = np.zeros(m) if zero_noise else sqrt_R_path[t] @ rng.standard_normal(m)
-        y_plus[t] = A.T @ x[t] + Z @ xi_t + e_plus
+        Z_t = Z if Z.ndim == 2 else Z[t]
+        y_plus[t] = A.T @ x[t] + Z_t @ xi_t + e_plus
         xi_plus[t] = xi_t
         xi_prev = xi_t
 
@@ -681,11 +724,12 @@ def recover_shocks(
     residual's OWN row IS the shock (diagonal R, the pre-S8 read); with
     ``M`` (S8 E5, ``e = M eps``, ``M`` unit lower triangular in the
     family's ``meas_recovery_order``) the same exact triangular solve
-    row by row. Same process-noise/residual algebra as
-    :func:`_recover_structural_shocks` (whose lw_sv-specific slot
-    arithmetic this generalizes; for lw_sv the two are bit-identical,
-    pinned by tests/test_smoother_sim.py) -- see that function's boundary
-    note about w_0's lag-copy rows.
+    row by row. ``Z`` is (m, n) constant or a (T, m, n) path (S9: the
+    residual is taken through that period's loading). Same process-noise/
+    residual algebra as :func:`_recover_structural_shocks` (whose
+    lw_sv-specific slot arithmetic this generalizes; for lw_sv the two
+    are bit-identical, pinned by tests/test_smoother_sim.py) -- see that
+    function's boundary note about w_0's lag-copy rows.
     Returns ``({state_shock: (T,)}, {measurement_shock: (T,)})``."""
     xi_prev = np.vstack([xi00[None, :], xi_draw[:-1]])
     w = xi_draw - xi_prev @ F.T
@@ -696,7 +740,7 @@ def recover_shocks(
             acc = acc - other_coef * eps[other]
         eps[shock] = acc / coef
     state_shocks = {s: eps[s] for s in meta.state_shocks}
-    e = yobs - x @ A - xi_draw @ Z.T
+    e = yobs - x @ A - _obs_mean_states(np.asarray(Z, dtype=np.float64), xi_draw)
     if M is None:
         meas_shocks = {name: e[:, meta.meas_shock_row(name)] for name in meta.measurement_shocks}
     else:
@@ -836,9 +880,11 @@ def simulate_smoother_draw(
 
     ``R`` accepts the same constant-(m,m)-or-(T,m,m)-path forms as
     :func:`kalman_loglik`/:func:`kalman_smoother` (normalized via
-    :func:`_as_R_path`), and ``Q`` a constant (n,n) matrix or a (T,n,n)
+    :func:`_as_R_path`), ``Q`` a constant (n,n) matrix or a (T,n,n)
     path (S6: a family with SV on a STATE shock, e.g. UCSV's trend shock,
-    passes that draw's own exp(h) path) -- for an SV draw, pass
+    passes that draw's own exp(h) path), and ``Z`` a constant (m,n)
+    matrix or a (T,m,n) path (S9: an authored model's data-dependent
+    loadings at the real regressors) -- for an SV draw, pass
     ``sv_diag_variance_path(h_is, h_pc)`` built from THAT draw's own saved
     h_is/h_pc transformed parameters (HANDOFF.md's S4 warning: never
     re-derive h from nu).
@@ -879,6 +925,8 @@ def simulate_smoother_draw(
         Q = _as_Q_path(Q, yobs.shape[0])  # validates the path length
     A = np.ascontiguousarray(A, dtype=np.float64)
     Z = np.ascontiguousarray(Z, dtype=np.float64)
+    if Z.ndim == 3:
+        Z = _as_Z_path(Z, yobs.shape[0])  # validates the path length
     xi00 = np.ascontiguousarray(xi00, dtype=np.float64)
     P00 = np.ascontiguousarray(P00, dtype=np.float64)
     R_path = _as_R_path(R, yobs.shape[0])

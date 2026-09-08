@@ -26,6 +26,7 @@ from g1_harness import (
     PARAM_SEED,
     PRE_QT_FIXTURE,
     PRE_QT_TOL,
+    PRE_ZT_FIXTURE,
     SYNTHETIC_DATA,
     compare_loglik,
     generate_h_paths,
@@ -33,11 +34,14 @@ from g1_harness import (
     generate_q_paths,
     generate_q_sv_inputs,
     generate_sv_inputs,
+    generate_z_scales,
     python_kf_loglik,
     python_kf_loglik_sv,
     python_kf_loglik_svq,
     python_kf_loglik_tv,
     python_kf_loglik_tvq,
+    python_kf_loglik_tvz,
+    python_kf_loglik_tvzqr,
     stan_kf_loglik_batch,
 )
 
@@ -154,7 +158,7 @@ def test_constant_q_stan_loglik_reproduces_pre_generalization_fixture() -> None:
     from pathlib import Path
 
     points = generate_parameter_points(N_PARAM_POINTS, seed=PARAM_SEED)
-    stan_ll, stan_ll_tv, stan_ll_sv, _, _ = stan_kf_loglik_batch(points, SYNTHETIC_DATA)
+    stan_ll, stan_ll_tv, stan_ll_sv, _, _, _, _ = stan_kf_loglik_batch(points, SYNTHETIC_DATA)
     rows = list(csv.DictReader((Path(__file__).parent / PRE_QT_FIXTURE).open()))
     assert len(rows) == N_PARAM_POINTS
     for i, row in enumerate(rows):
@@ -165,6 +169,34 @@ def test_constant_q_stan_loglik_reproduces_pre_generalization_fixture() -> None:
                 f"constant-Q regression pin failed at point {i}, path {key}: "
                 f"got {got!r}, pre-generalization fixture {want!r}"
             )
+
+
+def test_constant_z_stan_loglik_reproduces_pre_zt_fixture_exactly() -> None:
+    """The constant-Z REGRESSION PIN (plans/S9-plan.md decision 1): the
+    Z_t-generalized Stan filter's constant-Z values on ALL FIVE S8 paths
+    (constant, time-varying R, the R_t SV composition, time-varying Q, the
+    Q_t SV composition) must reproduce the log-likelihoods captured from
+    the UNTOUCHED S8 program at the same 50 points
+    (tests/fixtures/g1/pre_zt_stan_loglik.csv, captured 2026-09-05 before
+    any stan/ edit) with difference EXACTLY 0.0: ``Z[t] P Z[t]'`` with
+    every ``Z[t]`` the same matrix is the same arithmetic as ``Z P Z'``."""
+    import csv
+    from pathlib import Path
+
+    points = generate_parameter_points(N_PARAM_POINTS, seed=PARAM_SEED)
+    got = stan_kf_loglik_batch(points, SYNTHETIC_DATA)[:5]
+    rows = list(csv.DictReader((Path(__file__).parent / PRE_ZT_FIXTURE).open()))
+    assert len(rows) == N_PARAM_POINTS
+    worst = 0.0
+    for i, row in enumerate(rows):
+        assert int(row["point"]) == i
+        for arr, key in zip(got, ("loglik", "loglik_tv", "loglik_sv", "loglik_tvq", "loglik_svq")):
+            want = float(row[key])
+            worst = max(worst, abs(float(arr[i]) - want))
+            assert float(arr[i]) == want, (
+                f"constant-Z regression pin failed at point {i}, path {key}: got {float(arr[i])!r}, pre-S9 fixture {want!r}"
+            )
+    assert worst == 0.0
 
 
 def test_g1_python_kf_matches_stan_kf_loglik() -> None:
@@ -189,10 +221,11 @@ def test_g1_python_kf_matches_stan_kf_loglik() -> None:
     sv_inputs = generate_sv_inputs(points, SYNTHETIC_DATA.T - 4)
     q_paths = generate_q_paths(points, SYNTHETIC_DATA.T - 4)
     q_sv_inputs = generate_q_sv_inputs(points, SYNTHETIC_DATA.T - 4)
-    stan_ll, stan_ll_tv, stan_ll_sv, stan_ll_tvq, stan_ll_svq = stan_kf_loglik_batch(
-        points, SYNTHETIC_DATA, h_paths, sv_inputs, q_paths, q_sv_inputs
+    z_scales = generate_z_scales(points, SYNTHETIC_DATA.T - 4)
+    stan_ll, stan_ll_tv, stan_ll_sv, stan_ll_tvq, stan_ll_svq, stan_ll_tvz, stan_ll_tvzqr = stan_kf_loglik_batch(
+        points, SYNTHETIC_DATA, h_paths, sv_inputs, q_paths, q_sv_inputs, z_scales
     )
-    for arr in (stan_ll, stan_ll_tv, stan_ll_sv, stan_ll_tvq, stan_ll_svq):
+    for arr in (stan_ll, stan_ll_tv, stan_ll_sv, stan_ll_tvq, stan_ll_svq, stan_ll_tvz, stan_ll_tvzqr):
         assert arr.shape == (N_PARAM_POINTS,)
         assert np.all(np.isfinite(arr))
     # The tv/sv paths must actually differ from the constant path (a wiring
@@ -201,6 +234,8 @@ def test_g1_python_kf_matches_stan_kf_loglik() -> None:
     assert np.max(np.abs(stan_ll - stan_ll_sv)) > 1.0
     assert np.max(np.abs(stan_ll - stan_ll_tvq)) > 1e-3
     assert np.max(np.abs(stan_ll - stan_ll_svq)) > 1e-3
+    assert np.max(np.abs(stan_ll - stan_ll_tvz)) > 1e-3
+    assert np.max(np.abs(stan_ll_tv - stan_ll_tvzqr)) > 1e-3
 
     diffs = [
         compare_loglik(
@@ -261,3 +296,30 @@ def test_g1_python_kf_matches_stan_kf_loglik() -> None:
         for i, p in enumerate(points)
     ]
     assert max(diffs_svq) < LOGLIK_TOL
+
+    # S9: the Z_t path (constant Q, R) and the full time-varying core.
+    diffs_tvz = [
+        compare_loglik(
+            p,
+            SYNTHETIC_DATA,
+            lambda _p, _d, i=i: python_kf_loglik_tvz(_p, z_scales[i], _d),
+            lambda _p, _d, i=i: float(stan_ll_tvz[i]),
+            tol=LOGLIK_TOL,
+        )
+        for i, p in enumerate(points)
+    ]
+    assert max(diffs_tvz) < LOGLIK_TOL
+
+    diffs_tvzqr = [
+        compare_loglik(
+            p,
+            SYNTHETIC_DATA,
+            lambda _p, _d, i=i: python_kf_loglik_tvzqr(_p, z_scales[i], q_paths[i], h_paths[i], _d),
+            lambda _p, _d, i=i: float(stan_ll_tvzqr[i]),
+            tol=LOGLIK_TOL,
+        )
+        for i, p in enumerate(points)
+    ]
+    assert max(diffs_tvzqr) < LOGLIK_TOL
+    print(f"G1 max |Stan - Python|: const {max(diffs):.2e} tvR {max(diffs_tv):.2e} svR {max(diffs_sv):.2e} "
+          f"tvQ {max(diffs_tvq):.2e} svQ {max(diffs_svq):.2e} tvZ {max(diffs_tvz):.2e} tvZQR {max(diffs_tvzqr):.2e}")

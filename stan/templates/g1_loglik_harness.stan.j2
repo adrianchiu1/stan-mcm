@@ -38,6 +38,15 @@
 //   turned into a (T, 1x1) variance path by sv_scalar_variance_path (the
 //   helper the ucsv template uses) and placed on Q's z slot -- compared
 //   against the same composition in the Python mirror.
+//
+// S9 additions (the Z_t generalization, plans/S9-plan.md):
+// - `loglik_tvz` exercises the TIME-VARYING measurement-LOADING path: a
+//   per-point per-period scale factor zscale (data; a random walk around
+//   1) replaces Z[1, 1] and multiplies Z[2, 2] -- inline plain Stan, so
+//   the Z_t filter is validated independently of the authored template's
+//   own Z_t composition (gated in tests/test_s9_stan.py); constant Q, R.
+// - `loglik_tvzqr` exercises the FULL core signature: the Z_t path with
+//   the S6 Q_t path and the S3 R_t path together.
 
 functions {
 {% include "functions/ssm_matrices_lw.stan" %}
@@ -65,6 +74,7 @@ data {
   vector[n_points] h0_z;            // per-point realized initial z log-variances
   vector[n_points] sigma_h_z;       // per-point z log-variance RW scales
   matrix[n_points, T] nu_z;         // per-point z SV innovations
+  matrix[n_points, T] zscale;       // per-point Z_t scale factors (Z_t path)
 }
 
 generated quantities {
@@ -73,6 +83,8 @@ generated quantities {
   vector[n_points] loglik_sv;
   vector[n_points] loglik_tvq;
   vector[n_points] loglik_svq;
+  vector[n_points] loglik_tvz;
+  vector[n_points] loglik_tvzqr;
   for (i in 1:n_points) {
     matrix[7, 7] Q = lw_Q(params[i, 6], params[i, 7], params[i, 8]);
     matrix[6, 2] A = lw_A(params[i, 1], params[i, 2], params[i, 3],
@@ -114,5 +126,18 @@ generated quantities {
     loglik_svq[i] = kalman_loglik(yobs, x, lw_F(), Qz, A, Z,
                                   lw_R(params[i, 9], params[i, 10]),
                                   xi00, P00);
+    // Time-varying Z_t: the y* loading of the y row and the -b_y loading
+    // of the pi row scaled per period by zscale (S9); constant Q and R,
+    // then the full time-varying core (Z_t with Q_t and R_t).
+    array[T] matrix[2, 7] Zt;
+    for (t in 1:T) {
+      Zt[t] = Z;
+      Zt[t][1, 1] = zscale[i, t];
+      Zt[t][2, 2] = Z[2, 2] * zscale[i, t];
+    }
+    loglik_tvz[i] = kalman_loglik(yobs, x, lw_F(), Q, A, Zt,
+                                  lw_R(params[i, 9], params[i, 10]),
+                                  xi00, P00);
+    loglik_tvzqr[i] = kalman_loglik(yobs, x, lw_F(), Qt, A, Zt, Rt, xi00, P00);
   }
 }

@@ -1,0 +1,68 @@
+model:
+  family: authored
+  options:
+    family: authored
+    name: ch3_tvp_regression
+    observables:
+    - Y
+    exogenous:
+    - X
+    equations:
+      measurement:
+      - Y = beta*X + e
+      transition:
+      - beta = beta[-1] + eta
+    parameters:
+      s_e:
+        dist: half_normal
+        sd: 0.5
+      s_eta:
+        dist: half_normal
+        sd: 0.1
+    shocks:
+      e:
+        sd: s_e
+        sv: null
+      eta:
+        sd: s_eta
+        sv: null
+    initial_state:
+      beta:
+        mean: 0.0
+        sd: 1.0
+    forecast_rules:
+      X:
+        rule: last_value
+        value: null
+        terms: null
+data:
+  file: ../data/ch3_tvp_example1_sim.csv
+  date_column: date
+  mapping:
+    Y: Y
+    X: X
+  sample:
+    start: null
+    end: null
+priors: {}
+sampler:
+  chains: 2
+  warmup: 300
+  sampling: 300
+  adapt_delta: 0.8
+  max_treedepth: 10
+  seed: 20260905
+outputs:
+  horizon: 8
+  irf_horizon: 8
+  irf_vol_reference: end_of_sample
+  irf_dates: []
+  smoother_draws:
+    thin: 5
+  prior_predictive_draws: 20
+qc:
+  mirror_check: true
+  mirror_points: 5
+  mirror_tolerance: 1.0e-08
+  mirror_rtol: 1.0e-11
+  mirror_seed: 20260904

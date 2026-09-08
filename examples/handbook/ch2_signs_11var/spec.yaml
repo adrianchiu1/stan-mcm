@@ -2108,6 +2108,7 @@ outputs:
   horizon: 8
   irf_horizon: 36
   irf_vol_reference: end_of_sample
+  irf_dates: []
   smoother_draws:
     thin: 4
   prior_predictive_draws: 20

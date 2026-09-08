@@ -1,99 +1,142 @@
 # Handoff
 
-Status as of 2026-09-05 (end of the S8 session). **S8 WP1-WP3 are
-complete and green on branch `claude/s8-grammar-var-extensions-o193mw`
-(pushed; PR https://github.com/adrianchiu1/stan-mcm/pull/9 opened from the Claude Code UI, not merged); WP4 is IN PROGRESS --
-see the section right below.** The binding scope record is
-`plans/S8-plan.md` (its five brief-vs-doctrine conflicts, the E3 proof,
-and the progress record at its end); the measured gate results and the
-judgment calls are in DECISIONS.md 2026-09-05.
+Status as of 2026-09-05 (end of the S9 session). **S9 WP1-WP5 are
+complete and green on branch `claude/s9-tvp-loadings-ewmngd` (pushed; no
+PR opened, per the brief).** The binding scope record is
+`plans/S9-plan.md` (its seven design decisions and the progress record
+at its end); the measured gate results, the hash decision and the
+numerics-reviewer disposition are in DECISIONS.md 2026-09-05 (the two S9
+entries). The S8 leftovers (the two large handbook smoke runs, the FAVAR
+rate block, a handbook notebook) are still open -- see "What's next".
 
-## S8 IN PROGRESS -- resume here
+## What S9 delivered (all green)
 
-Done and recorded (DECISIONS.md 2026-09-05; `tests/test_s8_*.py`, marker
-`authored`): **WP1** the grammar bundle (E0 zero state shocks / zero
-states, E1 intercepts and drifts, E2 contemporaneous exogenous
-regressors, E3 shock-free rows with the PD rule, E5 contemporaneous
-observables -> recursive VARs with non-diagonal R through measurement
-loadings), every extension gated against a hand-built oracle, the
-compiled Stan programs against the Python mirror at 50 prior draws, and
-the E5 fit oracle against OLS on the handbook data; **WP2** `au.var`,
-`au.minnesota_priors`, the Villani steady-state form (closed-form
-oracle), FEVD in the generic layer (+ the `fevd` output module);
-**WP3** `macrotoolkit.postprocess` (sign restrictions, Waggoner-Zha
-conditional forecasts) with tests on synthetic draws and adapters over a
-real run. One numerics-reviewer pass over WP1 (no must-fix; three
-should-fix applied). **WP4** `examples/handbook/`: `make_data.py`
-(all Chapter 1-3 files -> CSV, dates reconstructed and recorded),
-`build_specs.py` (nine specs generated through the authoring API),
-`run_smoke.py` (fit + fast tier + post-processors -> README records).
-Smoke records exist for `ch1_ar2`, `ch1_ar2_ar1err`, `ch2_bivar_minnesota`,
-`ch2_steady_state`, `ch2_conditional`, `ch3_uc_trend_cycle`,
-`ch2_var4_monthly_cholesky` (see each README's "Smoke run record").
+**Time-varying parameters via data-dependent measurement loadings (E4).**
+`Y = c_t + B_t*x_t + e` and `pi = c_t + b_t*pi[-1] + e` -- a STATE
+multiplied by a lagged observable, a `mean()` of one observable, or an
+exogenous series (lag 0 included) -- compile and estimate:
 
-**Not done -- resume here:** (1) the two large smoke runs,
-`ch2_signs_11var` (319 parameters; the sign-restriction post-processor
-call is in `run_smoke.py`; one attempt at 2 chains x 200/200 was killed
-by a 40-minute cap on a busy 4-core container -- budget an hour or more,
-or lower `SMOKE_BIG` further for a first look) and `ch3_dfm_uk_panel`
-(m = 40, n = 6; the 40x40 innovation Cholesky per period makes NUTS
-slow) -- run
-`python examples/handbook/run_smoke.py ch2_signs_11var ch3_dfm_uk_panel`
-when the machine-hours are available and check the records in (a killed
-attempt leaves an incomplete `runs/<id>/` without `_SUCCESS`; remove it
-before retrying); if the DFM's
-mirror check or diagnostics disappoint, that is the finding to record
-(short chains are stated as smoke, not evidence). (2) The FAVAR's rate
-block (the policy rate as an observable inside the factor VAR) needs
-the E5 substitution on the STATE side, which the grammar rejects
-("shock loadings must be numeric") -- an S9 item next to E4. (3) The
-handbook-example notebook (none was built; the specs + READMEs are the
-walkthrough). (4) `examples/handbook/README.md`'s table is the index;
-the run ids recorded there are smoke runs at short chains -- every
-record says so.
+- **Grammar** (`specs/schema/equations.py::ProductTerm`, `linearize`
+  with kind-aware classification; `authored_structure.py`): the product
+  is a data-dependent loading `Z_t = Z0 + sum_j x_t[j] Zx_j` on the
+  feedback-map column the data factor already declares
+  (`ModelStructure.Zx`, `StateSpaceMeta.data_loadings`); E5 composes
+  `Zx`; every other product keeps the S7 rejection message (extended by
+  one sentence naming the E4 shape); a product in a transition equation
+  is rejected as E6. `ModelStructure.coefficient_shocks` /
+  `StateSpaceMeta.coefficient_shocks`: state shocks whose loaded slots
+  reach no additively-loaded slot through F's pattern.
+- **Shared KF `Z_t` path** (`stan/functions/kalman_loglik_tv.stan`:
+  `array[] matrix Z` core + seven `rep_array` overloads; `smoother.py`:
+  `_as_Z_path`, `_kf_core` with `Z[t]`, the RTS inputs, the DK plus path,
+  `recover_shocks` through `Z_t`). G1 over SEVEN paths (<= 7.3e-12); the
+  constant-Z regression pin EXACT (0.0) on all five S8 paths
+  (`tests/fixtures/g1/pre_zt_stan_loglik.csv`); the render pins
+  regenerated once with the recorded decision; every lw_sv/ucsv spec
+  re-identified (lineage in the example READMEs).
+- **Compiler / template** (`authoring/compile.py::build_Zx`,
+  `build_loadings`, `build_Z_path`, `build_matrices(x=)`,
+  `is_stationary(xi_ref=)`; `authoring/stan.py::_zt_entries`;
+  `authored.stan.j2` `Zt` in transformed data when numeric, else in
+  transformed parameters): Stan text and Python path perform identical
+  operations entry by entry; the three E4 programs mirror the Python KF
+  at 50 prior draws (4.6e-13 / 3.6e-12 / 6.6e-11).
+- **Engine** (`engine.py::DataLoadings`, `observable_recursion(loadings,
+  coef_path)`, `simulate_forward(loadings)`; `results_core.py`
+  `DrawMatrices.loadings`, `observable_bars`, `impulse_response(loadings,
+  coef_state)`, `hd_bar_names` minus the coefficient shocks;
+  `authoring/results.py` dated IRFs via `outputs.irf_dates`
+  (`IRFDraws.by_date`, `reference_dates`, `omitted_shocks`), the HD at
+  the drawn coefficient path, the fan / prior predictive / structural
+  simulator on the full bilinear system): the G6 identity exact; the
+  fast tier applies unchanged.
+- **Oracles** (`tests/test_s9_grammar.py`, `tests/test_s9_stan.py`):
+  (a) the TVP regression at Q = 0, P00 = 0 equals the constant-coefficient
+  regression EXACTLY (0.0) and, with P00 > 0, the closed-form marginal
+  likelihood; (b) the handbook's `example1.m` filter loop reproduces the
+  KF's filtered path to 1e-10 and the fitted DGP recovers beta_t (inside
+  the 90% band at 91% of periods; smoothed RMSE 0.037 vs the handbook
+  filter's 0.052 at the true parameters); (c) the TVP-AR(1)-SV recovery
+  design (pre-registered constants in DECISIONS.md; a 2-dataset smoke in
+  the fast suite; the 20-dataset gate under `slow` RAN and PASSED:
+  pooled coverage 0.875, per-parameter minimum 0.70 on the SV scale).
+- **Examples** (`examples/handbook/`): `ch3_tvp_regression` (the example
+  1/2 DGP simulated once by `make_data.py`), `ch5_tvp_ar1_sv` (UK
+  inflation from `inflation.xlsx`, training-sample initial conditions),
+  `ch3_tvp_var` (US GDP/CPI/R, 21 random-walk coefficients, constant
+  Sigma via E5, IRFs at three dates); smoke records in each README.
 
-## Warnings for whoever builds S9
+## Warnings for whoever builds S10
 
-- **E4 (data-dependent measurement loadings, the TVP regression of
-  handbook §3.2's first example and the TVP-VAR of example 3) is next**
-  and is NOT a grammar tweak: `Z_t` varies with data, so the KF core
-  (`kalman_loglik_tv.stan` + `_kf_core`) needs a `Z_t` path exactly as
-  `R_t`/`Q_t` were added (the S3/S6 playbook: array-of-matrices core,
-  constant overloads, G1 mirror, the run-hash consequence for every
-  family whose render inlines the filter -- see DECISIONS 2026-09-04
-  WP2a for how that was taken last time). Budget the hash re-identification.
-- **The mirror gate is now `|diff| < max(1e-8, 1e-11 |loglik|)`**
-  (`qc.mirror_rtol`). Flat-prior draws reach |loglik| ~ 1e7-1e9 where an
-  absolute 1e-8 is below float64 resolution; the relative term is inert
-  for every hand family (|loglik| ~ 1e2-1e3). Do not loosen it further:
-  a wide prior on a recursive VAR's contemporaneous coefficients (`a0`)
-  makes the innovation Cholesky lose ~4 digits per recursion level --
-  `au.var`'s `a0_sd` default is 1.0 for exactly that reason (the
-  4-variable example failed the gate at N(0, 10)). If a model fails the
-  relative gate, look at the conditioning of R = M D M' before touching
-  the tolerance.
-- **The `_const` unit state** (a transition drift) has exactly zero
-  variance: the RTS smoother's masked-Cholesky branch exists for it
-  (`smoother._rts_smooth`; condition = an exact 0.0 predicted diagonal).
-  Do not give it a tiny variance "to be safe" -- the branch is exact and
-  the pre-S8 arithmetic is untouched only because the condition is exact.
-- **The HD `init` bar carries the drift** (labelled "incl. drift"); the
-  `const` bar is the MEASUREMENT intercept's column. A shock-free row has
-  no measurement bar; its identity is `Y = C + tau` per period.
+- **E6 (time-varying transition paths / Primiceri) is next** and is the
+  `Z_t` playbook applied to `F`: `array[] matrix F` core + overloads +
+  `_as_F_path` + a G1 path + a constant-F fixture pin captured BEFORE the
+  `stan/` edit (`tests/fixtures/g1/pre_ft_stan_loglik.csv`, all seven
+  paths) + the render pins regenerated once + the identity lineage.
+  Budget the hash re-identification again. The engine's
+  `propagate_state_shock` and `state_components` assume a constant F --
+  with `F_t` the state components are propagated through the path; the
+  HD identity still holds by the same induction. Grammar: a product in a
+  transition equation is today rejected with a message naming E6
+  (`authored_structure.py`, the `ProductTerm` branch of the transition
+  loop) -- that is the hook. Primiceri's model also needs a STOCHASTIC
+  volatility on the COEFFICIENT shocks' covariance (a full `Q_t` -- S6
+  gives the diagonal) and the A_t (contemporaneous) drift; scope it.
+- **E7 (missing observations)** is a row-selection filter step in both
+  mirrors (`kalman_loglik_tv.stan` + `_kf_core`): per period, keep the
+  observed rows of `yobs`, `Z_t`, `R_t` (`A'x_t` too); the DK plus path
+  and `recover_shocks` must skip the missing rows; the data loader must
+  stop rejecting NaN for a family that declares missing-data support;
+  the capability matrix says how (the DFM / mixed-frequency row). G1
+  needs a masked path.
+- **Coefficient states are STRUCTURE in the outputs** (plan decision 6):
+  the HD holds them at the drawn path, IRFs condition on
+  `outputs.irf_dates`, and coefficient-only shocks are OMITTED from the
+  bars and the IRFs with the reason in the caption. Do not "fix" the
+  omission by adding zero bars, and do not decompose the coefficient
+  path into bars in observable space (bilinear -- the identity breaks).
+  If a user wants "the contribution of the coefficient drift", that is a
+  counterfactual (re-simulate at a frozen coefficient), a new output.
+- **`build_matrices` needs `x` for a model with data loadings** and
+  returns the (T, m, n) path; `DrawMatrices.Z` is the CONSTANT part
+  `Z0` and `DrawMatrices.loadings` carries the rest; `smoother_draws`
+  builds the KF path from the real `x`. Every consumer branches on
+  `loadings is None` to the pre-S9 path -- keep it that way (the hand
+  families' bit-identity depends on it, as with `M is None` in S8).
+- **`is_stationary(params, xi_ref=)`**: with coefficient states the
+  feedback companion depends on the coefficient values; the identity
+  gate passes `xi00`. A model whose coefficient prior is centred on
+  explosive dynamics is filtered like an explosive draw.
+- **The E3 rank rule with E4** is generic (generic parameter AND
+  regressor values); a shock-free row loaded only through a data-
+  dependent coefficient is singular wherever the regressor is exactly
+  zero -- the Cholesky reports it at fit time; nothing patches it.
+- **`outputs.irf_dates` are report options** (outside the estimation
+  identity, the S5 split); the S8 handbook specs gained the empty field
+  on rebuild.
+- **The TVP-VAR smoke is slow** (21 states, 27 sampled parameters; see
+  its README record for the time) -- budget an hour for a re-run.
+- All S8 warnings below still apply (the `_const` unit state's exact
+  zero variance; the HD `init` bar carrying the drift; the mirror gate's
+  relative term; flat priors and the identity gate). The S7 warnings and
+  the S7 stage record follow unchanged.
+
+## Warnings from S8 (still binding)
+
+- **The mirror gate is `|diff| < max(1e-8, 1e-11 |loglik|)`**
+  (`qc.mirror_rtol`); do not loosen it -- a wide prior on a recursive
+  VAR's `a0` makes the innovation Cholesky lose digits (`au.var`'s
+  `a0_sd` default is 1.0 for that reason).
+- **The `_const` unit state** has exactly zero variance; the RTS
+  smoother's masked-Cholesky branch exists for it (condition = an exact
+  0.0 predicted diagonal). Do not give it a tiny variance.
+- **The HD `init` bar carries the drift**; the `const` bar is the
+  MEASUREMENT intercept's column.
 - **`measurement_loadings` is `None` for every hand family and every S7
   model**; every consumer branches on `M is None` to the pre-S8 path.
-  Keep it that way -- the full suite's bit-identity for lw_sv/ucsv
-  depends on it.
 - **A flat prior has no stationary draws**: the fast tier's HD-identity
-  gate raises (FAIL, not skip) for `N(0, 10)` VAR coefficients. Use the
-  Minnesota prior (or any prior with stationary mass) for anything the
-  fast tier must pass; `ch2_conditional` was moved for this reason.
-- **Prior-predictive figures exclude explosive paths and COUNT them in
-  the title** (a flat-prior VAR's prior mass is mostly explosive); the
-  rule (non-finite or > 1e3 x the data scale) is on the figure.
+  gate raises (FAIL, not skip) for `N(0, 10)` VAR coefficients.
 - Term order is still meaning; the Const column is x column 0.
-- All S7 warnings below still apply; the S7 stage record follows
-  unchanged.
 
 ## What S7 delivered (all green)
 
@@ -226,15 +269,20 @@ and structural derivation in `specs/schema/equations.py`,
 - `uv tool install pytest --with cmdstanpy --with numba --with arviz
   --with pydantic --with jinja2 --with matplotlib --with pyyaml --with
   pandas --with click --with h5netcdf --with openpyxl --with scipy
-  --with nbformat --with nbclient --with ipykernel --with-editable .`
+  --with nbformat --with nbclient --with ipykernel --with xlrd --with
+  openpyxl --with-editable .` (S9: `xlrd`/`openpyxl` for the handbook's
+  `.xls`/`.xlsx` data files -- only `make_data.py` needs them)
   (add `~/.local/share/uv/tools/pytest/bin` to `PATH`; use that venv's
   `python` for scripts).
 - CmdStan **pinned 2.36.0** at `~/.cmdstan` (`python -m
   cmdstanpy.install_cmdstan --dir ~/.cmdstan --version 2.36.0`; never
   without `--version` -- `api.github.com` is blocked; ~5-25 min build).
-- Fast suite `pytest -m "not slow"`: **382 passed, 0 skipped** at
-  stage end (~5-6 min; the S7 gates compile five extra programs
-  and run two tiny authored fits). Marker `authored` selects the S7
+- Fast suite `pytest -m "not slow"`: **450 passed, 8 deselected** at
+  S9 stage end (~15 min on a contended 4-core container, ~6 min on a
+  quiet one; the S8/S9 gates compile a dozen extra programs and run
+  several short authored fits, incl. the example-1 DGP fit, the dated-IRF
+  TVP-AR(1) fit and the 2-dataset recovery smoke). The slow S9 recovery
+  gate: `pytest -m "slow" tests/test_s9_stan.py` (~20 x 2-chain fits). Marker `authored` selects the S7
   tests. Slow: `-m "slow and ucsv"` (G2 ~20 min + SBC ~1-1.5 h,
   resumable), `-m "slow and lw_sv"` (G2 ~38 min, G3 ~3.5-7 h, G4 ~3-5 h
   resumable), the sampling notebooks under `-m slow`.
@@ -250,24 +298,21 @@ pre-registered design, G6. S6: the notebook API, the fit-time mirror
 check, `mtk validate`. Details in README.md's ladder table,
 `STRESS-TESTS.md`, the example READMEs and DECISIONS.md's dated entries.
 
-## What's next after S8 (the S7 list, still open)
+## What's next after S9
 
-1. **Per-authored-model SBC registration + the promotion/production
-   layer.** `authoring/validation.py` exposes `recovery_design` /
-   `sbc_design`; the missing pieces are (a) a way to REGISTER a
-   pre-registered design for an authored model (a `validation:` block in
-   the spec, or a sidecar file keyed by the canonical model id) so `mtk
-   validate <spec> --tier sbc` runs it, and (b) the promotion record S6
-   already named: which validated program + design a production run may
-   use, with the mirror check and gate verdicts attached, scheduled
-   re-validation, and the `runs-archive` → published-run workflow. The
-   notebook model is the obvious first design to pre-register.
-2. **`results_lw.py` migration onto `results_core.py`** (S6/S7 backlog;
-   the authored results module shows what a declaration over the core
-   looks like for a model with an exogenous block and lagged-carried
-   states -- the same shape lw_sv needs).
-3. Backlog carried forward: PACF stationarity parameterization for AR
-   blocks (now relevant to authored AR states too); intercepts/drifts as
-   a constant state (a small DSL extension once a model needs it);
-   `estimate_c`; missing observations / exact diffuse init when DFM
-   arrives (capability-matrix doctrine).
+1. **E6 -- time-varying transition paths (Primiceri 2005)** and **E7 --
+   missing observations / mixed frequency** (the DFM row of the
+   capability matrix; Chapter 3 example 5 is the mixed-frequency VAR):
+   see the warnings above for the playbook each follows.
+2. **The S8 leftovers**: the two large handbook smoke runs
+   (`ch2_signs_11var`, `ch3_dfm_uk_panel` -- HANDOFF's S8 section said
+   how; budget an hour or more each), the FAVAR's rate block (the E5
+   substitution on the STATE side), a handbook-example notebook.
+3. **An SBC design for the TVP-AR(1)-SV** (the recovery gate PASSED at
+   the pre-registered design, DECISIONS.md 2026-09-05; SBC is the next
+   rung -- `authoring.validation.sbc_design` at the same anchors, the
+   G3/G4 constants pre-registered first).
+4. The S7 list, still open: per-authored-model SBC registration + the
+   promotion/production layer; `results_lw.py` migration onto
+   `results_core.py`; PACF stationarity parameterization for AR blocks;
+   `estimate_c`; exact diffuse init when DFM arrives.

@@ -10,8 +10,10 @@ per-model work (S8+), not framework work (plans/S7-plan.md).
 The structural simulator every recovery/SBC design needs is generic here:
 the compiled model's own equations through the engine's
 ``simulate_forward`` from ``xi_0 ~ N(xi00, P00)`` with the SV random walks
-continued from the drawn ``h_0`` -- exactly the generative model the
-rendered program's KF likelihood defines (the SBC exactness requirement).
+continued from the drawn ``h_0`` (and, S9 E4, the time-varying
+coefficients drawn as states and applied to the simulated regressors) --
+exactly the generative model the rendered program's KF likelihood defines
+(the SBC exactness requirement).
 """
 from __future__ import annotations
 
@@ -103,9 +105,11 @@ def simulate_dataset(compiled: CompiledModel, params: Mapping[str, float], rng: 
     meta = compiled.meta
     L = compiled.lag_depth
     h0 = {s: float(params[f"h0_{s}"]) for s in compiled.sv_shocks}
-    F, Q, A, Z, R = compiled.build_matrices(params, h={s: np.array([h0[s]]) for s in compiled.sv_shocks} or None, T=1)
+    hh = {s: np.array([h0[s]]) for s in compiled.sv_shocks} or None
+    F, Q, A, Z, R = compiled.build_F(params), compiled.build_Q(params, hh, 1), compiled.build_A(params), compiled.build_Z(params), compiled.build_R(params, hh, 1)
     extras = {**{k: float(v) for k, v in params.items() if not k.startswith("h0_")}, **{f"h_{s}": np.array([h0[s]]) for s in compiled.sv_shocks}}
-    dm = DrawMatrices(F=F, Q=Q if Q.ndim == 2 else Q[0], A=A, Z=Z, R=R if R.ndim == 2 else R[0], extras=extras, M=compiled.build_M(params))
+    dm = DrawMatrices(F=F, Q=Q if Q.ndim == 2 else Q[0], A=A, Z=Z, R=R if R.ndim == 2 else R[0], extras=extras, M=compiled.build_M(params),
+                      loadings=compiled.build_loadings(params))
     state_noise, meas_noise = _noise_models(compiled, dm, h_last=h0)
     out_exog: dict[str, np.ndarray] = {}
     for e in meta.exog_names:
@@ -121,7 +125,8 @@ def simulate_dataset(compiled: CompiledModel, params: Mapping[str, float], rng: 
     rules = data_path_rules(compiled, out_exog, T)
     exog_seeds = presample_exog_seeds(compiled, out_exog)
     xi_init = xi00 + _psd_sqrt(P00) @ rng.standard_normal(len(xi00))
-    out = simulate_forward(F, dm.Q, A, Z, meta, xi_init, {}, exog_seeds, rules, meas_noise, T, rng, state_noise=state_noise, meas_loading=dm.M)
+    out = simulate_forward(F, dm.Q, A, Z, meta, xi_init, {}, exog_seeds, rules, meas_noise, T, rng, state_noise=state_noise, meas_loading=dm.M,
+                           loadings=dm.loadings)
     return {**{o: out["obs"][:, i].copy() for i, o in enumerate(meta.obs_names)}, **out_exog}
 
 

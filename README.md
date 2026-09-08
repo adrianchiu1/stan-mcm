@@ -231,10 +231,34 @@ with no stochastic state shock or no state at all (a regression / VAR
 runs through the same Kalman filter with `n = 0`). The scope stays
 linear-Gaussian state-space models with iid Gaussian shocks, optional
 random-walk log-variance SV on any shock, explicit initial conditions and
-the templates' prior menu; nonlinearities, correlated/shared shocks,
-regime switching, missing data, mixed frequency, data-dependent or
-time-varying loadings and exact-diffuse initialization are rejected at
-spec-parse time with a message naming the limitation.
+the templates' prior menu; nonlinearities beyond the one bilinear shape
+below, correlated/shared shocks, regime switching, missing data, mixed
+frequency, time-varying transitions and exact-diffuse initialization are
+rejected at spec-parse time with a message naming the limitation.
+
+**Time-varying parameters (S9, E4).** A measurement equation may multiply
+a STATE by a lagged observable, a `mean()` of one observable, or an
+exogenous series -- `Y = beta*X + e` with `beta = beta[-1] + eta` (the
+handbook's Chapter 3 TVP regression), `pi = c + b*pi[-1] + e` with `c`,
+`b` random walks and `e` under SV (Chapter 5's TVP-AR(1)-SV), or a
+recursive VAR whose every coefficient is a random-walk state (Chapter
+3's TVP-VAR, constant Sigma through the E5 form). The product compiles to
+a DATA-DEPENDENT loading `Z_t = Z0 + sum_j x_t[j] Zx_j` built from the
+regressor columns the feedback map already declares; the shared Kalman
+filter takes `Z_t` as a path (the `R_t`/`Q_t` playbook: array core,
+constant overloads, the Python mirror, G1 over seven paths, the
+constant-Z regression pin exact). The forward simulation runs the full
+bilinear system (`Z_t` from the simulated path); the historical
+decomposition holds the coefficients at the drawn path while every bar
+feeds its own observables back through them (the G6 identity stays
+exact); IRFs are conditional on the coefficient state at
+`outputs.irf_dates` (the handbook's practice), and the shocks that move
+only coefficients are omitted from the bars and the IRFs with the reason
+stated. `plans/S9-plan.md` has the design; `tests/test_s9_grammar.py` /
+`tests/test_s9_stan.py` the gates (a TVP regression with `Q = 0` equals
+the constant-coefficient regression EXACTLY; the handbook's own example 1
+filter loop reproduces the KF's filtered path; the fitted example 1 DGP
+recovers `beta_t` within bands; parameter recovery on the TVP-AR(1)-SV).
 
 **VARs and post-processors (S8).** `au.var(name, observables, p, ...)`
 expands a VAR(p) into the recursive equations (the list order is the
@@ -249,9 +273,10 @@ long-run means as constant states, and every authored run now carries a
 (`macrotoolkit.postprocess`): sign restrictions by Haar rotations of the
 structural IRFs (Rubio-Ramirez/Waggoner/Zha; the handbook's "closest to
 median" variant optional) and Waggoner-Zha conditional forecasts with
-hard conditions. The handbook's Chapter 1-3 examples are authored as
-specs under [examples/handbook/](examples/handbook/) (data conversion,
-spec generation and smoke-run records included).
+hard conditions. The handbook's Chapter 1-3 examples (and, since S9,
+the Chapter 3 TVP regression / TVP-VAR and the Chapter 5 TVP-AR(1)-SV)
+are authored as specs under [examples/handbook/](examples/handbook/)
+(data conversion, spec generation and smoke-run records included).
 
 **Where the DSL sits on the ladder.** The compiler is gated, not trusted:
 the three hand-written families expressed as equations reproduce their

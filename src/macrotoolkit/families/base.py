@@ -126,6 +126,19 @@ class StateSpaceMeta:
       and every consumer takes the pre-S8 path bit for bit. With it,
       ``measurement_shocks`` may be SHORTER than ``obs_names`` (a
       shock-free row, S8 E3) and ``n_obs`` is the row count.
+    - ``data_loadings`` (S9 E4, optional): the sparsity pattern of the
+      DATA-DEPENDENT measurement loadings, ``(observable, state label,
+      x column)`` triples -- ``Z_t = Z0 + sum_j x_t[j] Zx_j`` with the
+      coefficient of ``Zx_j[row, slot]`` parameter-dependent and arriving
+      per draw as a numeric ``DataLoadings`` object (``macrotoolkit.engine``).
+      Empty (every hand family, every S7/S8 model) means the loading is
+      constant and every consumer takes the pre-S9 path bit for bit.
+    - ``coefficient_shocks`` (S9 E4): the state shocks that can only ever
+      move a time-varying coefficient (their loaded slots reach no
+      additively-loaded slot through ``F``); they have no additive
+      observable bar in the historical decomposition and no impulse
+      response from rest, and the HD/IRF modules omit them with the
+      reason stated.
     """
 
     state_labels: tuple[StateLabel, ...]
@@ -136,8 +149,20 @@ class StateSpaceMeta:
     exog_names: tuple[str, ...] = ()
     feedback_map: tuple[FeedbackTerm, ...] = ()
     measurement_loadings: Mapping[str, tuple[str, ...]] | None = None
+    data_loadings: tuple[tuple[str, StateLabel, int], ...] = ()
+    coefficient_shocks: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
+        for obs, label, col in self.data_loadings:
+            if obs not in self.obs_names:
+                raise ValueError(f"data_loadings entry {(obs, label, col)!r} names an unknown observable; obs_names: {self.obs_names}.")
+            if tuple(label) not in self.state_labels:
+                raise ValueError(f"data_loadings entry {(obs, label, col)!r} names an unknown state slot; valid labels: {list(self.state_labels)}.")
+            if not (0 <= col < len(self.feedback_map)) or isinstance(self.feedback_map[col], Const):
+                raise ValueError(f"data_loadings entry {(obs, label, col)!r}: column {col} is not a data column of the feedback map.")
+        unknown = [s for s in self.coefficient_shocks if s not in self.state_shocks]
+        if unknown:
+            raise ValueError(f"coefficient_shocks {unknown} are not state shocks; state_shocks: {self.state_shocks}.")
         if self.measurement_loadings is None:
             if self.obs_names and len(self.obs_names) != len(self.measurement_shocks):
                 raise ValueError(
@@ -271,6 +296,16 @@ class StateSpaceMeta:
 
     def has_const_column(self) -> bool:
         return any(isinstance(t, Const) for t in self.feedback_map)
+
+    @property
+    def has_data_loadings(self) -> bool:
+        """True iff the measurement loading is data-dependent (S9 E4)."""
+        return bool(self.data_loadings)
+
+    def additive_state_shocks(self) -> tuple[str, ...]:
+        """The state shocks that get an observable HD bar / an IRF: every
+        state shock except the coefficient-only ones (S9 E4)."""
+        return tuple(s for s in self.state_shocks if s not in self.coefficient_shocks)
 
     def exog_is_referenced(self, name: str) -> bool:
         """True iff some x column is a lag (any lag, 0 included) of the

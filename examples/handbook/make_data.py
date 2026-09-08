@@ -18,6 +18,7 @@ import io
 import zipfile
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 HERE = Path(__file__).resolve().parent
@@ -99,6 +100,47 @@ def convert(zip_path: Path) -> None:
         frame["base_rate"] = [float(r[0]) for r in rate]
         pd.DataFrame(frame).to_csv(OUT / "ch3_uk_panel_levels.csv", index=False)
         pd.DataFrame({"series": slug, "name": names, "transform": [int(r[0]) for r in index], "fast": [int(r[1]) for r in index]}).to_csv(OUT / "ch3_uk_panel_index.csv", index=False)
+
+        # Chapter 5 example 5 (S9): the UK price level, quarterly, 389 rows.
+        # example5.m builds annual inflation 100*(ln P_t - ln P_{t-4}), drops
+        # the first 4 rows, one regression lag and a 10-observation training
+        # sample, and plots the remaining 374 rows on TT = 1917.75:0.25:2011
+        # (1917Q4-2011Q1), so the price level runs 1914Q1-2011Q1. The CSV
+        # carries the level AND the annual inflation from 1915Q1 (the spec
+        # reads `infl`; the first four rows have no annual difference and are
+        # omitted rather than written as missing values).
+        import openpyxl
+
+        wb = openpyxl.load_workbook(io.BytesIO(zf.read("Code2017/CHAPTER5/DATA/inflation.xlsx")), read_only=True)
+        level = [float(r[0]) for r in wb.worksheets[0].iter_rows(values_only=True) if r and r[0] is not None]
+        d = pd.date_range("1914-01-01", periods=len(level), freq="QS")
+        lv = pd.Series(level, dtype=float)
+        infl = 100.0 * (np.log(lv) - np.log(lv.shift(4)))
+        pd.DataFrame({"date": d[4:].strftime("%Y-%m-%d"), "cpi_level": lv.to_numpy()[4:], "infl": infl.to_numpy()[4:]}).to_csv(OUT / "ch5_uk_inflation.csv", index=False)
+
+    # Chapter 3 examples 1/2 (S9): the ARTIFICIAL TVP-regression DGP of
+    # example1.m -- Y_t = beta_t X_t + e1_t, beta_t = beta_{t-1} + e2_t,
+    # var(e1) = R = 0.01, var(e2) = Q = 0.001, beta_1 = 0, X ~ N(0, 1) --
+    # simulated once at a recorded seed (the handbook's own script draws
+    # fresh data on every run). T = 500 rows as in the script; the true
+    # beta_t is written alongside so the README can overlay it (the spec
+    # does not read it). Dates are a quarterly index (no calendar meaning).
+    # The loop below is the script's `for j=2:t` verbatim: row 0 is the
+    # handbook's zero initial row (beta_1 = 0 AND Y_1 = 0 -- its e1(1) is
+    # drawn and discarded), kept as the handbook has it (numerics-reviewer
+    # note, DECISIONS.md 2026-09-05) rather than "corrected".
+    T, Q, R = 500, 0.001, 0.01
+    rng = np.random.default_rng(20260905)
+    e1 = rng.standard_normal(T) * np.sqrt(R)
+    e2 = rng.standard_normal(T) * np.sqrt(Q)
+    X = rng.standard_normal(T)
+    beta = np.zeros(T)
+    Y = np.zeros(T)
+    for j in range(1, T):
+        beta[j] = beta[j - 1] + e2[j]
+        Y[j] = X[j] * beta[j] + e1[j]
+    d = pd.date_range("1900-01-01", periods=T, freq="QS")
+    pd.DataFrame({"date": d.strftime("%Y-%m-%d"), "Y": Y, "X": X, "beta_true": beta}).to_csv(OUT / "ch3_tvp_example1_sim.csv", index=False)
     print(f"wrote CSVs to {OUT}")
 
 

@@ -304,19 +304,35 @@ def sbc_gate(design, *, p_floor: float = 0.001, divergence_limit: int | None = N
     )
 
 
-def hd_identity_gate(family: str, spec_builder: Callable[[], Any], df_builder: Callable[[], Any], reconstruct: Callable[[Any, int], float], n_draws: int = 5, tolerance: float = 1e-6) -> Gate:
+def hd_identity_gate(family: str, spec_builder: Callable[[], Any], df_builder: Callable[[], Any], reconstruct: Callable[[Any, int], float], n_draws: int = 5, tolerance: float = 1e-6, rtol: float = 1e-12) -> Gate:
     """G6's shape: ``reconstruct(results_like, draw_index) -> max abs
     reconstruction error`` supplied by the family over a prior-point
-    results object; PASS when every draw's error is below ``tolerance``."""
+    results object; PASS when every draw's error is below ``tolerance``.
+    A family may instead return ``(error, scale)`` with ``scale`` the
+    largest bar magnitude of that draw: the gate is then ``error <
+    max(tolerance, rtol * scale)`` (S9, DECISIONS.md 2026-09-05 -- the
+    mirror gate's S8 shape: a time-varying coefficient drawn explosive
+    along the sample makes every bar huge and their exact cancellation a
+    float64 measurement; 1e-12 of the cancelling magnitude is far below
+    any structural error and inert for every stationary draw, where the
+    absolute 1e-6 binds as before)."""
 
     def _run(artifact_dir: Path) -> GateResult:
-        errs = [float(reconstruct(spec_builder(), df_builder(), i)) for i in range(n_draws)]
-        worst_err = max(errs)
-        ok = worst_err < tolerance
+        errs, gates = [], []
+        for i in range(n_draws):
+            out = reconstruct(spec_builder(), df_builder(), i)
+            err, scale = (float(out[0]), float(out[1])) if isinstance(out, tuple) else (float(out), 0.0)
+            errs.append(err)
+            gates.append(max(tolerance, rtol * scale))
+        worst = max(range(n_draws), key=lambda k: errs[k])
+        ok = all(e < g for e, g in zip(errs, gates))
+        worst_err = errs[worst]
+        scaled = any(g > tolerance for g in gates)
+        note = f" (gate {tolerance:.0e}" + (f", or {rtol:.0e} x the draw's largest bar where that is larger: the largest error is draw {worst}'s, whose bars reach {gates[worst] / rtol:.1e} so its gate is {gates[worst]:.2e})" if scaled else ")")
         return GateResult(
             "hd_identity", "fast", "PASS" if ok else "FAIL",
-            [f"historical-decomposition reconstruction: max |error| = {worst_err:.2e} over {n_draws} simulation-smoother draws (gate {tolerance:.0e})"],
-            {"max_abs_error": worst_err, "n_draws": n_draws, "tolerance": tolerance},
+            [f"historical-decomposition reconstruction: max |error| = {worst_err:.2e} over {n_draws} simulation-smoother draws{note}"],
+            {"max_abs_error": worst_err, "n_draws": n_draws, "tolerance": tolerance, "rtol": rtol, "gates": gates, "errors": errs},
         )
 
     return Gate("hd_identity", "fast", f"Per-period historical-decomposition reconstruction identity over {n_draws} simulation-smoother draws (G6's shape).", _run)

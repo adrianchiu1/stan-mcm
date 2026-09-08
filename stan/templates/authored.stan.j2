@@ -19,7 +19,12 @@
 //   state (n={{ n }}): [{{ state_labels | join(', ') }}]
 //   obs   (m={{ m }}): [{{ obs_names | join(', ') }}]
 //   exog  (k={{ k }}): [{{ exog_cols | join(', ') }}]
-//   xi_t = F xi_{t-1} + w_t (w ~ N(0, Q{% if sv_state %}_t{% endif %}));  yobs_t = A' x_t + Z xi_t + e_t (e ~ N(0, R{% if sv_meas %}_t{% endif %}))
+//   xi_t = F xi_{t-1} + w_t (w ~ N(0, Q{% if sv_state %}_t{% endif %}));  yobs_t = A' x_t + Z{% if Z.tv %}_t{% endif %} xi_t + e_t (e ~ N(0, R{% if sv_meas %}_t{% endif %}))
+{% if Z.tv %}
+// Data-dependent loadings (S9 E4): a state multiplied by a lagged observable
+// or an exogenous series -- Z_t = Z0 + sum_j x[t, j] Zx_j, built from the
+// regressor matrix the feedback map declares (the time-varying coefficients).
+{% endif %}
 {% if no_state_shocks %}
 // No stochastic state shock (S8 E0): Q = 0 (a deterministic / empty state).
 {% endif %}
@@ -74,11 +79,19 @@ transformed data {
   F[{{ i }}, {{ j }}] = {{ e }};
 {% endfor %}
 {% endif %}
-{% if Z.numeric %}
+{% if Z.numeric and not Z.tv %}
   matrix[{{ m }}, {{ n }}] Z = rep_matrix(0, {{ m }}, {{ n }});
 {% for i, j, e in Z.entries %}
   Z[{{ i }}, {{ j }}] = {{ e }};
 {% endfor %}
+{% elif Z.numeric and Z.tv %}
+  array[T] matrix[{{ m }}, {{ n }}] Zt;   // Z_t = Z0 + sum_j x[t, j] Zx_j (numeric coefficients)
+  for (t in 1:T) {
+    Zt[t] = rep_matrix(0, {{ m }}, {{ n }});
+{% for i, j, e in Z.tv_entries %}
+    Zt[t][{{ i }}, {{ j }}] = {{ e }};
+{% endfor %}
+  }
 {% endif %}
 {% if no_state_shocks %}
   matrix[{{ n }}, {{ n }}] Q = rep_matrix(0, {{ n }}, {{ n }});   // Q = 0: no state shock
@@ -113,11 +126,19 @@ transformed parameters {
   A[{{ i }}, {{ j }}] = {{ e }};
 {% endfor %}
 {% endif %}
-{% if not Z.numeric %}
+{% if not Z.numeric and not Z.tv %}
   matrix[{{ m }}, {{ n }}] Z = rep_matrix(0, {{ m }}, {{ n }});
 {% for i, j, e in Z.entries %}
   Z[{{ i }}, {{ j }}] = {{ e }};
 {% endfor %}
+{% elif not Z.numeric and Z.tv %}
+  array[T] matrix[{{ m }}, {{ n }}] Zt;   // Z_t = Z0 + sum_j x[t, j] Zx_j (parameter-dependent coefficients)
+  for (t in 1:T) {
+    Zt[t] = rep_matrix(0, {{ m }}, {{ n }});
+{% for i, j, e in Z.tv_entries %}
+    Zt[t][{{ i }}, {{ j }}] = {{ e }};
+{% endfor %}
+  }
 {% endif %}
 {% if sv_state %}
   array[T] matrix[{{ n }}, {{ n }}] Qt;   // Q_t = sum_s var_s(t) b_s b_s'
@@ -161,7 +182,7 @@ transformed parameters {
 {% endif %}
   // The Kalman-filter marginal log-likelihood (the shared filter; states
   // marginalized, Rao-Blackwellized likelihood).
-  real kf_loglik = kalman_loglik(yobs, x, F, {% if sv_state %}Qt{% else %}Q{% endif %}, A, Z, {% if sv_meas %}Rt{% else %}R{% endif %}, xi00, P00);
+  real kf_loglik = kalman_loglik(yobs, x, F, {% if sv_state %}Qt{% else %}Q{% endif %}, A, {% if Z.tv %}Zt{% else %}Z{% endif %}, {% if sv_meas %}Rt{% else %}R{% endif %}, xi00, P00);
 }
 
 model {
