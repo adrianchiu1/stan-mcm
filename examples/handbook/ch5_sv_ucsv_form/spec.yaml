@@ -1,0 +1,67 @@
+model:
+  family: authored
+  options:
+    family: authored
+    name: ch5_sv_ucsv_form
+    observables:
+    - infl
+    exogenous: []
+    equations:
+      measurement:
+      - infl = tau + e
+      transition:
+      - tau = tau[-1] + eta
+    parameters:
+      sigma_eta:
+        dist: half_normal
+        sd: 0.5
+    shocks:
+      eta:
+        sd: sigma_eta
+        sv: null
+      e:
+        sd: null
+        sv:
+          sigma_h:
+            dist: half_normal
+            sd: 0.3
+          h0_sd: 3.0
+          mu_h0:
+            anchor: log_var_diff
+            series: infl
+            fraction: 1.0
+    initial_state:
+      tau:
+        mean:
+          first_obs: infl
+        sd: 5.0
+    forecast_rules: {}
+data:
+  file: ../data/ch5_uk_inflation.csv
+  date_column: date
+  mapping:
+    infl: infl
+  sample:
+    start: null
+    end: null
+priors: {}
+sampler:
+  chains: 4
+  warmup: 500
+  sampling: 500
+  adapt_delta: 0.9
+  max_treedepth: 10
+  seed: 20260905
+outputs:
+  horizon: 12
+  irf_horizon: 12
+  irf_vol_reference: end_of_sample
+  irf_dates: []
+  smoother_draws: all
+  prior_predictive_draws: 200
+qc:
+  mirror_check: true
+  mirror_points: 5
+  mirror_tolerance: 1.0e-08
+  mirror_rtol: 1.0e-11
+  mirror_seed: 20260904

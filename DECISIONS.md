@@ -3,6 +3,32 @@
 One dated line per judgment call not fixed by the spec, with rationale.
 Newest first.
 
+- **2026-09-05 — Companion track: the CCBS handbook (Blake & Mumtaz 2017) re-fashioned with
+  macrotoolkit (`docs/companion/`, branch `claude/companion-handbook-9k2m` from the S9 head).**
+  Scope agreed with the user: the estimable-now subset after Bundle B (S8) and E4 (S9), every
+  handbook example mapped to a verdict (`docs/companion/00-inventory.md`), short gap chapters for
+  Chapters 4 and 6 and for E6/E7/E8, one companion chapter per handbook chapter mirroring its
+  sections with the examples on the handbook's own data, a *What differs from the handbook* box for
+  every prior substitution, and one executable notebook per chapter
+  (`examples/handbook/notebooks/build_notebooks.py`). Two companion-only additions to the example
+  set: `ch5_sv_uk_inflation` / `ch5_sv_ucsv_form` (Chapter 5 example 4 in the handbook's mean-only
+  form, E0, and in UC form) and `ch7_dfm_sv` (the Chapter 7 model with constant AR coefficients and
+  SV on the factor shocks, two countries of the handbook's `dataxx01.mat`; `build_ch7.py`).
+  Runs on this branch (all re-identified relative to S8's records by S9's `Z_t` filter change):
+  ch1_ar2 `3daed38410ce`, ch1_ar2_ar1err `ecbc32188034` (FAIL at 2x300/300: the posterior is bimodal
+  -- an autoregressive root in the regression or in the error -- which the handbook's own Figure 14
+  shows as chains jumping between two configurations), ch3_uc_trend_cycle `32ff691ff037` (PASS),
+  ch3_tvp_regression `f48f15521246` (the DGP's sqrt(R) = 0.1 and sqrt(Q) = 0.032 recovered as 0.099
+  and 0.028), ch2_bivar_minnesota `a620305f7c6e`, ch2_steady_state `fc2f0c3c4319`, ch2_conditional
+  `d92813ddfb30`, ch2_var4_monthly_cholesky `7247575d7872`; Chapter 1's Table 1 reproduced to two
+  decimals (c 0.247 vs 0.2494, b1 1.393 vs 1.3867, b2 -0.462 vs -0.4600). Publication-length runs,
+  the 11-variable sign-restriction VAR, the two factor models and the TVP-VAR are run sessions
+  (`docs/companion/09-run-sessions.md`). Judgment calls: the companion cites the smoke-run
+  diagnostics verdicts as measured (WARN/FAIL at 2x300/300) rather than lengthening chains for the
+  text; the Chapter 2 dummy-observation prior is stated as an approximation (Minnesota normals),
+  never as a replication; the IRF figure title of the authored output module overlaps its convention
+  line at small sizes (a plotting nit, not fixed in this docs track).
+
 - **2026-09-05 — S9 numerics-reviewer pass over the WP1-WP3 change set
   (before the commit): NO must-fix; two should-fix, both dispositioned.**
   The reviewer hand-traced the eight `(Q, Z, R)` overload combinations
